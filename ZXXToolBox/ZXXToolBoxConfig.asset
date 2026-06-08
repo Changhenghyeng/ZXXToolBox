@@ -1,0 +1,122 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b820ace8880ea9844a289fae5cd17289, type: 3}
+  m_Name: ZXXToolBoxConfig
+  m_EditorClassIdentifier: 
+  displayName: BigBroToolBox
+  toolOverrides:
+  - id: ProcGen
+    desc: "\u5728\u6A21\u578B\u8868\u9762\u6309\u89C4\u5219\u6563\u5E03\u9884\u5236\u4F53"
+    category: "\u751F\u6210\u5DE5\u5177"
+    visible: 1
+  - id: Wall Builder
+    desc: "\u5899\u6BB5\u62FC\u63A5\uFF1A\u56DB\u9762\u56F4\u5408 / L \u578B / \u8D70\u5ECA
+      / \u5355\u6392\u76F4\u7EBF"
+    category: "\u751F\u6210\u5DE5\u5177"
+    visible: 1
+  - id: Box Collider Generator
+    desc: "\u6279\u91CF\u4E3A\u9884\u5236\u4F53\u751F\u6210 BoxCollider"
+    category: "\u751F\u6210\u5DE5\u5177"
+    visible: 1
+  - id: Shadow Baker
+    desc: "\u5EFA\u7B51\u9876\u5149\u5F71\u5B50\u70D8\u57F9 + \u5730\u9762\u9762\u7247\u751F\u6210"
+    category: "\u751F\u6210\u5DE5\u5177"
+    visible: 1
+  - id: Batch Replacer
+    desc: "\u5728 Hierarchy \u4E2D\u6279\u91CF\u66FF\u6362\u573A\u666F\u7269\u4F53"
+    category: "\u6279\u91CF\u64CD\u4F5C"
+    visible: 1
+  - id: Batch Rename Tool
+    desc: "\u6279\u91CF\u91CD\u547D\u540D\u5DE5\u5177"
+    category: "\u6279\u91CF\u64CD\u4F5C"
+    visible: 1
+  - id: Convert Variant To Normal Prefab
+    desc: "Prefab Variant \u8F6C\u6362\u4E3A\u666E\u901A Prefab"
+    category: "\u9884\u5236\u4F53\u5904\u7406"
+    visible: 1
+  - id: Prefab Extractor
+    desc: "\u4ECE\u573A\u666F\u63D0\u53D6\u5B50\u7269\u4F53\u4E3A\u72EC\u7ACB Prefab"
+    category: "\u9884\u5236\u4F53\u5904\u7406"
+    visible: 1
+  - id: Transparent Screenshot
+    desc: "\u622A\u53D6\u900F\u660E\u80CC\u666F\u7684 Game \u89C6\u56FE\u622A\u56FE 
+      Ctrl+Shift+X"
+    category: "\u5176\u4ED6"
+    visible: 1
+  - id: Label Tool
+    desc: "\u573A\u666F\u9884\u5236\u4F53\u540D\u79F0\u6807\u7B7E\u663E\u793A\u5DE5\u5177"
+    category: "\u5176\u4ED6"
+    visible: 1
+  - id: Measure Tool
+    desc: "\u4E09\u7EF4\u6D4B\u91CF\uFF1A\u5305\u56F4\u76D2\u5C3A\u5BF8 / \u8DDD\u79BB
+      / \u6807\u5C3A"
+    category: "\u5176\u4ED6"
+    visible: 1
+  - id: Sync Names
+    desc: "\u540C\u6B65\u7269\u4F53\u540D\u79F0\u5230 Prefab\uFF08\u6709\u9009\u4E2D\u2192\u4EC5\u9009\u4E2D
+      / \u65E0\u9009\u4E2D\u2192\u6574\u4E2A\u573A\u666F\uFF09"
+    category: "\u6279\u91CF\u64CD\u4F5C"
+    visible: 1
+  - id: Cast Shadows OFF
+    desc: "\u5173\u95ED Cast Shadows\uFF08\u6709\u9009\u4E2D\u2192\u4EC5\u9009\u4E2D
+      / \u65E0\u9009\u4E2D\u2192\u6574\u4E2A\u573A\u666F\uFF09"
+    category: "\u6279\u91CF\u64CD\u4F5C"
+    visible: 1
+  - id: Normalize Prefab Root
+    desc: "\u70D8\u7119 Prefab \u6839\u8282\u70B9 Scale/TRS \u5230\u5B50\u8282\u70B9 
+      Ctrl+Shift+N \u5FEB\u901F\u70D8\u7119"
+    category: "\u9884\u5236\u4F53\u5904\u7406"
+    visible: 1
+  - id: Git Path Navigator
+    desc: "\u7C98\u8D34 Git \u8DEF\u5F84\u81EA\u52A8\u5B9A\u4F4D\u5230 Project \u7A97\u53E3 
+      Ctrl+G"
+    category: "\u5176\u4ED6"
+    visible: 1
+  workflows:
+  - name: "\u5EFA\u7B51\u9884\u5236\u4F53\u5236\u4F5C"
+    steps:
+    - stepType: manual
+      toolId: 
+      label: "\u5236\u4F5C\u9884\u5236\u4F53"
+      settingsJson: 
+    - stepType: tool
+      toolId: Convert Variant To Normal Prefab
+      label: 
+      settingsJson: 
+    - stepType: manual
+      toolId: 
+      label: "\u8C03\u6574\u5927\u5C0F"
+      settingsJson: 
+    - stepType: tool
+      toolId: Normalize Root Scale
+      label: 
+      settingsJson: 
+    - stepType: manual
+      toolId: 
+      label: "\u4FEE\u6539\u547D\u540D"
+      settingsJson: 
+    - stepType: tool
+      toolId: Box Collider Generator
+      label: 
+      settingsJson: 
+    - stepType: tool
+      toolId: Shadow Baker
+      label: 
+      settingsJson: 
+    - stepType: tool
+      toolId: Batch Rename Tool
+      label: 
+      settingsJson: 
+    - stepType: manual
+      toolId: 
+      label: "\u6574\u7406\u6587\u4EF6\u8DEF\u5F84"
+      settingsJson: 
