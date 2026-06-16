@@ -29,6 +29,26 @@ public class TransparentScreenshot : EditorWindow
 {
     private const string PREF_PREFIX = "TransparentScreenshot.";
 
+    // === endCameraRendering 回调：在 URP 渲染完成后直接抓 RGB ===
+    private static Camera        s_capCam;
+    private static RenderTexture s_capRT;
+    private static Texture2D     s_capResult;
+
+    static TransparentScreenshot()
+    {
+        RenderPipelineManager.endCameraRendering += (ctx, cam) =>
+        {
+            if (cam != s_capCam || s_capRT == null) return;
+            var prev = RenderTexture.active;
+            RenderTexture.active = s_capRT;
+            s_capResult = new Texture2D(s_capRT.width, s_capRT.height,
+                TextureFormat.RGBA32, false, false);
+            s_capResult.ReadPixels(new Rect(0, 0, s_capRT.width, s_capRT.height), 0, 0, false);
+            s_capResult.Apply();
+            RenderTexture.active = prev;
+        };
+    }
+
     private enum NamingMode
     {
         Default,
@@ -39,7 +59,6 @@ public class TransparentScreenshot : EditorWindow
     private int width = 1024;
     private int height = 1024;
     private bool transparentBackground = true;
-    private bool keepPostProcessing = true;
     private string outputFolder = "Screenshots";
     private string fileNamePrefix = "shot";
     private int superSize = 2;
@@ -52,8 +71,12 @@ public class TransparentScreenshot : EditorWindow
     private bool addTimestamp = true;
     private bool addResolution = true;
 
-    // === Sequence capture ===
-    private bool sequenceFoldout;
+    // === Capture Mode ===
+    private enum CaptureMode { Single, AnimSequence, ParticleSequence }
+    private CaptureMode captureMode = CaptureMode.Single;
+
+    // === Sequence capture (shared params) ===
+    private int sequenceFps = 30;
 
     [System.Serializable]
     private class AnimPairSaveEntry
@@ -153,6 +176,11 @@ public class TransparentScreenshot : EditorWindow
     private bool exportIndividualFrames = false;
     private bool sequenceUseEndpoints = false;
 
+    // === Particle Sequence ===
+    private GameObject particleTarget;
+    private string particleScanInfo = "";
+    private float particleDuration = 5f;
+
     // === Shadow Catcher ===
     private bool shadowCatcherFoldout;
     private bool enableShadowCatcher = false;
@@ -161,7 +189,12 @@ public class TransparentScreenshot : EditorWindow
     private List<GameObject> shadowReceivers =
         new List<GameObject> { null };
     private float shadowIntensity = 1.0f;
-    private bool shadowCatcherPPComposite = true;
+
+    // === Depth Occlusion (粒子序列帧) ===
+    private bool occlusionFoldout;
+    private List<GameObject> occlusionOccluders =
+        new List<GameObject> { null };
+    private const int MD_ZONE_OCCLUDER = 5;
 
     [Shortcut("Transparent Screenshot/Capture", null, KeyCode.X,
         ShortcutModifiers.Shift | ShortcutModifiers.Control)]
@@ -188,7 +221,6 @@ public class TransparentScreenshot : EditorWindow
         int outH = EditorPrefs.GetInt(PREF_PREFIX + "h", 1024);
         int ss = EditorPrefs.GetInt(PREF_PREFIX + "ss", 2);
         bool tbg = EditorPrefs.GetBool(PREF_PREFIX + "tbg", true);
-        bool kpp = EditorPrefs.GetBool(PREF_PREFIX + "kpp", true);
         bool useGVS = EditorPrefs.GetBool(PREF_PREFIX + "gvs", false);
         bool openFolder = EditorPrefs.GetBool(PREF_PREFIX + "open", true);
         string folder = EditorPrefs.GetString(PREF_PREFIX + "folder", "Screenshots");
@@ -219,18 +251,11 @@ public class TransparentScreenshot : EditorWindow
             prefabName = sel.name;
         }
 
-        // 渲染
-        int rw = outW * ss;
-        int rh = outH * ss;
+        // 渲染：和 Single Capture 完全相同的逻辑
         Texture2D finalTex = null;
         try
         {
-            if (!tbg)
-                finalTex = RenderAndDownsample(cam, rw, rh, false, false, false, default, outW, outH, ss);
-            else if (!kpp)
-                finalTex = RenderAndDownsample(cam, rw, rh, true, true, false, default, outW, outH, ss);
-            else
-                finalTex = RenderWithGameView(cam, rw, rh, outW, outH, ss);
+finalTex = CapturePipeline.CaptureFrame(cam, outW, outH, ss, tbg);
 
             // 命名
             var folderAbs = string.IsNullOrEmpty(folder) || !Path.IsPathRooted(folder)
@@ -269,368 +294,26 @@ public class TransparentScreenshot : EditorWindow
 
     private void OnGUI()
     {
+        // ============================================================
+        //  固定顶栏：模式切换 + Capture 按钮
+        // ============================================================
+        DrawTopBar();
+
+        // ============================================================
+        //  滚动区：Camera / Output / Rendering / Source
+        // ============================================================
         scrollPos = EditorGUILayout.BeginScrollView(scrollPos);
-        using (new EditorGUILayout.HorizontalScope())
-        {
-            GUI.backgroundColor = new Color(0.6f, 1f, 0.6f);
-            if (GUILayout.Button(
-                new GUIContent("Capture",
-                    "用当前设置截取一帧\n快捷键: Ctrl+Shift+X"),
-                GUILayout.Height(30))) Capture();
 
-            GUI.backgroundColor = new Color(0.7f, 0.85f, 1f);
-            if (GUILayout.Button(
-                new GUIContent("Capture Sequence", "用当前设置截取序列帧 Sprite Sheet"),
-                GUILayout.Height(30))) CaptureSequence();
-            GUI.backgroundColor = Color.white;
-        }
-
-        EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Camera", EditorStyles.boldLabel);
-        targetCamera = (Camera)EditorGUILayout.ObjectField(
-            new GUIContent("Target Camera", "留空则使用 MainCamera"),
-            targetCamera, typeof(Camera), true);
-
-        EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Output", EditorStyles.boldLabel);
-        useGameViewSize = EditorGUILayout.Toggle(
-            new GUIContent("Use Game View Size",
-                "勾选后输出尺寸跟随 Game 视图当前分辨率，Width/Height 设置被忽略。\n"
-                + "Super Size 仍然生效。"),
-            useGameViewSize);
-        using (new EditorGUI.DisabledScope(useGameViewSize))
-        {
-            width  = Mathf.Max(1, EditorGUILayout.IntField(
-                new GUIContent("Width", "输出图片宽度"), width));
-            height = Mathf.Max(1, EditorGUILayout.IntField(
-                new GUIContent("Height", "输出图片高度"), height));
-        }
-        if (useGameViewSize)
-        {
-            var gv = UnityEditor.Handles.GetMainGameViewSize();
-            EditorGUILayout.LabelField(" ",
-                $"Game View: {(int)gv.x} x {(int)gv.y}",
-                EditorStyles.miniLabel);
-        }
-        superSize = Mathf.Clamp(EditorGUILayout.IntSlider(
-            new GUIContent("Super Size", "渲染时放大倍数再下采样，>1 减少锯齿，2~3 即可"),
-            superSize, 1, 4), 1, 4);
-        using (new EditorGUI.DisabledScope(enableShadowCatcher))
-        {
-            transparentBackground = EditorGUILayout.Toggle(
-                new GUIContent("Transparent BG", "输出 PNG 带透明通道"),
-                transparentBackground);
-        }
-        using (new EditorGUI.DisabledScope(!transparentBackground || enableShadowCatcher))
-        {
-            keepPostProcessing = EditorGUILayout.Toggle(
-                new GUIContent("Keep Post Processing",
-                    "勾选后从 Game 视图捕获颜色，完整保留 Bloom / Tonemap 等后处理效果。\n"
-                    + "未勾选时透明背景会临时关闭后处理（速度更快）。"),
-                keepPostProcessing);
-        }
-
-        EditorGUILayout.Space();
-        EditorGUILayout.LabelField("File", EditorStyles.boldLabel);
-        using (new EditorGUILayout.HorizontalScope())
-        {
-            outputFolder = EditorGUILayout.TextField(
-                new GUIContent("Folder", "截图保存目录，相对路径或绝对路径"), outputFolder);
-            if (GUILayout.Button("...", GUILayout.Width(30)))
-            {
-                var picked = EditorUtility.OpenFolderPanel(
-                    "Choose folder", GetAbsoluteOutputFolder(), "");
-                if (!string.IsNullOrEmpty(picked))
-                {
-                    var projectRoot = Directory.GetParent(Application.dataPath)
-                                        .FullName.Replace('\\', '/');
-                    if (picked.StartsWith(projectRoot))
-                        outputFolder = picked.Substring(projectRoot.Length).TrimStart('/');
-                    else
-                        outputFolder = picked;
-                }
-            }
-        }
-
-        EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Naming", EditorStyles.boldLabel);
-        namingMode = (NamingMode)EditorGUILayout.EnumPopup(
-            new GUIContent("Naming Mode",
-                "Default: 使用现有规则 {prefix}_{timestamp}_{W}x{H}\n"
-                + "Prefab Name: 使用 Hierarchy 中选中物体的名字"),
-            namingMode);
-
-        if (namingMode == NamingMode.Default)
-        {
-            fileNamePrefix = EditorGUILayout.TextField(
-                new GUIContent("Name Prefix", "文件名前缀，如 shot → shot_20260527_153947.png"),
-                fileNamePrefix);
-        }
-        else
-        {
-            addPrefix = EditorGUILayout.Toggle(
-                new GUIContent("Add Prefix", "在预制体名称前添加前缀"),
-                addPrefix);
-            if (addPrefix)
-            {
-                using (new EditorGUI.IndentLevelScope())
-                {
-                    fileNamePrefix = EditorGUILayout.TextField(
-                        new GUIContent("Prefix", "前缀文本"),
-                        fileNamePrefix);
-                }
-            }
-
-            addTimestamp = EditorGUILayout.Toggle(
-                new GUIContent("Add Timestamp", "文件名末尾追加时间戳"),
-                addTimestamp);
-            addResolution = EditorGUILayout.Toggle(
-                new GUIContent("Add Resolution", "文件名末尾追加分辨率"),
-                addResolution);
-
-            // 预览当前命名模式的效果
-            var selName = GetSelectedGameObjectName();
-            if (!string.IsNullOrEmpty(selName))
-            {
-                var previewName = BuildFileName(selName, 1024, 1024);
-                EditorGUILayout.LabelField(" ",
-                    $"Preview: {previewName}",
-                    EditorStyles.miniLabel);
-            }
-            else
-            {
-                EditorGUILayout.LabelField(" ",
-                    "Preview: 未在 Hierarchy 中选中物体，无法预览",
-                    EditorStyles.miniLabel);
-            }
-        }
-
-        openFolderAfterSave = EditorGUILayout.Toggle(
-            new GUIContent("Open Folder After Save",
-                "截图完成后在资源管理器中打开所在目录"),
-            openFolderAfterSave);
-
-        EditorGUILayout.Space();
-        sequenceFoldout = EditorGUILayout.Foldout(sequenceFoldout,
-            "Sequence (Animation Sprite Sheet)", false);
-        if (sequenceFoldout)
-        {
-            using (new EditorGUI.IndentLevelScope())
-            {
-                EditorGUILayout.LabelField("Animation Pairs", EditorStyles.boldLabel);
-                int removeIndex = -1;
-                for (int i = 0; i < animPairs.Count; i++)
-                {
-                    var pair = animPairs[i];
-                    using (new EditorGUILayout.HorizontalScope())
-                    {
-                        // Clip slot (AnimationClip only)
-                        var clipRect = EditorGUILayout.GetControlRect(
-                            GUILayout.Height(EditorGUIUtility.singleLineHeight));
-                        var clip = pair.clip;
-                        MultiDragObjectField(clipRect, ref clip,
-                            typeof(AnimationClip), false, i, MD_ZONE_CLIP);
-                        pair.clip = clip;
-
-                        // Target slot (GameObject, allow scene objects)
-                        var targetRect = EditorGUILayout.GetControlRect(
-                            GUILayout.Height(EditorGUIUtility.singleLineHeight));
-                        var target = pair.target;
-                        MultiDragObjectField(targetRect, ref target,
-                            typeof(GameObject), true, i, MD_ZONE_TARGET);
-                        pair.target = target;
-
-                        if (animPairs.Count > 1)
-                        {
-                            if (GUILayout.Button("X", GUILayout.Width(22)))
-                                removeIndex = i;
-                        }
-                    }
-                }
-                if (removeIndex >= 0)
-                    animPairs.RemoveAt(removeIndex);
-
-                // 处理 animation pairs 的多对象拖入分发
-                if (_pendingMultiDragObjs != null
-                    && (_pendingMultiDragZone == MD_ZONE_CLIP || _pendingMultiDragZone == MD_ZONE_TARGET))
-                {
-                    bool isClip = (_pendingMultiDragZone == MD_ZONE_CLIP);
-                    int row = _pendingMultiDragDropRow;
-                    for (int j = 0; j < _pendingMultiDragObjs.Length; j++)
-                    {
-                        int idx = row + j;
-                        while (idx >= animPairs.Count)
-                            animPairs.Add(new AnimPairEntry());
-                        if (isClip)
-                            animPairs[idx].clip = _pendingMultiDragObjs[j] as AnimationClip;
-                        else
-                            animPairs[idx].target = _pendingMultiDragObjs[j] as GameObject;
-                    }
-                    _pendingMultiDragObjs = null;
-                    _pendingMultiDragDropRow = -1;
-                }
-
-                if (GUILayout.Button("+ Add Pair", GUILayout.Height(20)))
-                    animPairs.Add(new AnimPairEntry());
-
-                EditorGUILayout.Space();
-
-                sequenceFrameCount = Mathf.Max(1,
-                    EditorGUILayout.IntField(
-                        new GUIContent("Frame Count", "均匀采样动画时长得到的帧数"),
-                        sequenceFrameCount));
-
-                sequenceColumns = Mathf.Max(1,
-                    EditorGUILayout.IntField(
-                        new GUIContent("Columns",
-                            "Sheet 的列数；行数自动 = ceil(FrameCount / Columns)"),
-                        sequenceColumns));
-
-                int rows = Mathf.CeilToInt(sequenceFrameCount / (float)sequenceColumns);
-                EditorGUILayout.LabelField(" ",
-                    $"Layout: {sequenceColumns} x {rows} (= {sequenceColumns * rows} cells, "
-                    + $"{sequenceFrameCount} used)",
-                    EditorStyles.miniLabel);
-
-                exportIndividualFrames = EditorGUILayout.Toggle(
-                    new GUIContent("Export Individual Frames",
-                        "同时输出每一帧的单张 PNG（除 Sheet 外）"),
-                    exportIndividualFrames);
-
-                sequenceUseEndpoints = EditorGUILayout.Toggle(
-                    new GUIContent("Include Endpoints",
-                        "勾选：均匀采样含首尾帧 (t = i/(N-1) * length)，"
-                        + "适合非循环动作。\n"
-                        + "不勾：中心采样 (t = (i+0.5)/N * length)，"
-                        + "适合循环动作。"),
-                    sequenceUseEndpoints);
-
-                EditorGUILayout.Space();
-                if (GUILayout.Button(
-                    new GUIContent("Diagnose Bindings",
-                        "检查所有 Animation Pair 的骨骼路径匹配情况，"
-                        + "用于排查骨骼动画不动的问题"),
-                    GUILayout.Height(22)))
-                    DiagnoseBindings();
-            }
-        }
-
-        EditorGUILayout.Space();
-        EditorGUILayout.LabelField("", GUI.skin.horizontalSlider);
-        shadowCatcherFoldout = EditorGUILayout.Foldout(shadowCatcherFoldout,
-            "Shadow Catcher", false);
-        if (shadowCatcherFoldout)
-        {
-            using (new EditorGUI.IndentLevelScope())
-            {
-                enableShadowCatcher = EditorGUILayout.Toggle(
-                    new GUIContent("Enable Shadow Catcher",
-                        "启用阴影捕捉模式。物体不透明，影子半透明黑色，地面不可见。\n"
-                        + "需要场景里有开启阴影的方向光。"),
-                    enableShadowCatcher);
-
-                using (new EditorGUI.DisabledScope(!enableShadowCatcher))
-                {
-                    // Shadow Casters list
-                    EditorGUILayout.LabelField("Shadow Casters", EditorStyles.boldLabel);
-                    int removeCaster = -1;
-                    for (int i = 0; i < shadowCasterRoots.Count; i++)
-                    {
-                        using (new EditorGUILayout.HorizontalScope())
-                        {
-                            var rect = EditorGUILayout.GetControlRect(
-                                GUILayout.Height(EditorGUIUtility.singleLineHeight));
-                            var go = shadowCasterRoots[i];
-                            MultiDragObjectField(rect, ref go,
-                                typeof(GameObject), true, i, MD_ZONE_CASTER);
-                            shadowCasterRoots[i] = go;
-                            if (shadowCasterRoots.Count > 1)
-                            {
-                                if (GUILayout.Button("X", GUILayout.Width(22)))
-                                    removeCaster = i;
-                            }
-                        }
-                    }
-                    if (removeCaster >= 0) shadowCasterRoots.RemoveAt(removeCaster);
-                    // 处理 Shadow Casters 多对象拖入分发
-                    if (_pendingMultiDragObjs != null && _pendingMultiDragZone == MD_ZONE_CASTER)
-                    {
-                        int row = _pendingMultiDragDropRow;
-                        for (int j = 0; j < _pendingMultiDragObjs.Length; j++)
-                        {
-                            int idx = row + j;
-                            while (idx >= shadowCasterRoots.Count)
-                                shadowCasterRoots.Add(null);
-                            shadowCasterRoots[idx] = _pendingMultiDragObjs[j] as GameObject;
-                        }
-                        _pendingMultiDragObjs = null;
-                        _pendingMultiDragDropRow = -1;
-                    }
-                    if (GUILayout.Button("+ Add Caster", GUILayout.Height(18)))
-                        shadowCasterRoots.Add(null);
-
-                    EditorGUILayout.Space();
-
-                    // Shadow Receivers list
-                    EditorGUILayout.LabelField("Shadow Receivers", EditorStyles.boldLabel);
-                    int removeReceiver = -1;
-                    for (int i = 0; i < shadowReceivers.Count; i++)
-                    {
-                        using (new EditorGUILayout.HorizontalScope())
-                        {
-                            var rect = EditorGUILayout.GetControlRect(
-                                GUILayout.Height(EditorGUIUtility.singleLineHeight));
-                            var go = shadowReceivers[i];
-                            MultiDragObjectField(rect, ref go,
-                                typeof(GameObject), true, i, MD_ZONE_RECEIVER);
-                            shadowReceivers[i] = go;
-                            if (shadowReceivers.Count > 1)
-                            {
-                                if (GUILayout.Button("X", GUILayout.Width(22)))
-                                    removeReceiver = i;
-                            }
-                        }
-                    }
-                    if (removeReceiver >= 0) shadowReceivers.RemoveAt(removeReceiver);
-                    // 处理 Shadow Receivers 多对象拖入分发
-                    if (_pendingMultiDragObjs != null && _pendingMultiDragZone == MD_ZONE_RECEIVER)
-                    {
-                        int row = _pendingMultiDragDropRow;
-                        for (int j = 0; j < _pendingMultiDragObjs.Length; j++)
-                        {
-                            int idx = row + j;
-                            while (idx >= shadowReceivers.Count)
-                                shadowReceivers.Add(null);
-                            shadowReceivers[idx] = _pendingMultiDragObjs[j] as GameObject;
-                        }
-                        _pendingMultiDragObjs = null;
-                        _pendingMultiDragDropRow = -1;
-                    }
-                    if (GUILayout.Button("+ Add Receiver", GUILayout.Height(18)))
-                        shadowReceivers.Add(null);
-
-                    shadowIntensity = EditorGUILayout.Slider(
-                        new GUIContent("Shadow Intensity", "阴影深浅倍率，1=原始"),
-                        shadowIntensity, 0f, 2f);
-
-                    shadowCatcherPPComposite = EditorGUILayout.Toggle(
-                        new GUIContent("Composite Post Processing",
-                            "额外渲染一 pass 带后处理的物体，自动合成到影子图上。\n"
-                            + "勾选 = 物体有后处理效果 + 影子正常。"),
-                        shadowCatcherPPComposite);
-                }
-
-                if (enableShadowCatcher)
-                    EditorGUILayout.HelpBox("Shadow Catcher 开启后，上方透明背景/后处理设置将被忽略。"
-                        + "直接将物体和面片拖入插槽即可，无需改 Layer。",
-                        MessageType.Info);
-            }
-        }
+        DrawCameraSection();
+        DrawOutputSection();
+        DrawRenderingSection();
+        DrawSourceSection();
 
         EditorGUILayout.EndScrollView();
+
         if (GUI.changed) SavePrefs();
 
-        // ── 署名 ──
+        // 署名
         GUILayout.FlexibleSpace();
         var authorStyle = new GUIStyle(EditorStyles.miniLabel)
         {
@@ -641,7 +324,503 @@ public class TransparentScreenshot : EditorWindow
         EditorGUILayout.LabelField("114.21, 30.56", authorStyle);
     }
 
-    public void Capture()
+    // ================================================================
+    //  UI Section Helpers
+    // ================================================================
+
+    private void DrawTopBar()
+    {
+        const float BTN_H = 28f;
+
+        EditorGUILayout.BeginHorizontal();
+
+        // Mode 按钮（非 toolbar，手动实现选中高亮）
+        var modeNames = new[] { "Single", "Anim Seq", "Particle" };
+        for (int i = 0; i < modeNames.Length; i++)
+        {
+            bool selected = (captureMode == (CaptureMode)i);
+            GUI.backgroundColor = selected
+                ? new Color(0.55f, 0.75f, 1f)
+                : Color.white;
+            if (GUILayout.Button(modeNames[i],
+                GUILayout.Height(BTN_H), GUILayout.Width(90)))
+                captureMode = (CaptureMode)i;
+        }
+        GUI.backgroundColor = Color.white;
+
+        GUILayout.FlexibleSpace();
+
+        string btnLabel;
+        switch (captureMode)
+        {
+            case CaptureMode.AnimSequence:
+            case CaptureMode.ParticleSequence:
+                btnLabel = "Capture Sequence"; break;
+            default:
+                btnLabel = "Capture  (Ctrl+Shift+X)"; break;
+        }
+
+        GUI.backgroundColor = new Color(0.6f, 1f, 0.6f);
+        if (GUILayout.Button(btnLabel,
+            GUILayout.Height(BTN_H), GUILayout.Width(180)))
+            OnCaptureButton();
+        GUI.backgroundColor = Color.white;
+
+        EditorGUILayout.EndHorizontal();
+        EditorGUILayout.Space();
+    }
+
+    private void OnCaptureButton()
+    {
+        switch (captureMode)
+        {
+            case CaptureMode.Single:
+                Capture();
+                break;
+            case CaptureMode.AnimSequence:
+            {
+                // 从 clip 时长 + FPS 计算帧数
+                var valid = GetValidPairs();
+                if (valid.Count > 0)
+                    sequenceFrameCount = Mathf.Max(1,
+                        Mathf.CeilToInt(valid[0].clip.length * sequenceFps));
+                CaptureSequence();
+                break;
+            }
+            case CaptureMode.ParticleSequence:
+                CaptureParticleSequence();
+                break;
+        }
+    }
+
+    private void DrawCameraSection()
+    {
+        EditorGUILayout.LabelField("Camera", EditorStyles.boldLabel);
+        targetCamera = (Camera)EditorGUILayout.ObjectField(
+            new GUIContent("Target Camera", "留空则使用 MainCamera"),
+            targetCamera, typeof(Camera), true);
+        EditorGUILayout.Space();
+    }
+
+    private void DrawOutputSection()
+    {
+        EditorGUILayout.LabelField("Output", EditorStyles.boldLabel);
+
+        // Resolution
+        useGameViewSize = EditorGUILayout.Toggle(
+            new GUIContent("Use Game View Size",
+                "输出尺寸跟随 Game 视图当前分辨率，Width/Height 被忽略"),
+            useGameViewSize);
+        using (new EditorGUI.DisabledScope(useGameViewSize))
+        {
+            EditorGUILayout.BeginHorizontal();
+            width  = Mathf.Max(1, EditorGUILayout.IntField("Width", width));
+            GUILayout.Label("×", GUILayout.Width(14));
+            height = Mathf.Max(1, EditorGUILayout.IntField("Height", height));
+            EditorGUILayout.EndHorizontal();
+        }
+        if (useGameViewSize)
+        {
+            var gv = UnityEditor.Handles.GetMainGameViewSize();
+            EditorGUILayout.LabelField(" ",
+                $"Game View: {(int)gv.x} × {(int)gv.y}", EditorStyles.miniLabel);
+        }
+
+        // Super Size
+        superSize = Mathf.Clamp(EditorGUILayout.IntSlider(
+            new GUIContent("Super Size", "渲染放大倍数再下采样，2~3 即可"),
+            superSize, 1, 4), 1, 4);
+
+        // Folder
+        EditorGUILayout.BeginHorizontal();
+        outputFolder = EditorGUILayout.TextField("Folder", outputFolder);
+        if (GUILayout.Button("...", GUILayout.Width(30)))
+        {
+            var picked = EditorUtility.OpenFolderPanel(
+                "Choose folder", GetAbsoluteOutputFolder(), "");
+            if (!string.IsNullOrEmpty(picked))
+            {
+                var projectRoot = Directory.GetParent(Application.dataPath)
+                                    .FullName.Replace('\\', '/');
+                if (picked.StartsWith(projectRoot))
+                    outputFolder = picked.Substring(projectRoot.Length).TrimStart('/');
+                else
+                    outputFolder = picked;
+            }
+        }
+        EditorGUILayout.EndHorizontal();
+
+        // Naming
+        namingMode = (NamingMode)EditorGUILayout.EnumPopup("Naming", namingMode);
+        if (namingMode == NamingMode.Default)
+        {
+            fileNamePrefix = EditorGUILayout.TextField("Prefix", fileNamePrefix);
+        }
+        else
+        {
+            addPrefix = EditorGUILayout.Toggle("Add Prefix", addPrefix);
+            if (addPrefix)
+                using (new EditorGUI.IndentLevelScope())
+                    fileNamePrefix = EditorGUILayout.TextField("Prefix", fileNamePrefix);
+            addTimestamp = EditorGUILayout.Toggle("Add Timestamp", addTimestamp);
+            addResolution = EditorGUILayout.Toggle("Add Resolution", addResolution);
+
+            var selName = GetSelectedGameObjectName();
+            EditorGUILayout.LabelField(" ",
+                string.IsNullOrEmpty(selName)
+                    ? "Preview: 未在 Hierarchy 中选中物体"
+                    : $"Preview: {BuildFileName(selName, width, height)}",
+                EditorStyles.miniLabel);
+        }
+
+        openFolderAfterSave = EditorGUILayout.Toggle(
+            "Open Folder After Save", openFolderAfterSave);
+        EditorGUILayout.Space();
+    }
+
+    private void DrawRenderingSection()
+    {
+        EditorGUILayout.LabelField("Rendering", EditorStyles.boldLabel);
+
+        // Transparent BG
+        using (new EditorGUI.DisabledScope(enableShadowCatcher))
+        {
+            transparentBackground = EditorGUILayout.Toggle(
+                new GUIContent("Transparent Background",
+                    "输出 PNG 带透明通道"), transparentBackground);
+        }
+
+        // Shadow Catcher
+        enableShadowCatcher = EditorGUILayout.Toggle(
+            new GUIContent("Shadow Catcher",
+                "物体不透明，影子半透明黑色，地面不可见"),
+            enableShadowCatcher);
+        if (enableShadowCatcher)
+        {
+            using (new EditorGUI.IndentLevelScope())
+            {
+                // Casters
+                EditorGUILayout.LabelField("Shadow Casters", EditorStyles.boldLabel);
+                int removeCaster = -1;
+                for (int i = 0; i < shadowCasterRoots.Count; i++)
+                {
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        var rect = EditorGUILayout.GetControlRect(
+                            GUILayout.Height(EditorGUIUtility.singleLineHeight));
+                        var go = shadowCasterRoots[i];
+                        MultiDragObjectField(rect, ref go,
+                            typeof(GameObject), true, i, MD_ZONE_CASTER);
+                        shadowCasterRoots[i] = go;
+                        if (shadowCasterRoots.Count > 1
+                            && GUILayout.Button("X", GUILayout.Width(22)))
+                            removeCaster = i;
+                    }
+                }
+                if (removeCaster >= 0) shadowCasterRoots.RemoveAt(removeCaster);
+                if (_pendingMultiDragObjs != null
+                    && _pendingMultiDragZone == MD_ZONE_CASTER)
+                {
+                    int row = _pendingMultiDragDropRow;
+                    for (int j = 0; j < _pendingMultiDragObjs.Length; j++)
+                    {
+                        int idx = row + j;
+                        while (idx >= shadowCasterRoots.Count)
+                            shadowCasterRoots.Add(null);
+                        shadowCasterRoots[idx] = _pendingMultiDragObjs[j] as GameObject;
+                    }
+                    _pendingMultiDragObjs = null;
+                    _pendingMultiDragDropRow = -1;
+                }
+                if (GUILayout.Button("+ Add Caster", GUILayout.Height(18)))
+                    shadowCasterRoots.Add(null);
+
+                // Receivers
+                EditorGUILayout.LabelField("Shadow Receivers", EditorStyles.boldLabel);
+                int removeReceiver = -1;
+                for (int i = 0; i < shadowReceivers.Count; i++)
+                {
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        var rect = EditorGUILayout.GetControlRect(
+                            GUILayout.Height(EditorGUIUtility.singleLineHeight));
+                        var go = shadowReceivers[i];
+                        MultiDragObjectField(rect, ref go,
+                            typeof(GameObject), true, i, MD_ZONE_RECEIVER);
+                        shadowReceivers[i] = go;
+                        if (shadowReceivers.Count > 1
+                            && GUILayout.Button("X", GUILayout.Width(22)))
+                            removeReceiver = i;
+                    }
+                }
+                if (removeReceiver >= 0) shadowReceivers.RemoveAt(removeReceiver);
+                if (_pendingMultiDragObjs != null
+                    && _pendingMultiDragZone == MD_ZONE_RECEIVER)
+                {
+                    int row = _pendingMultiDragDropRow;
+                    for (int j = 0; j < _pendingMultiDragObjs.Length; j++)
+                    {
+                        int idx = row + j;
+                        while (idx >= shadowReceivers.Count)
+                            shadowReceivers.Add(null);
+                        shadowReceivers[idx] = _pendingMultiDragObjs[j] as GameObject;
+                    }
+                    _pendingMultiDragObjs = null;
+                    _pendingMultiDragDropRow = -1;
+                }
+                if (GUILayout.Button("+ Add Receiver", GUILayout.Height(18)))
+                    shadowReceivers.Add(null);
+
+                shadowIntensity = EditorGUILayout.Slider(
+                    "Shadow Intensity", shadowIntensity, 0f, 2f);
+
+                EditorGUILayout.HelpBox(
+                    "Transparent BG / Keep PP 在 Shadow Catcher 模式下被忽略。",
+                    MessageType.Info);
+            }
+        }
+
+        // Depth Occlusion
+        if (captureMode == CaptureMode.ParticleSequence)
+        {
+            occlusionFoldout = EditorGUILayout.Foldout(
+                occlusionFoldout, "Depth Occlusion");
+            if (occlusionFoldout)
+            {
+                using (new EditorGUI.IndentLevelScope())
+                {
+                    int removeOcc = -1;
+                    for (int i = 0; i < occlusionOccluders.Count; i++)
+                    {
+                        using (new EditorGUILayout.HorizontalScope())
+                        {
+                            var rect = EditorGUILayout.GetControlRect(
+                                GUILayout.Height(EditorGUIUtility.singleLineHeight));
+                            var go = occlusionOccluders[i];
+                            MultiDragObjectField(rect, ref go,
+                                typeof(GameObject), true, i, MD_ZONE_OCCLUDER);
+                            occlusionOccluders[i] = go;
+                            if (occlusionOccluders.Count > 1
+                                && GUILayout.Button("X", GUILayout.Width(22)))
+                                removeOcc = i;
+                        }
+                    }
+                    if (removeOcc >= 0) occlusionOccluders.RemoveAt(removeOcc);
+                    if (_pendingMultiDragObjs != null
+                        && _pendingMultiDragZone == MD_ZONE_OCCLUDER)
+                    {
+                        int row = _pendingMultiDragDropRow;
+                        for (int j = 0; j < _pendingMultiDragObjs.Length; j++)
+                        {
+                            int idx = row + j;
+                            while (idx >= occlusionOccluders.Count)
+                                occlusionOccluders.Add(null);
+                            occlusionOccluders[idx] =
+                                _pendingMultiDragObjs[j] as GameObject;
+                        }
+                        _pendingMultiDragObjs = null;
+                        _pendingMultiDragDropRow = -1;
+                    }
+                    if (GUILayout.Button("+ Add Occluder", GUILayout.Height(18)))
+                        occlusionOccluders.Add(null);
+
+                    EditorGUILayout.HelpBox(
+                        "拖入遮挡模型（如墙、柱子）。\n"
+                        + "粒子在模型后面 → 透明；粒子在前面 → 正常显示。\n"
+                        + "不填模型则没有效果。",
+                        MessageType.None);
+                }
+            }
+        }
+
+        EditorGUILayout.Space();
+    }
+
+    private void DrawSourceSection()
+    {
+        switch (captureMode)
+        {
+            case CaptureMode.AnimSequence:
+                DrawAnimSource();
+                break;
+            case CaptureMode.ParticleSequence:
+                DrawParticleSource();
+                break;
+            case CaptureMode.Single:
+            default:
+                EditorGUILayout.LabelField("Source",
+                    "截取相机当前画面（无需额外配置）",
+                    EditorStyles.wordWrappedMiniLabel);
+                break;
+        }
+    }
+
+    // ---- Anim Source ----
+
+    private void DrawAnimSource()
+    {
+        EditorGUILayout.LabelField("Source", EditorStyles.boldLabel);
+
+        // Pairs list
+        EditorGUILayout.LabelField("Animation Pairs",
+            EditorStyles.miniBoldLabel);
+        int removeIndex = -1;
+        for (int i = 0; i < animPairs.Count; i++)
+        {
+            var pair = animPairs[i];
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                var clipRect = EditorGUILayout.GetControlRect(
+                    GUILayout.Height(EditorGUIUtility.singleLineHeight));
+                var clip = pair.clip;
+                MultiDragObjectField(clipRect, ref clip,
+                    typeof(AnimationClip), false, i, MD_ZONE_CLIP);
+                pair.clip = clip;
+
+                var targetRect = EditorGUILayout.GetControlRect(
+                    GUILayout.Height(EditorGUIUtility.singleLineHeight));
+                var target = pair.target;
+                MultiDragObjectField(targetRect, ref target,
+                    typeof(GameObject), true, i, MD_ZONE_TARGET);
+                pair.target = target;
+
+                if (animPairs.Count > 1
+                    && GUILayout.Button("X", GUILayout.Width(22)))
+                    removeIndex = i;
+            }
+        }
+        if (removeIndex >= 0) animPairs.RemoveAt(removeIndex);
+        if (_pendingMultiDragObjs != null
+            && (_pendingMultiDragZone == MD_ZONE_CLIP
+                || _pendingMultiDragZone == MD_ZONE_TARGET))
+        {
+            bool isClip = (_pendingMultiDragZone == MD_ZONE_CLIP);
+            int row = _pendingMultiDragDropRow;
+            for (int j = 0; j < _pendingMultiDragObjs.Length; j++)
+            {
+                int idx = row + j;
+                while (idx >= animPairs.Count)
+                    animPairs.Add(new AnimPairEntry());
+                if (isClip)
+                    animPairs[idx].clip = _pendingMultiDragObjs[j] as AnimationClip;
+                else
+                    animPairs[idx].target = _pendingMultiDragObjs[j] as GameObject;
+            }
+            _pendingMultiDragObjs = null;
+            _pendingMultiDragDropRow = -1;
+        }
+        if (GUILayout.Button("+ Add Pair", GUILayout.Height(20)))
+            animPairs.Add(new AnimPairEntry());
+
+        // Timing: Duration (clip derived) + FPS → frame count
+        var valid = GetValidPairs();
+        float clipDuration = valid.Count > 0 ? valid[0].clip.length : 0f;
+        int derivedFrames = Mathf.Max(1,
+            Mathf.CeilToInt(clipDuration * sequenceFps));
+
+        EditorGUILayout.Space();
+        EditorGUILayout.BeginHorizontal();
+        using (new EditorGUI.DisabledScope(true))
+            EditorGUILayout.TextField(
+                new GUIContent("Duration", "来自 AnimationClip 时长"),
+                clipDuration > 0f ? $"{clipDuration:F2}s" : "—");
+        sequenceFps = Mathf.Max(1,
+            EditorGUILayout.IntField("FPS", sequenceFps));
+        EditorGUILayout.EndHorizontal();
+
+        EditorGUILayout.LabelField(" ",
+            clipDuration > 0f
+                ? $"→ {derivedFrames} frames ({clipDuration:F2}s × {sequenceFps}fps)"
+                : "→ 请先指定有效的 Animation Pair",
+            EditorStyles.miniLabel);
+
+        DrawSequenceCommonControls(derivedFrames);
+
+        // Diagnose
+        EditorGUILayout.Space();
+        if (GUILayout.Button("Diagnose Bindings", GUILayout.Height(22)))
+            DiagnoseBindings();
+    }
+
+    // ---- Particle Source ----
+
+    private void DrawParticleSource()
+    {
+        EditorGUILayout.LabelField("Source", EditorStyles.boldLabel);
+
+        // Target
+        var newTarget = (GameObject)EditorGUILayout.ObjectField(
+            new GUIContent("Particle Target",
+                "拖入粒子特效根节点，会扫描所有子 ParticleSystem"),
+            particleTarget, typeof(GameObject), true);
+        if (newTarget != particleTarget)
+        {
+            particleTarget = newTarget;
+            particleScanInfo = BuildParticleScanDisplay(particleTarget);
+        }
+
+        // Scan info
+        if (particleTarget != null)
+        {
+            if (!string.IsNullOrEmpty(particleScanInfo))
+                EditorGUILayout.HelpBox(particleScanInfo, MessageType.None);
+            else
+                EditorGUILayout.HelpBox(
+                    "⚠ 未找到 ParticleSystem", MessageType.Warning);
+        }
+
+        // Timing: Duration (user input) + FPS → frame count
+        particleDuration = Mathf.Max(0.1f,
+            EditorGUILayout.FloatField("Duration (s)", particleDuration));
+        sequenceFps = Mathf.Max(1,
+            EditorGUILayout.IntField("FPS", sequenceFps));
+
+        int derivedFrames = Mathf.Max(1,
+            Mathf.CeilToInt(particleDuration * sequenceFps));
+        EditorGUILayout.LabelField(" ",
+            $"→ {derivedFrames} frames "
+            + $"({particleDuration:F2}s × {sequenceFps}fps)",
+            EditorStyles.miniLabel);
+
+        DrawSequenceCommonControls(derivedFrames);
+    }
+
+    // ---- Shared Sequence Controls ----
+
+    private void DrawSequenceCommonControls(int frameCount)
+    {
+        EditorGUILayout.Space();
+
+        sequenceColumns = Mathf.Max(1,
+            EditorGUILayout.IntField("Columns", sequenceColumns));
+
+        int rows = Mathf.CeilToInt(frameCount / (float)sequenceColumns);
+        EditorGUILayout.LabelField(" ",
+            $"Layout: {sequenceColumns} × {rows} "
+            + $"({sequenceColumns * rows} cells, {frameCount} used)",
+            EditorStyles.miniLabel);
+
+        sequenceUseEndpoints = EditorGUILayout.Toggle(
+            new GUIContent("Include Endpoints",
+                "关闭 = 中心采样（适合循环），开启 = 含首尾帧"),
+            sequenceUseEndpoints);
+
+        exportIndividualFrames = EditorGUILayout.Toggle(
+            "Export Individual Frames", exportIndividualFrames);
+
+        EditorGUILayout.Space();
+    }
+
+    private List<AnimPairEntry> GetValidPairs()
+    {
+        var list = new List<AnimPairEntry>();
+        for (int i = 0; i < animPairs.Count; i++)
+            if (animPairs[i].clip != null && animPairs[i].target != null)
+                list.Add(animPairs[i]);
+        return list;
+    }
+
+    private void Capture()
     {
         var cam = targetCamera != null ? targetCamera : Camera.main;
         if (cam == null)
@@ -699,176 +878,16 @@ public class TransparentScreenshot : EditorWindow
         }
     }
 
-    // === 静态辅助方法（供 QuickCapture 快捷键使用） ===
-
-    // RenderOnce + 下采样 + Gamma 校正，一步到位
-    private static Texture2D RenderAndDownsample(Camera cam, int rw, int rh,
-        bool transparent, bool disablePost, bool overrideClear, Color clearColor,
-        int outW, int outH, int superSize)
-    {
-        var tex = RenderOnce(cam, rw, rh, transparent, disablePost, overrideClear, clearColor);
-        if (superSize > 1)
-        {
-            var resized = Downsample(tex, outW, outH);
-            Object.DestroyImmediate(tex);
-            tex = resized;
-        }
-        LinearToGamma(tex);
-        return tex;
-    }
-
-    // Game 视图 RGB + B/C alpha 的完整流程
-    private static Texture2D RenderWithGameView(Camera cam, int rw, int rh,
-        int outW, int outH, int superSize)
-    {
-        var gameViewTex = CaptureGameViewRGB(cam);
-        if (gameViewTex != null)
-        {
-            SrgbToLinear(gameViewTex);
-
-            Texture2D rgbTex;
-            if (gameViewTex.width == rw && gameViewTex.height == rh)
-            {
-                rgbTex = gameViewTex;
-            }
-            else
-            {
-                var tmp = RenderTexture.GetTemporary(rw, rh, 0,
-                    RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear, 1);
-                tmp.filterMode = FilterMode.Bilinear;
-                Graphics.Blit(gameViewTex, tmp);
-                Object.DestroyImmediate(gameViewTex);
-                var prevActive = RenderTexture.active;
-                RenderTexture.active = tmp;
-                rgbTex = new Texture2D(rw, rh, TextureFormat.RGBA32, false, false);
-                rgbTex.ReadPixels(new Rect(0, 0, rw, rh), 0, 0, false);
-                rgbTex.Apply();
-                RenderTexture.active = prevActive;
-                RenderTexture.ReleaseTemporary(tmp);
-            }
-
-            var blackTex = RenderOnce(cam, rw, rh, false, true, true, Color.black);
-            var whiteTex = RenderOnce(cam, rw, rh, false, true, true, Color.white);
-            var finalTex = DualBackgroundAlpha(rgbTex, blackTex, whiteTex);
-            Object.DestroyImmediate(rgbTex);
-            Object.DestroyImmediate(blackTex);
-            Object.DestroyImmediate(whiteTex);
-
-            if (superSize > 1)
-            {
-                var resized = Downsample(finalTex, outW, outH);
-                Object.DestroyImmediate(finalTex);
-                finalTex = resized;
-            }
-            LinearToGamma(finalTex);
-            return finalTex;
-        }
-
-        // Fallback：三 pass 渲染
-        var fbRgbTex = RenderOnce(cam, rw, rh, true, false, false, default);
-        var fbBlackTex = RenderOnce(cam, rw, rh, false, true, true, Color.black);
-        var fbWhiteTex = RenderOnce(cam, rw, rh, false, true, true, Color.white);
-        var fbTex = DualBackgroundAlpha(fbRgbTex, fbBlackTex, fbWhiteTex);
-        Object.DestroyImmediate(fbRgbTex);
-        Object.DestroyImmediate(fbBlackTex);
-        Object.DestroyImmediate(fbWhiteTex);
-        if (superSize > 1)
-        {
-            var resized = Downsample(fbTex, outW, outH);
-            Object.DestroyImmediate(fbTex);
-            fbTex = resized;
-        }
-        LinearToGamma(fbTex);
-        return fbTex;
-    }
-
-    // 用当前场景姿态渲染一帧到 outW x outH 的 Texture2D（已应用 supersize 下采样）。
-    // 序列帧捕捉时会在外层先 SampleAnimationClip 把姿态推到指定时刻，再调本方法。
     private Texture2D RenderCurrentFrame(Camera cam, int outW, int outH)
     {
-        int rw = outW * superSize;
-        int rh = outH * superSize;
-
-        Texture2D finalTex;
-        if (enableShadowCatcher)
-        {
-            return RenderCurrentFrameShadowCatcher(cam, outW, outH);
-        }
-        else if (!transparentBackground)
-        {
-            finalTex = RenderOnce(cam, rw, rh, false, false, false, default);
-        }
-        else if (!keepPostProcessing)
-        {
-            finalTex = RenderOnce(cam, rw, rh, true, true, false, default);
-        }
-        else
-        {
-            // 透明背景 + 保留后处理：优先用 Game 视图 RT 作为 RGB 源
-            // 这样可以保证颜色和后处理效果跟 Game 视图看到的完全一致
-            // 失败时 fallback 到三 pass RenderOnce 方案
-            var gameViewTex = CaptureGameViewRGB(cam);
-            if (gameViewTex != null)
-            {
-                // Game 视图 RGB 是 sRGB → 转到线性空间
-                SrgbToLinear(gameViewTex);
-
-                // 如果 Game 视图分辨率与目标分辨率不同，缩放 RGB 到 rw x rh
-                Texture2D rgbTex;
-                if (gameViewTex.width == rw && gameViewTex.height == rh)
-                {
-                    rgbTex = gameViewTex;
-                }
-                else
-                {
-                    var tmp = RenderTexture.GetTemporary(rw, rh, 0,
-                        RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear, 1);
-                    tmp.filterMode = FilterMode.Bilinear;
-                    Graphics.Blit(gameViewTex, tmp);
-                    Object.DestroyImmediate(gameViewTex);
-                    var prevActive2 = RenderTexture.active;
-                    RenderTexture.active = tmp;
-                    rgbTex = new Texture2D(rw, rh, TextureFormat.RGBA32, false, false);
-                    rgbTex.ReadPixels(new Rect(0, 0, rw, rh), 0, 0, false);
-                    rgbTex.Apply();
-                    RenderTexture.active = prevActive2;
-                    RenderTexture.ReleaseTemporary(tmp);
-                }
-
-                var blackTex = RenderOnce(cam, rw, rh, false, true, true, Color.black);
-                var whiteTex = RenderOnce(cam, rw, rh, false, true, true, Color.white);
-                finalTex = DualBackgroundAlpha(rgbTex, blackTex, whiteTex);
-                Object.DestroyImmediate(rgbTex);
-                Object.DestroyImmediate(blackTex);
-                Object.DestroyImmediate(whiteTex);
-            }
-            else
-            {
-                // Fallback：原三 pass 双背景抠图
-                var rgbTex   = RenderOnce(cam, rw, rh, true,  false, false, default);
-                var blackTex = RenderOnce(cam, rw, rh, false, true,  true,  Color.black);
-                var whiteTex = RenderOnce(cam, rw, rh, false, true,  true,  Color.white);
-                finalTex = DualBackgroundAlpha(rgbTex, blackTex, whiteTex);
-                Object.DestroyImmediate(rgbTex);
-                Object.DestroyImmediate(blackTex);
-                Object.DestroyImmediate(whiteTex);
-            }
-        }
-
-        if (superSize > 1)
-        {
-            var resized = Downsample(finalTex, outW, outH);
-            Object.DestroyImmediate(finalTex);
-            finalTex = resized;
-        }
-
-        // RenderOnce 返回线性数据，PNG 输出前做 gamma 校正
-        LinearToGamma(finalTex);
-        return finalTex;
+return CapturePipeline.CaptureFrame(cam, outW, outH, superSize,
+            transparentBackground,
+            enableShadowCatcher, shadowCasterRoots, shadowReceivers,
+            shadowIntensity);
     }
 
     // 诊断所有 pair 的 clip 曲线路径在对应 target 下能否找到 Transform。
-    public void DiagnoseBindings()
+    private void DiagnoseBindings()
     {
         if (animPairs.Count == 0)
         {
@@ -952,34 +971,6 @@ public class TransparentScreenshot : EditorWindow
     //   1) forceMatrixRecalculationPerRender = true 让下一次渲染前强制重算骨骼矩阵
     //   2) BakeMesh 到一个临时 Mesh 强制走一次蒙皮计算（最关键的一步）
     //   3) updateWhenOffscreen 临时打开，避免 SMR 被视锥剔除后跳过蒙皮
-    private static void ForceSkinnedMeshRenderersRefresh()
-    {
-        var all = Object.FindObjectsOfType<SkinnedMeshRenderer>();
-        if (all == null || all.Length == 0) return;
-
-        // BakeMesh 需要一个临时 Mesh 容器，复用一个避免每帧分配
-        var dummy = new Mesh { hideFlags = HideFlags.HideAndDontSave };
-        try
-        {
-            for (int i = 0; i < all.Length; i++)
-            {
-                var smr = all[i];
-                if (smr == null || !smr.enabled) continue;
-                if (smr.sharedMesh == null) continue;
-
-                smr.forceMatrixRecalculationPerRender = true;
-                // BakeMesh 会强制 Unity 用当前骨骼姿态做一次完整蒙皮，
-                // 副作用是让 SMR 内部的"当前姿态"缓存被更新。
-                // 即使我们丢弃 dummy 结果，cam.Render() 时 SMR 也会用最新姿态。
-                try { smr.BakeMesh(dummy); }
-                catch { /* 极少数 mesh 不支持 BakeMesh，忽略 */ }
-            }
-        }
-        finally
-        {
-            Object.DestroyImmediate(dummy);
-        }
-    }
 
     private static void CollectChildPaths(Transform t, string prefix,
         List<string> outList)
@@ -993,10 +984,13 @@ public class TransparentScreenshot : EditorWindow
         }
     }
 
-    public void CaptureSequence()
+    // Sheet 拼接器 —— 所有序列帧入口共用
+    // renderFrame(i) 返回第 i 帧的 Texture2D，BuildSheet 负责拼 Sheet、导出单帧、保存
+
+    private void CaptureSequence()
     {
-        var cam = targetCamera != null ? targetCamera : Camera.main;
-        if (cam == null)
+        var sourceCam = targetCamera != null ? targetCamera : Camera.main;
+        if (sourceCam == null)
         {
             EditorUtility.DisplayDialog("Sequence",
                 "找不到相机：请指定 Target Camera 或场景里有一个 MainCamera。", "OK");
@@ -1057,41 +1051,19 @@ public class TransparentScreenshot : EditorWindow
         }
 
         var folderAbs = GetAbsoluteOutputFolder();
-        Directory.CreateDirectory(folderAbs);
         var stamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        var clipName = validPairs[0].clip.name;
 
-        string framesDir = null;
+        string framesDirName = null;
         if (exportIndividualFrames)
         {
-            var clipName = validPairs[0].clip.name;
-            var dirName = namingMode == NamingMode.Default
+            framesDirName = namingMode == NamingMode.Default
                 ? $"{fileNamePrefix}_{clipName}_{stamp}_frames"
                 : $"{(addPrefix && !string.IsNullOrEmpty(fileNamePrefix) ? fileNamePrefix + "_" : "")}{prefabName}_{clipName}_{(addTimestamp ? stamp + "_" : "")}frames";
-            framesDir = Path.Combine(folderAbs, dirName).Replace('\\', '/');
-            Directory.CreateDirectory(framesDir);
         }
+        var sheetFileName = BuildSequenceSheetName(prefabName, clipName, stamp, cols, rows, outW, outH);
 
-        bool gpuCopySupported =
-            (SystemInfo.copyTextureSupport & CopyTextureSupport.TextureToRT) != 0;
-
-        var sheetRT = RenderTexture.GetTemporary(cols * outW, rows * outH, 0,
-            RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB, 1);
-        sheetRT.filterMode = FilterMode.Bilinear;
-        var prevActiveClear = RenderTexture.active;
-        RenderTexture.active = sheetRT;
-        GL.Clear(true, true, new Color(0, 0, 0, 0));
-        RenderTexture.active = prevActiveClear;
-
-        Texture2D cpuSheet = null;
-        if (!gpuCopySupported)
-        {
-            cpuSheet = new Texture2D(cols * outW, rows * outH,
-                TextureFormat.RGBA32, false, false);
-            var clear = new Color32[cpuSheet.width * cpuSheet.height];
-            cpuSheet.SetPixels32(clear);
-        }
-
-        // 禁用所有涉及 target 上的 Animator / Animation（去重）
+        // 禁用 target 上的 Animator / Animation，用 AnimationMode 手动采样
         var disabledAnimators = new Dictionary<Animator, bool>();
         var disabledAnimations = new Dictionary<Animation, bool>();
         foreach (var pair in validPairs)
@@ -1111,204 +1083,343 @@ public class TransparentScreenshot : EditorWindow
         }
 
         bool started = false;
-        bool canceled = false;
         string sheetPath = null;
-
         try
         {
             AnimationMode.StartAnimationMode();
             started = true;
 
-            for (int i = 0; i < frameCount; i++)
+            bool ok = CapturePipeline.BuildSheet(i =>
             {
-                if (EditorUtility.DisplayCancelableProgressBar(
-                    "Capturing Sequence",
-                    $"Frame {i + 1}/{frameCount}  ({validPairs.Count} pairs)",
-                    (i + 1) / (float)frameCount))
-                {
-                    canceled = true;
-                    break;
-                }
-
                 float t;
                 if (sequenceUseEndpoints && frameCount > 1)
                     t = i / (float)(frameCount - 1) * masterLength;
                 else
                     t = (i + 0.5f) / frameCount * masterLength;
 
-                // 对所有 pair 依次采样
                 AnimationMode.BeginSampling();
                 foreach (var pair in validPairs)
-                {
                     AnimationMode.SampleAnimationClip(pair.target, pair.clip, t);
-                }
                 AnimationMode.EndSampling();
 
-                ForceSkinnedMeshRenderersRefresh();
+                CapturePipeline.ForceSkinnedRefresh();
+                UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
 
-                var frameTex = RenderCurrentFrame(cam, outW, outH);
-                try
-                {
-                    int col = i % cols;
-                    int row = i / cols;
-                    int dstX = col * outW;
-                    int dstY = (rows - 1 - row) * outH;
-                    if (gpuCopySupported)
-                    {
-                        Graphics.CopyTexture(frameTex, 0, 0, 0, 0, outW, outH,
-                            sheetRT, 0, 0, dstX, dstY);
-                    }
-                    else
-                    {
-                        var px = frameTex.GetPixels32();
-                        cpuSheet.SetPixels32(dstX, dstY, outW, outH, px);
-                    }
+                return RenderCurrentFrame(sourceCam, outW, outH);
+            },
+                frameCount, cols, rows, outW, outH,
+                folderAbs, sheetFileName, framesDirName,
+                exportIndividualFrames, out sheetPath);
 
-                    if (exportIndividualFrames)
-                    {
-                        var fbytes = frameTex.EncodeToPNG();
-                        var fname = BuildSequenceFrameName(prefabName,
-                            validPairs[0].clip.name, i);
-                        var fpath = Path.Combine(framesDir, fname).Replace('\\', '/');
-                        File.WriteAllBytes(fpath, fbytes);
-                    }
-                }
-                finally
-                {
-                    Object.DestroyImmediate(frameTex);
-                }
-            }
-
-            if (!canceled)
-            {
-                Texture2D sheetTex;
-                if (gpuCopySupported)
-                {
-                    var prevActive2 = RenderTexture.active;
-                    RenderTexture.active = sheetRT;
-                    sheetTex = new Texture2D(sheetRT.width, sheetRT.height,
-                        TextureFormat.RGBA32, false, false);
-                    sheetTex.ReadPixels(new Rect(0, 0, sheetRT.width, sheetRT.height), 0, 0, false);
-                    sheetTex.Apply();
-                    RenderTexture.active = prevActive2;
-                }
-                else
-                {
-                    cpuSheet.Apply();
-                    sheetTex = cpuSheet;
-                    cpuSheet = null;
-                }
-
-                var bytes = sheetTex.EncodeToPNG();
-                Object.DestroyImmediate(sheetTex);
-
-                var sname = BuildSequenceSheetName(prefabName,
-                    validPairs[0].clip.name, stamp, cols, rows, outW, outH);
-                sheetPath = Path.Combine(folderAbs, sname).Replace('\\', '/');
-                File.WriteAllBytes(sheetPath, bytes);
-
+            if (ok)
                 Debug.Log($"<color=#7fcf6f>[Screenshot]</color> Sheet saved: {sheetPath} "
                         + $"(layout {cols}x{rows}, frame {outW}x{outH}, {validPairs.Count} pairs)");
-            }
             else
-            {
                 Debug.Log("[Screenshot] Sequence canceled.");
-            }
         }
         finally
         {
             if (started) AnimationMode.StopAnimationMode();
-            EditorUtility.ClearProgressBar();
-            RenderTexture.ReleaseTemporary(sheetRT);
-            if (cpuSheet != null) Object.DestroyImmediate(cpuSheet);
-
-            // 恢复所有 Animator / Animation 状态
             foreach (var kvp in disabledAnimators)
                 if (kvp.Key != null) kvp.Key.enabled = kvp.Value;
             foreach (var kvp in disabledAnimations)
                 if (kvp.Key != null) kvp.Key.enabled = kvp.Value;
-
-            if (!canceled && sheetPath != null)
+            if (!string.IsNullOrEmpty(sheetPath))
             {
-                var projectRoot = Directory.GetParent(Application.dataPath)
-                                    .FullName.Replace('\\', '/');
+                var projectRoot = Directory.GetParent(Application.dataPath).FullName.Replace('\\', '/');
                 if (sheetPath.StartsWith(projectRoot)) AssetDatabase.Refresh();
                 if (openFolderAfterSave) EditorUtility.RevealInFinder(sheetPath);
             }
         }
     }
 
-    private static Texture2D RenderOnce(Camera cam, int rw, int rh,
-        bool transparent, bool disablePost,
-        bool overrideClear, Color clearColor,
-        int cullingMask = -1)
+    // === Particle Sequence Capture ===
+
+    /// <summary>生成粒子扫描信息的显示字符串。</summary>
+    private string BuildParticleScanDisplay(GameObject root)
     {
-        var prevClearFlags = cam.clearFlags;
-        var prevBg         = cam.backgroundColor;
-        var prevTarget     = cam.targetTexture;
-        var prevCulling    = cam.cullingMask;
+        if (root == null) return "";
 
-#if UNITY_2019_3_OR_NEWER
-        UniversalAdditionalCameraData urpData = null;
-        bool prevPost = false;
-        cam.TryGetComponent(out urpData);
-        if (urpData != null)
+        var info = ParticleSequenceRender.BuildScanInfo(root);
+        if (info.systemCount == 0)
+            return "";
+
+        var sb = new StringBuilder();
+        for (int i = 0; i < info.systemCount; i++)
         {
-            prevPost = urpData.renderPostProcessing;
-            if (disablePost) urpData.renderPostProcessing = false;
+            sb.Append("  · ").Append(info.names[i])
+              .Append("  ").Append(info.durations[i].ToString("F1"))
+              .Append("s  ").Append(info.isLooping[i] ? "loop ✓" : "once")
+              .AppendLine();
         }
-#endif
 
-        // 相机 HDR 开启时用 ARGBHalf 保留 HDR 数据，避免亮部截断导致 Bloom 失效
-        var rtFormat = cam.allowHDR
-            ? RenderTextureFormat.ARGBHalf
-            : RenderTextureFormat.ARGB32;
+        if (info.maxDuration <= 0f)
+        {
+            sb.Append("↳ 未检测到有效时长");
+        }
+        else if (info.allLooping)
+        {
+            sb.Append("↳ 建议时长: ").Append(info.maxDuration.ToString("F1"))
+              .Append("s（捕获完整循环）");
+        }
+        else
+        {
+            sb.Append("↳ 建议范围: ").Append(info.minDuration.ToString("F1"))
+              .Append("s ~ ").Append(info.maxDuration.ToString("F1"))
+              .Append("s");
+        }
 
-        // MSAA 级别跟随相机设置，保持和 Game 视图一致
-        int msaaSamples = cam.allowMSAA ? Mathf.Max(1, QualitySettings.antiAliasing) : 1;
+        return sb.ToString();
+    }
 
-        var rt = RenderTexture.GetTemporary(rw, rh, 24,
-            rtFormat, RenderTextureReadWrite.Linear, msaaSamples);
+    /// <summary>执行粒子特效序列帧截图。</summary>
+    private void CaptureParticleSequence()
+    {
+        var cam = targetCamera != null ? targetCamera : Camera.main;
+        if (cam == null)
+        {
+            EditorUtility.DisplayDialog("Particle Sequence",
+                "找不到相机：请指定 Target Camera 或场景里有一个 MainCamera。", "OK");
+            return;
+        }
+        if (particleTarget == null)
+        {
+            EditorUtility.DisplayDialog("Particle Sequence",
+                "请先指定 Particle Target（拖入特效预制体根节点）。", "OK");
+            return;
+        }
 
+        // 检查有没有粒子系统
+        var checkPS = ParticleSequenceRender.GetAllSystems(particleTarget);
+        if (checkPS.Length == 0)
+        {
+            EditorUtility.DisplayDialog("Particle Sequence",
+                "指定的 GameObject 上未找到任何 ParticleSystem 组件。", "OK");
+            return;
+        }
+
+        int outW = width, outH = height;
+        if (useGameViewSize)
+        {
+            var gv = UnityEditor.Handles.GetMainGameViewSize();
+            outW = Mathf.Max(1, Mathf.RoundToInt(gv.x));
+            outH = Mathf.Max(1, Mathf.RoundToInt(gv.y));
+        }
+
+        // PrefabName 模式
+        string prefabName = null;
+        if (namingMode == NamingMode.PrefabName)
+        {
+            prefabName = GetSelectedGameObjectName();
+            if (string.IsNullOrEmpty(prefabName))
+            {
+                EditorUtility.DisplayDialog("Particle Sequence",
+                    "PrefabName 模式需要在 Hierarchy 中选中一个 GameObject。", "OK");
+                return;
+            }
+        }
+
+        int frameCount = Mathf.Max(1, Mathf.CeilToInt(particleDuration * sequenceFps));
+        int cols = Mathf.Max(1, sequenceColumns);
+        int rows = Mathf.CeilToInt(frameCount / (float)cols);
+
+        // Sheet 尺寸检查
+        long sheetPixels = (long)cols * outW * rows * outH;
+        if (sheetPixels > 16384L * 16384L)
+        {
+            if (!EditorUtility.DisplayDialog("Particle Sequence",
+                $"Sheet 大约 {cols * outW} x {rows * outH} 像素，"
+                + "可能超过 GPU 上限。是否继续？",
+                "继续", "取消")) return;
+        }
+
+        var folderAbs = GetAbsoluteOutputFolder();
+        var stamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
+
+        // 构建文件名
+        string sheetFileName;
+        string framesDirName = null;
+        string targetName = particleTarget.name;
+
+        if (namingMode == NamingMode.Default)
+        {
+            sheetFileName =
+                $"{fileNamePrefix}_{targetName}_{stamp}_sheet_{cols}x{rows}_{outW}x{outH}.png";
+            if (exportIndividualFrames)
+                framesDirName = $"{fileNamePrefix}_{targetName}_{stamp}_frames";
+        }
+        else
+        {
+            var sb = new StringBuilder();
+            if (addPrefix && !string.IsNullOrEmpty(fileNamePrefix))
+                sb.Append(fileNamePrefix).Append('_');
+            sb.Append(prefabName ?? targetName);
+            if (addTimestamp)
+                sb.Append('_').Append(stamp);
+            sb.Append("_sheet_").Append(cols).Append('x').Append(rows)
+              .Append('_').Append(outW).Append('x').Append(outH);
+            sb.Append(".png");
+            sheetFileName = sb.ToString();
+
+            if (exportIndividualFrames)
+            {
+                sb.Clear();
+                if (addPrefix && !string.IsNullOrEmpty(fileNamePrefix))
+                    sb.Append(fileNamePrefix).Append('_');
+                sb.Append(prefabName ?? targetName);
+                if (addTimestamp)
+                    sb.Append('_').Append(stamp);
+                sb.Append("_frames");
+                framesDirName = sb.ToString();
+            }
+        }
+
+
+        // --- 不透明：CaptureRGB 直接抓，和 Single/AnimSequence 完全一致 ---
+        if (!transparentBackground)
+        {
+            bool ok = CaptureParticleSequence_Opaque(
+                cam, particleTarget, checkPS,
+                particleDuration, frameCount, cols, rows,
+                outW, outH, sequenceUseEndpoints,
+                exportIndividualFrames,
+                folderAbs, sheetFileName, framesDirName);
+            if (ok)
+            {
+                var sheetPath = Path.Combine(folderAbs, sheetFileName).Replace('\\', '/');
+                var projectRoot = Directory.GetParent(Application.dataPath)
+                                    .FullName.Replace('\\', '/');
+                if (sheetPath.StartsWith(projectRoot))
+                    AssetDatabase.Refresh();
+                if (openFolderAfterSave)
+                    EditorUtility.RevealInFinder(sheetPath);
+            }
+            return;
+        }
+
+        // --- 透明：检查是否有深度遮挡 ---
+        var effectiveOccluders = new List<GameObject>();
+        for (int i = 0; i < occlusionOccluders.Count; i++)
+            if (occlusionOccluders[i] != null)
+                effectiveOccluders.Add(occlusionOccluders[i]);
+
+        bool transparentOk;
+        if (effectiveOccluders.Count > 0)
+        {
+            // 有深度遮挡 → ParticleSequenceRender 自定义三 pass（含遮挡判断）
+            transparentOk = ParticleSequenceRender.CaptureParticleSheet(
+                cam, particleTarget,
+                particleDuration, frameCount, cols,
+                outW, outH, superSize, sequenceUseEndpoints,
+                exportIndividualFrames,
+                folderAbs, sheetFileName, framesDirName,
+                effectiveOccluders);
+        }
+        else
+        {
+            // 无遮挡 → 直接用通用渲染（与 Single/AnimSequence 完全一致）
+            transparentOk = CaptureParticleSequence_Transparent(
+                cam, particleTarget, checkPS,
+                particleDuration, frameCount, cols, rows,
+                outW, outH, sequenceUseEndpoints,
+                exportIndividualFrames,
+                folderAbs, sheetFileName, framesDirName);
+        }
+
+        if (transparentOk)
+        {
+            var sheetPath = Path.Combine(folderAbs, sheetFileName).Replace('\\', '/');
+            var projectRoot = Directory.GetParent(Application.dataPath)
+                                .FullName.Replace('\\', '/');
+            if (sheetPath.StartsWith(projectRoot))
+                AssetDatabase.Refresh();
+            if (openFolderAfterSave)
+                EditorUtility.RevealInFinder(sheetPath);
+        }
+    }
+
+    // 粒子序列帧不透明模式：原始相机 + CaptureRGB，和 Single/Anim 一致
+    private bool CaptureParticleSequence_Opaque(
+        Camera cam, GameObject target, ParticleSystem[] allPS,
+        float duration, int frameCount, int cols, int rows,
+        int outW, int outH, bool useEndpoints,
+        bool exportIndividual,
+        string folderAbs, string sheetFileName, string framesDirName)
+    {
+        var savedStates = ParticleSequenceRender.FixRandomSeeds(allPS);
         try
         {
-            if (cullingMask >= 0) cam.cullingMask = cullingMask;
-            if (transparent)
+            bool ok = CapturePipeline.BuildSheet(i =>
             {
-                cam.clearFlags = CameraClearFlags.SolidColor;
-                cam.backgroundColor = new Color(0, 0, 0, 0);
-            }
-            else if (overrideClear)
-            {
-                cam.clearFlags = CameraClearFlags.SolidColor;
-                cam.backgroundColor = clearColor;
-            }
+                float t;
+                if (useEndpoints && frameCount > 1)
+                    t = i / (float)(frameCount - 1) * duration;
+                else
+                    t = (i + 0.5f) / frameCount * duration;
 
-            cam.targetTexture = rt;
-            cam.Render();
+                ParticleSequenceRender.SimulateAll(allPS, t);
+                var tex = CapturePipeline.CaptureRGB(cam, outW, outH);
+                if (tex == null)
+                    tex = CapturePipeline.RenderAndDownsample(cam, outW * superSize, outH * superSize,
+                        false, false, false, default, outW, outH, superSize);
+                return tex;
+            },
+                frameCount, cols, rows, outW, outH,
+                folderAbs, sheetFileName, framesDirName,
+                exportIndividual, out _);
 
-            var prevActive = RenderTexture.active;
-            RenderTexture.active = rt;
-            // linear=true: prevent Unity 2022+ auto sRGB conversion on ReadPixels
-            // from a Linear RT, so LinearToGamma is the only gamma application.
-            var tex = new Texture2D(rw, rh, TextureFormat.RGBA32, false, true);
-            tex.ReadPixels(new Rect(0, 0, rw, rh), 0, 0, false);
-            tex.Apply();
-            RenderTexture.active = prevActive;
-            return tex;
+            if (ok)
+                Debug.Log($"<color=#7fcf6f>[ParticleSequence]</color> Sheet saved: "
+                    + Path.Combine(folderAbs, sheetFileName)
+                    + $" (layout {cols}x{rows}, frame {outW}x{outH})");
+            return ok;
         }
         finally
         {
-            cam.targetTexture = prevTarget;
-            cam.clearFlags    = prevClearFlags;
-            cam.backgroundColor = prevBg;
-            cam.cullingMask   = prevCulling;
-#if UNITY_2019_3_OR_NEWER
-            if (urpData != null) urpData.renderPostProcessing = prevPost;
-#endif
-            RenderTexture.ReleaseTemporary(rt);
+            ParticleSequenceRender.RestoreRandomSeeds(savedStates);
+            ParticleSequenceRender.ClearAll(allPS);
         }
     }
+
+    // 粒子序列帧透明无遮挡：与 Single/AnimSequence 完全相同的渲染逻辑
+    private bool CaptureParticleSequence_Transparent(
+        Camera cam, GameObject target, ParticleSystem[] allPS,
+        float duration, int frameCount, int cols, int rows,
+        int outW, int outH, bool useEndpoints,
+        bool exportIndividual,
+        string folderAbs, string sheetFileName, string framesDirName)
+    {
+        var savedStates = ParticleSequenceRender.FixRandomSeeds(allPS);
+        try
+        {
+            bool ok = CapturePipeline.BuildSheet(i =>
+            {
+                float t;
+                if (useEndpoints && frameCount > 1)
+                    t = i / (float)(frameCount - 1) * duration;
+                else
+                    t = (i + 0.5f) / frameCount * duration;
+
+                ParticleSequenceRender.SimulateAll(allPS, t);
+                return CapturePipeline.CaptureFrame(cam, outW, outH, superSize, true);
+            },
+                frameCount, cols, rows, outW, outH,
+                folderAbs, sheetFileName, framesDirName,
+                exportIndividual, out _);
+
+            if (ok)
+                Debug.Log($"<color=#7fcf6f>[ParticleSequence]</color> Sheet saved: "
+                    + Path.Combine(folderAbs, sheetFileName)
+                    + $" (layout {cols}x{rows}, frame {outW}x{outH})");
+            return ok;
+        }
+        finally
+        {
+            ParticleSequenceRender.RestoreRandomSeeds(savedStates);
+            ParticleSequenceRender.ClearAll(allPS);
+        }
+    }
+
 
     // 双背景抠图：对每个像素用黑底/白底两张图反推 alpha
     //   黑底:  black = src.rgb * a + 0 * (1-a) = src.rgb * a
@@ -1316,153 +1427,13 @@ public class TransparentScreenshot : EditorWindow
     //   相减:  white - black = 1 - a   =>   a = 1 - mean(white - black)
     // RGB 用 PASS A（透明背景渲染结果，已含后处理），它对实心和半透像素都给出
     // 正确的"显示在透明上的最终颜色"。完全透明的像素 a≈0，其 RGB 不影响 PNG 显示。
-    private static Texture2D DualBackgroundAlpha(Texture2D rgbTex,
-        Texture2D blackTex, Texture2D whiteTex)
-    {
-        if (rgbTex.width != blackTex.width || rgbTex.height != blackTex.height ||
-            rgbTex.width != whiteTex.width || rgbTex.height != whiteTex.height)
-        {
-            Debug.LogError("[Screenshot] Pass size mismatch.");
-            return rgbTex;
-        }
-
-        int w = rgbTex.width, h = rgbTex.height;
-        var rgb = rgbTex.GetPixels32();
-        var b   = blackTex.GetPixels32();
-        var wt  = whiteTex.GetPixels32();
-
-        // 阈值：白-黑差异在此之下视为完全实心（避免噪点把实心像素错判成半透）
-        const int SOLID_EPS = 4;     // 0~255
-        // 完全透明的判定：alpha 极低
-        const int CLEAR_EPS = 2;
-
-        for (int i = 0; i < rgb.Length; i++)
-        {
-            // 三通道取均值更稳，单通道遇到纯色物体会偏
-            int dr = wt[i].r - b[i].r;
-            int dg = wt[i].g - b[i].g;
-            int db = wt[i].b - b[i].b;
-            // dr/dg/db 理论上 >=0；负值当噪点处理
-            if (dr < 0) dr = 0; if (dg < 0) dg = 0; if (db < 0) db = 0;
-            int diff = (dr + dg + db) / 3;
-
-            byte alpha;
-            if (diff <= SOLID_EPS)         alpha = 255;
-            else if (diff >= 255 - CLEAR_EPS) alpha = 0;
-            else                            alpha = (byte)(255 - diff);
-
-            rgb[i] = new Color32(rgb[i].r, rgb[i].g, rgb[i].b, alpha);
-        }
-
-        var result = new Texture2D(w, h, TextureFormat.RGBA32, false, false);
-        result.SetPixels32(rgb);
-        result.Apply();
-        return result;
-    }
 
     // 将 Texture2D 的 RGB 通道从线性空间转换到 sRGB 空间（Gamma 校正）。
-    // 所有 RenderOnce 返回的纹理数据都是线性的，PNG 输出前必须过一遍此方法。
-    private static void LinearToGamma(Texture2D tex)
-    {
-        var px = tex.GetPixels();
-        for (int i = 0; i < px.Length; i++)
-            px[i] = px[i].gamma;
-        tex.SetPixels(px);
-        tex.Apply();
-    }
-
-    // sRGB → Linear 逆 gamma 校正
-    private static void SrgbToLinear(Texture2D tex)
-    {
-        var px = tex.GetPixels();
-        for (int i = 0; i < px.Length; i++)
-            px[i] = px[i].linear;
-        tex.SetPixels(px);
-        tex.Apply();
-    }
-
     // 通过反射获取 Game 视图的内部 RenderTexture
-    private static RenderTexture GetGameViewRT()
-    {
-        var gameViewType = typeof(EditorWindow).Assembly.GetType("UnityEditor.GameView");
-        if (gameViewType == null) return null;
-
-        var getMainMethod = gameViewType.GetMethod("GetMainGameView",
-            BindingFlags.NonPublic | BindingFlags.Static);
-        EditorWindow gameView = null;
-        if (getMainMethod != null)
-            gameView = getMainMethod.Invoke(null, null) as EditorWindow;
-        if (gameView == null)
-            gameView = EditorWindow.GetWindow(gameViewType);
-        if (gameView == null) return null;
-
-        var flags = BindingFlags.Instance | BindingFlags.NonPublic;
-
-        // 先尝试 PlayModeView.m_TargetTexture（基类，更稳定）
-        var baseType = gameViewType.BaseType;
-        if (baseType != null)
-        {
-            var field = baseType.GetField("m_TargetTexture", flags);
-            if (field != null)
-            {
-                var rt = field.GetValue(gameView) as RenderTexture;
-                if (rt != null && rt.IsCreated() && rt.width > 0)
-                    return rt;
-            }
-        }
-
-        // 再尝试 GameView 自己的字段
-        foreach (var name in new[] { "m_RenderTexture", "m_TargetTexture", "m_Target" })
-        {
-            var field = gameViewType.GetField(name, flags);
-            if (field != null)
-            {
-                var rt = field.GetValue(gameView) as RenderTexture;
-                if (rt != null && rt.IsCreated() && rt.width > 0)
-                    return rt;
-            }
-        }
-
-        return null;
-    }
 
     // 将相机渲染到 Game 视图的内部 RT 并捕获 RGB（sRGB 空间）。
     // 失败时返回 null，调用方应 fallback 到原方案。
-    private static Texture2D CaptureGameViewRGB(Camera cam)
-    {
-        var gameViewRT = GetGameViewRT();
-        if (gameViewRT == null) return null;
 
-        var prevTarget = cam.targetTexture;
-        cam.targetTexture = gameViewRT;
-        cam.Render();
-        cam.targetTexture = prevTarget;
-
-        var prevActive = RenderTexture.active;
-        RenderTexture.active = gameViewRT;
-        var tex = new Texture2D(gameViewRT.width, gameViewRT.height,
-            TextureFormat.RGBA32, false, false);
-        tex.ReadPixels(new Rect(0, 0, gameViewRT.width, gameViewRT.height), 0, 0, false);
-        tex.Apply();
-        RenderTexture.active = prevActive;
-        return tex;
-    }
-
-    private static Texture2D Downsample(Texture2D src, int dstW, int dstH)
-    {
-        var tmp = RenderTexture.GetTemporary(dstW, dstH, 0,
-            RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB, 1);
-        tmp.filterMode = FilterMode.Bilinear;
-        var prev = RenderTexture.active;
-        Graphics.Blit(src, tmp);
-        RenderTexture.active = tmp;
-        var result = new Texture2D(dstW, dstH, TextureFormat.RGBA32, false, false);
-        result.ReadPixels(new Rect(0, 0, dstW, dstH), 0, 0, false);
-        result.Apply();
-        RenderTexture.active = prev;
-        RenderTexture.ReleaseTemporary(tmp);
-        return result;
-    }
 
     // ---- Shadow Catcher ----
 
@@ -1471,210 +1442,16 @@ public class TransparentScreenshot : EditorWindow
     /// in LINEAR color space (no gamma correction applied).
     /// Uses the same GameView-capture + dual-background-alpha pipeline as the normal mode.
     /// </summary>
-    private Texture2D RenderNormalTransparentLinear(Camera cam, int rw, int rh)
-    {
-        var gameViewTex = CaptureGameViewRGB(cam);
-        if (gameViewTex != null)
-        {
-            // GameView capture is sRGB → convert to linear
-            SrgbToLinear(gameViewTex);
 
-            // Resize to target resolution if needed
-            Texture2D rgbTex;
-            if (gameViewTex.width == rw && gameViewTex.height == rh)
-            {
-                rgbTex = gameViewTex;
-            }
-            else
-            {
-                var tmp = RenderTexture.GetTemporary(rw, rh, 0,
-                    RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear, 1);
-                tmp.filterMode = FilterMode.Bilinear;
-                Graphics.Blit(gameViewTex, tmp);
-                Object.DestroyImmediate(gameViewTex);
-                var prevActive = RenderTexture.active;
-                RenderTexture.active = tmp;
-                rgbTex = new Texture2D(rw, rh, TextureFormat.RGBA32, false, true);
-                rgbTex.ReadPixels(new Rect(0, 0, rw, rh), 0, 0, false);
-                rgbTex.Apply();
-                RenderTexture.active = prevActive;
-                RenderTexture.ReleaseTemporary(tmp);
-            }
 
-            var blackTex = RenderOnce(cam, rw, rh, false, true, true, Color.black);
-            var whiteTex = RenderOnce(cam, rw, rh, false, true, true, Color.white);
-            var result = DualBackgroundAlpha(rgbTex, blackTex, whiteTex);
-            Object.DestroyImmediate(rgbTex);
-            Object.DestroyImmediate(blackTex);
-            Object.DestroyImmediate(whiteTex);
-            return result;
-        }
-        else
-        {
-            // Fallback: 3-pass dual-background matting
-            var rgbTex  = RenderOnce(cam, rw, rh, true, false, false, default);
-            var blackTex = RenderOnce(cam, rw, rh, false, true, true, Color.black);
-            var whiteTex = RenderOnce(cam, rw, rh, false, true, true, Color.white);
-            var result = DualBackgroundAlpha(rgbTex, blackTex, whiteTex);
-            Object.DestroyImmediate(rgbTex);
-            Object.DestroyImmediate(blackTex);
-            Object.DestroyImmediate(whiteTex);
-            return result;
-        }
-    }
 
-    private Texture2D RenderCurrentFrameShadowCatcher(Camera cam, int outW, int outH)
-    {
-        int rw = outW * superSize;
-        int rh = outH * superSize;
 
-        var casterRenderers = GetRenderersFromList(shadowCasterRoots);
-        var receiverRenderers = GetRenderersFromList(shadowReceivers);
-
-        var casterEnabled = new bool[casterRenderers.Length];
-        var receiverEnabled = new bool[receiverRenderers.Length];
-        var receiverRecvShadow = new bool[receiverRenderers.Length];
-        for (int i = 0; i < casterRenderers.Length; i++)
-            casterEnabled[i] = casterRenderers[i].enabled;
-        for (int i = 0; i < receiverRenderers.Length; i++)
-        {
-            receiverEnabled[i] = receiverRenderers[i].enabled;
-            receiverRecvShadow[i] = receiverRenderers[i].receiveShadows;
-        }
-
-        try
-        {
-            // 1. Normal transparent screenshot — correct Game-view object colors (linear)
-            var normalTex = RenderNormalTransparentLinear(cam, rw, rh);
-
-            // 2. Object mask (receivers hidden, no PP)
-            SetRenderersEnabled(receiverRenderers, false);
-            var objectTex = RenderOnce(cam, rw, rh, true, true, false, default);
-            SetRenderersEnabled(receiverRenderers, true);
-
-            // 3. Ground with shadows
-            var fullTex = RenderOnce(cam, rw, rh, true, true, false, default);
-
-            // 4. Ground without shadows
-            SetRenderersEnabled(casterRenderers, false);
-            SetReceiveShadows(receiverRenderers, false);
-            var groundNoShadowTex = RenderOnce(cam, rw, rh, true, true, false, default);
-            SetReceiveShadows(receiverRenderers, true);
-            SetRenderersEnabled(casterRenderers, true);
-
-            // 5. Composite: objects from normalTex, shadows from ground diff
-            var finalTex = CompositeShadowWithNormalColors(
-                objectTex, fullTex, groundNoShadowTex, normalTex);
-
-            Object.DestroyImmediate(objectTex);
-            Object.DestroyImmediate(fullTex);
-            Object.DestroyImmediate(groundNoShadowTex);
-            Object.DestroyImmediate(normalTex);
-
-            if (superSize > 1)
-            {
-                var resized = Downsample(finalTex, outW, outH);
-                Object.DestroyImmediate(finalTex);
-                finalTex = resized;
-            }
-            LinearToGamma(finalTex);
-            return finalTex;
-        }
-        finally
-        {
-            for (int i = 0; i < casterRenderers.Length; i++)
-                if (casterRenderers[i] != null)
-                    casterRenderers[i].enabled = casterEnabled[i];
-            for (int i = 0; i < receiverRenderers.Length; i++)
-            {
-                if (receiverRenderers[i] != null)
-                {
-                    receiverRenderers[i].enabled = receiverEnabled[i];
-                    receiverRenderers[i].receiveShadows = receiverRecvShadow[i];
-                }
-            }
-        }
-    }
-
-    private static Renderer[] GetRenderersFromList(
-        List<GameObject> roots)
-    {
-        if (roots == null || roots.Count == 0) return new Renderer[0];
-        var list = new List<Renderer>();
-        for (int i = 0; i < roots.Count; i++)
-        {
-            if (roots[i] != null)
-            {
-                var r = roots[i].GetComponentsInChildren<Renderer>();
-                if (r != null && r.Length > 0) list.AddRange(r);
-            }
-        }
-        return list.ToArray();
-    }
-
-    private static void SetRenderersEnabled(Renderer[] renderers, bool enabled)
-    {
-        for (int i = 0; i < renderers.Length; i++)
-            if (renderers[i] != null)
-                renderers[i].enabled = enabled;
-    }
-
-    private static void SetReceiveShadows(Renderer[] renderers, bool enabled)
-    {
-        for (int i = 0; i < renderers.Length; i++)
-            if (renderers[i] != null)
-                renderers[i].receiveShadows = enabled;
-    }
 
     /// <summary>
     /// Composite: objects from normalTransparent render (correct Game-view colors),
     /// shadows extracted from ground passes underneath.
     /// All inputs are in LINEAR color space.
     /// </summary>
-    private Texture2D CompositeShadowWithNormalColors(
-        Texture2D objectTex, Texture2D fullTex,
-        Texture2D groundNoShadowTex, Texture2D normalTex)
-    {
-        int w = objectTex.width, h = objectTex.height;
-        var objPx  = objectTex.GetPixels32();
-        var fullPx = fullTex.GetPixels32();
-        var gndPx  = groundNoShadowTex.GetPixels32();
-        var normalPx = normalTex.GetPixels32();
-
-        const int OBJ_ALPHA_THRESH = 8;
-        const int GND_ALPHA_THRESH = 8;
-
-        for (int i = 0; i < objPx.Length; i++)
-        {
-            if (objPx[i].a >= OBJ_ALPHA_THRESH)
-            {
-                // Object pixel: use normal transparent screenshot color (Game-view accurate)
-                normalPx[i].a = 255;
-            }
-            else if (gndPx[i].a >= GND_ALPHA_THRESH)
-            {
-                // Ground pixel: compute shadow alpha from luminance difference
-                int lumC = (gndPx[i].r + gndPx[i].g + gndPx[i].b) / 3;
-                int lumB = (fullPx[i].r + fullPx[i].g + fullPx[i].b) / 3;
-                int diff = lumC - lumB;
-                if (diff < 0) diff = 0;
-                float ratio = lumC > 0 ? (float)diff / lumC : 0f;
-                int a = Mathf.RoundToInt(Mathf.Clamp01(ratio * shadowIntensity) * 255);
-                if (a > 255) a = 255;
-                normalPx[i] = new Color32(0, 0, 0, (byte)a);
-            }
-            else
-            {
-                // Background: transparent
-                normalPx[i] = new Color32(0, 0, 0, 0);
-            }
-        }
-
-        var result = new Texture2D(w, h, TextureFormat.RGBA32, false, false);
-        result.SetPixels32(normalPx);
-        result.Apply();
-        return result;
-    }
 
     // 获取 Hierarchy 中当前选中 GameObject 的名称。
     private static string GetSelectedGameObjectName()
@@ -1767,12 +1544,12 @@ public class TransparentScreenshot : EditorWindow
         height = EditorPrefs.GetInt(PREF_PREFIX + "h", 1024);
         superSize = EditorPrefs.GetInt(PREF_PREFIX + "ss", 2);
         transparentBackground = EditorPrefs.GetBool(PREF_PREFIX + "tbg", true);
-        keepPostProcessing = EditorPrefs.GetBool(PREF_PREFIX + "kpp", true);
-        outputFolder = EditorPrefs.GetString(PREF_PREFIX + "folder", "Screenshots");
+                outputFolder = EditorPrefs.GetString(PREF_PREFIX + "folder", "Screenshots");
         fileNamePrefix = EditorPrefs.GetString(PREF_PREFIX + "prefix", "shot");
         openFolderAfterSave = EditorPrefs.GetBool(PREF_PREFIX + "open", true);
         useGameViewSize = EditorPrefs.GetBool(PREF_PREFIX + "gvs", false);
         namingMode = (NamingMode)EditorPrefs.GetInt(PREF_PREFIX + "nm", 0);
+        captureMode = (CaptureMode)EditorPrefs.GetInt(PREF_PREFIX + "cm", 0);
         addPrefix = EditorPrefs.GetBool(PREF_PREFIX + "ap", true);
         addTimestamp = EditorPrefs.GetBool(PREF_PREFIX + "ats", true);
         addResolution = EditorPrefs.GetBool(PREF_PREFIX + "ar", true);
@@ -1780,9 +1557,14 @@ public class TransparentScreenshot : EditorWindow
         sequenceColumns = EditorPrefs.GetInt(PREF_PREFIX + "seqC", 8);
         exportIndividualFrames = EditorPrefs.GetBool(PREF_PREFIX + "seqInd", false);
         sequenceUseEndpoints = EditorPrefs.GetBool(PREF_PREFIX + "seqEnd", false);
-        enableShadowCatcher = EditorPrefs.GetBool(PREF_PREFIX + "scEn", false);
+        sequenceFps = EditorPrefs.GetInt(PREF_PREFIX + "seqFps", 30);
+        // Particle Sequence
+        particleDuration = EditorPrefs.GetFloat(PREF_PREFIX + "psDur", 5f);
+        var psTargetPath = EditorPrefs.GetString(PREF_PREFIX + "psTarget", "");
+        if (!string.IsNullOrEmpty(psTargetPath))
+            particleTarget = GameObject.Find(psTargetPath);
+enableShadowCatcher = EditorPrefs.GetBool(PREF_PREFIX + "scEn", false);
         shadowIntensity = EditorPrefs.GetFloat(PREF_PREFIX + "scInt", 1f);
-        shadowCatcherPPComposite = EditorPrefs.GetBool(PREF_PREFIX + "scPP", true);
         // Load shadow casters
         var castersJson = EditorPrefs.GetString(PREF_PREFIX + "scCasters", "");
         if (!string.IsNullOrEmpty(castersJson))
@@ -1844,6 +1626,26 @@ public class TransparentScreenshot : EditorWindow
         }
         if (shadowReceivers.Count == 0)
             shadowReceivers.Add(null);
+
+        // Load occlusion occluders
+        var occludersJson = EditorPrefs.GetString(PREF_PREFIX + "scOcc", "");
+        if (!string.IsNullOrEmpty(occludersJson))
+        {
+            try
+            {
+                var wrapper = JsonUtility.FromJson<GameObjectPathList>(occludersJson);
+                occlusionOccluders.Clear();
+                if (wrapper != null && wrapper.paths != null)
+                {
+                    foreach (var p in wrapper.paths)
+                        occlusionOccluders.Add(
+                            string.IsNullOrEmpty(p) ? null : GameObject.Find(p));
+                }
+            }
+            catch { /* ignore */ }
+        }
+        if (occlusionOccluders.Count == 0)
+            occlusionOccluders.Add(null);
 
         // Load anim pairs (new JSON-based persistence)
         var pairsJson = EditorPrefs.GetString(PREF_PREFIX + "seqPairs", "");
@@ -1911,12 +1713,12 @@ public class TransparentScreenshot : EditorWindow
         EditorPrefs.SetInt(PREF_PREFIX + "h", height);
         EditorPrefs.SetInt(PREF_PREFIX + "ss", superSize);
         EditorPrefs.SetBool(PREF_PREFIX + "tbg", transparentBackground);
-        EditorPrefs.SetBool(PREF_PREFIX + "kpp", keepPostProcessing);
-        EditorPrefs.SetString(PREF_PREFIX + "folder", outputFolder ?? "");
+                EditorPrefs.SetString(PREF_PREFIX + "folder", outputFolder ?? "");
         EditorPrefs.SetString(PREF_PREFIX + "prefix", fileNamePrefix ?? "shot");
         EditorPrefs.SetBool(PREF_PREFIX + "open", openFolderAfterSave);
         EditorPrefs.SetBool(PREF_PREFIX + "gvs", useGameViewSize);
         EditorPrefs.SetInt(PREF_PREFIX + "nm", (int)namingMode);
+        EditorPrefs.SetInt(PREF_PREFIX + "cm", (int)captureMode);
         EditorPrefs.SetBool(PREF_PREFIX + "ap", addPrefix);
         EditorPrefs.SetBool(PREF_PREFIX + "ats", addTimestamp);
         EditorPrefs.SetBool(PREF_PREFIX + "ar", addResolution);
@@ -1924,9 +1726,13 @@ public class TransparentScreenshot : EditorWindow
         EditorPrefs.SetInt(PREF_PREFIX + "seqC", sequenceColumns);
         EditorPrefs.SetBool(PREF_PREFIX + "seqInd", exportIndividualFrames);
         EditorPrefs.SetBool(PREF_PREFIX + "seqEnd", sequenceUseEndpoints);
-        EditorPrefs.SetBool(PREF_PREFIX + "scEn", enableShadowCatcher);
+        EditorPrefs.SetInt(PREF_PREFIX + "seqFps", sequenceFps);
+        // Particle Sequence
+        EditorPrefs.SetFloat(PREF_PREFIX + "psDur", particleDuration);
+        EditorPrefs.SetString(PREF_PREFIX + "psTarget",
+            particleTarget != null ? GetGameObjectPath(particleTarget) : "");
+EditorPrefs.SetBool(PREF_PREFIX + "scEn", enableShadowCatcher);
         EditorPrefs.SetFloat(PREF_PREFIX + "scInt", shadowIntensity);
-        EditorPrefs.SetBool(PREF_PREFIX + "scPP", shadowCatcherPPComposite);
         // Save shadow casters
         {
             var wrapper = new GameObjectPathList();
@@ -1942,6 +1748,14 @@ public class TransparentScreenshot : EditorWindow
                 wrapper.paths.Add(shadowReceivers[i] != null
                     ? GetGameObjectPath(shadowReceivers[i]) : "");
             EditorPrefs.SetString(PREF_PREFIX + "scReceivers", JsonUtility.ToJson(wrapper));
+        }
+        // Save occlusion occluders
+        {
+            var wrapper = new GameObjectPathList();
+            for (int i = 0; i < occlusionOccluders.Count; i++)
+                wrapper.paths.Add(occlusionOccluders[i] != null
+                    ? GetGameObjectPath(occlusionOccluders[i]) : "");
+            EditorPrefs.SetString(PREF_PREFIX + "scOcc", JsonUtility.ToJson(wrapper));
         }
         // 清除旧格式 key
         EditorPrefs.DeleteKey(PREF_PREFIX + "scCaster");

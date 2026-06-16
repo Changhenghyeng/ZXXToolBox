@@ -27,6 +27,7 @@ public class ZXXToolBox : EditorWindow
         ("Prefab Extractor",              "从场景提取子物体为独立 Prefab",           "预制体处理", PrefabExtractorTool.Open),
         ("Normalize Prefab Root",         "规范化根节点 Transform，重置为 identity  Ctrl+Shift+N", "预制体处理", PrefabRootNormalizerWindow.ShowWindow),
         ("Transparent Screenshot",        "截取透明背景的 Game 视图截图  Ctrl+Shift+X","其他",       TransparentScreenshot.OpenWindow),
+        ("Shading Mode",                  "切换选中模型的软硬边法线显示（非破坏性预览）", "其他",       ShadingModeToggleWindow.Open),
         ("Label Tool",                    "场景预制体名称标签显示工具",               "其他",       LabelManagerWindow.Open),
         ("Measure Tool",                  "三维测量：包围盒尺寸 / 距离 / 标尺",          "其他",       MeasureTool.Open),
         ("Git Path Navigator",          "粘贴 Git 路径自动定位到 Project 窗口  Ctrl+G",  "其他",       GitPathNavigator.ShowWindow),
