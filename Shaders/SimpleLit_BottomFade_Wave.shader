@@ -1,0 +1,254 @@
+Shader "Custom/SimpleLit_BottomFade_Wave"
+{
+    Properties
+    {
+        _BaseMap   ("Albedo (Base Map)", 2D)         = "white" {}
+        _BaseColor ("Base Color", Color)             = (1,1,1,1)
+
+        [Header(Wind)]
+        _WindDirection ("Wind Direction (XZ)", Vector) = (0.5, 0.3, 0, 0)
+        _WindStrength  ("Wind Strength", Range(0, 2))  = 0.3
+        _WindSpeed     ("Wind Speed", Range(0, 5))     = 1.2
+        _WindScale     ("Wind Wave Scale", Range(0.01, 1)) = 0.15
+        _WindChaos     ("Wind Chaos", Range(0, 1))     = 0.3
+
+        [Header(Bottom Fade)]
+        _FadeStart ("Fade Start (底部完全透明的世界Y)", Float) = 0.0
+        _FadeRange ("Fade Range (渐变宽度)",           Float) = 1.0
+
+        [Enum(UnityEngine.Rendering.CullMode)] _Cull ("Cull Mode", Float) = 2
+    }
+
+    SubShader
+    {
+        Tags
+        {
+            "RenderType"     = "Transparent"
+            "RenderPipeline" = "UniversalPipeline"
+            "Queue"          = "Transparent"
+        }
+
+        // Pass 1：深度预写（无 LightMode Tag，强制每帧执行）
+        Pass
+        {
+            Name "DepthPrepass"
+
+            ZWrite On
+            ZTest LEqual
+            ColorMask 0
+            Cull [_Cull]
+
+            HLSLPROGRAM
+            #pragma vertex DepthVert
+            #pragma fragment DepthFrag
+            #pragma multi_compile_instancing
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+            CBUFFER_START(UnityPerMaterial)
+                float4 _BaseMap_ST;
+                float4 _BaseColor;
+                float  _FadeStart;
+                float  _FadeRange;
+                float2 _WindDirection;
+                float  _WindStrength;
+                float  _WindSpeed;
+                float  _WindScale;
+                float  _WindChaos;
+            CBUFFER_END
+
+            // ---- Wind displacement shared by both passes ----
+            float3 CalculateWindOffset(float3 positionOS)
+            {
+                // 用世界坐标算相位，保证相邻草片摆动一致
+                float3 worldPos = TransformObjectToWorld(positionOS);
+                float  time     = _Time.y * _WindSpeed;
+
+                // 高度因子：根部不动，顶部摆动最大
+                float heightFactor = saturate(positionOS.y);
+
+                // 主波形
+                float wave1 = sin(worldPos.x * _WindScale + time)
+                            * cos(worldPos.z * _WindScale * 1.3 + time * 0.6);
+
+                // 高频扰动层，让摆动不那么整齐
+                float wave2 = sin(worldPos.z * _WindScale * 3.7 + time * 1.7)
+                            * cos(worldPos.x * _WindScale * 2.3 - time * 1.1);
+
+                float combined = wave1 + wave2 * _WindChaos;
+
+                float3 offset = float3(_WindDirection.x, 0, _WindDirection.y)
+                              * (combined * _WindStrength * heightFactor);
+
+                return offset;
+            }
+
+            struct DepthAttribs
+            {
+                float4 positionOS : POSITION;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
+            };
+
+            struct DepthVaryings
+            {
+                float4 positionCS : SV_POSITION;
+                float3 positionWS : TEXCOORD0;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
+            };
+
+            DepthVaryings DepthVert(DepthAttribs IN)
+            {
+                DepthVaryings OUT;
+                UNITY_SETUP_INSTANCE_ID(IN);
+                UNITY_TRANSFER_INSTANCE_ID(IN, OUT);
+
+                float3 posOS = IN.positionOS.xyz + CalculateWindOffset(IN.positionOS.xyz);
+                VertexPositionInputs posInputs = GetVertexPositionInputs(posOS);
+                OUT.positionCS = posInputs.positionCS;
+                OUT.positionWS = posInputs.positionWS;
+                return OUT;
+            }
+
+            half4 DepthFrag(DepthVaryings IN) : SV_Target
+            {
+                UNITY_SETUP_INSTANCE_ID(IN);
+                float fadeT = smoothstep(_FadeStart, _FadeStart + max(_FadeRange, 0.0001), IN.positionWS.y);
+                clip(fadeT - 0.01);
+                return 0;
+            }
+            ENDHLSL
+        }
+
+        // Pass 2：光照 + Alpha 混合
+        Pass
+        {
+            Name "ForwardLit"
+            Tags { "LightMode" = "UniversalForward" }
+
+            Blend SrcAlpha OneMinusSrcAlpha
+            ZWrite Off
+            ZTest LEqual
+            Cull [_Cull]
+
+            HLSLPROGRAM
+            #pragma vertex vert
+            #pragma fragment frag
+
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE
+            #pragma multi_compile _ _ADDITIONAL_LIGHTS_VERTEX _ADDITIONAL_LIGHTS
+            #pragma multi_compile _ _SHADOWS_SOFT
+            #pragma multi_compile_fog
+            #pragma multi_compile_instancing
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+
+            TEXTURE2D(_BaseMap);
+            SAMPLER(sampler_BaseMap);
+
+            CBUFFER_START(UnityPerMaterial)
+                float4 _BaseMap_ST;
+                float4 _BaseColor;
+                float  _FadeStart;
+                float  _FadeRange;
+                float2 _WindDirection;
+                float  _WindStrength;
+                float  _WindSpeed;
+                float  _WindScale;
+                float  _WindChaos;
+            CBUFFER_END
+
+            float3 CalculateWindOffset(float3 positionOS)
+            {
+                float3 worldPos = TransformObjectToWorld(positionOS);
+                float  time     = _Time.y * _WindSpeed;
+                float  heightFactor = saturate(positionOS.y);
+
+                float wave1 = sin(worldPos.x * _WindScale + time)
+                            * cos(worldPos.z * _WindScale * 1.3 + time * 0.6);
+                float wave2 = sin(worldPos.z * _WindScale * 3.7 + time * 1.7)
+                            * cos(worldPos.x * _WindScale * 2.3 - time * 1.1);
+                float combined = wave1 + wave2 * _WindChaos;
+
+                return float3(_WindDirection.x, 0, _WindDirection.y)
+                     * (combined * _WindStrength * heightFactor);
+            }
+
+            struct Attributes
+            {
+                float4 positionOS : POSITION;
+                float3 normalOS   : NORMAL;
+                float4 tangentOS  : TANGENT;
+                float2 uv         : TEXCOORD0;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
+            };
+
+            struct Varyings
+            {
+                float4 positionCS : SV_POSITION;
+                float2 uv         : TEXCOORD0;
+                float3 positionWS : TEXCOORD1;
+                float3 normalWS   : TEXCOORD2;
+                float3 viewDirWS  : TEXCOORD3;
+                float  fogFactor  : TEXCOORD4;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
+            };
+
+            Varyings vert(Attributes IN)
+            {
+                Varyings OUT;
+                UNITY_SETUP_INSTANCE_ID(IN);
+                UNITY_TRANSFER_INSTANCE_ID(IN, OUT);
+
+                float3 posOS = IN.positionOS.xyz + CalculateWindOffset(IN.positionOS.xyz);
+
+                VertexPositionInputs posInputs  = GetVertexPositionInputs(posOS);
+                VertexNormalInputs   normInputs = GetVertexNormalInputs(IN.normalOS, IN.tangentOS);
+
+                OUT.positionCS = posInputs.positionCS;
+                OUT.positionWS = posInputs.positionWS;
+                OUT.normalWS   = normInputs.normalWS;
+                OUT.viewDirWS  = GetWorldSpaceViewDir(posInputs.positionWS);
+                OUT.uv         = TRANSFORM_TEX(IN.uv, _BaseMap);
+                OUT.fogFactor  = ComputeFogFactor(posInputs.positionCS.z);
+
+                return OUT;
+            }
+
+            half4 frag(Varyings IN) : SV_Target
+            {
+                UNITY_SETUP_INSTANCE_ID(IN);
+
+                half4 albedo = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, IN.uv) * _BaseColor;
+
+                // FadeStart = 完全透明起点，FadeStart + FadeRange = 完全不透明终点
+                float fadeT = smoothstep(_FadeStart, _FadeStart + max(_FadeRange, 0.0001), IN.positionWS.y);
+
+                InputData inputData;
+                ZERO_INITIALIZE(InputData, inputData);
+                inputData.positionWS      = IN.positionWS;
+                inputData.normalWS        = normalize(IN.normalWS);
+                inputData.viewDirectionWS = normalize(IN.viewDirWS);
+                inputData.fogCoord        = IN.fogFactor;
+                inputData.shadowCoord     = TransformWorldToShadowCoord(IN.positionWS);
+                inputData.bakedGI         = SampleSH(inputData.normalWS);
+
+                SurfaceData surfaceData;
+                ZERO_INITIALIZE(SurfaceData, surfaceData);
+                surfaceData.albedo    = albedo.rgb;
+                surfaceData.alpha     = albedo.a * fadeT;
+                surfaceData.specular  = half3(0, 0, 0);  // 无高光
+                surfaceData.occlusion = 1.0;
+
+                half4 color = UniversalFragmentBlinnPhong(inputData, surfaceData);
+                color.rgb   = MixFog(color.rgb, IN.fogFactor);
+                color.a     = surfaceData.alpha;
+
+                return color;
+            }
+            ENDHLSL
+        }
+    }
+
+    FallBack "Universal Render Pipeline/Simple Lit"
+}

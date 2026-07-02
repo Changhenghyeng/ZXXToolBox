@@ -4,7 +4,7 @@ using UnityEditor;
 
 namespace ShadowBakerTool.Editor
 {
-    public enum DecalShaderType { URP_Unlit_Multiply, ShadowDecal_URP }
+    public enum DecalShaderType { URP_Unlit_Multiply, ShadowDecal_Gradient_URP }
 
     public class DecalGenerateSettings
     {
@@ -25,7 +25,7 @@ namespace ShadowBakerTool.Editor
     public static class ShadowDecalGenerator
     {
         private const string URPUnlitShader = "Universal Render Pipeline/Unlit";
-        private const string CustomDecalShader = "Custom/ShadowDecal_URP";
+        private const string CustomDecalShader = "Custom/ShadowDecal_Gradient_URP";
 
         /// <summary>
         /// Build a quad mesh + material + GameObject from a bake result, save it as a prefab.
@@ -39,7 +39,7 @@ namespace ShadowBakerTool.Editor
                 return null;
             }
 
-            string shaderName = opts.ShaderType == DecalShaderType.ShadowDecal_URP
+            string shaderName = opts.ShaderType == DecalShaderType.ShadowDecal_Gradient_URP
                 ? CustomDecalShader : URPUnlitShader;
 
             var shader = Shader.Find(shaderName);
@@ -69,12 +69,23 @@ namespace ShadowBakerTool.Editor
                 name = opts.AssetName + "_ShadowMat"
             };
 
-            if (opts.ShaderType == DecalShaderType.ShadowDecal_URP)
+            if (opts.ShaderType == DecalShaderType.ShadowDecal_Gradient_URP)
             {
-                // Custom shader: SrcAlpha blend + Z-bias. Intensity is encoded in _BaseColor.a.
                 mat.SetTexture("_BaseMap", bake.Texture);
                 mat.SetColor("_BaseColor", opts.ShadowColor);
-                mat.SetFloat("_Intensity", 1f);
+
+                // The shader's CustomEditor normally applies the transparent/multiply setup when
+                // the shader is assigned in the inspector. A code-created material skips that, so
+                // do it explicitly here — otherwise the material stays in the opaque queue (2000)
+                // and _BaseColor.a cannot drive the shadow opacity (multiply needs _ALPHAMODULATE_ON).
+                mat.SetFloat("_Surface", 1f);   // Transparent
+                mat.SetFloat("_Blend", 3f);     // Multiply
+                mat.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.DstColor); // 2
+                mat.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.Zero);     // 0
+                mat.SetFloat("_ZWrite", 0f);
+                mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                mat.EnableKeyword("_ALPHAMODULATE_ON");
+                mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent; // 3000
             }
             else
             {

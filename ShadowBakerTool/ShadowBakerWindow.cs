@@ -41,6 +41,13 @@ namespace ShadowBakerTool.Editor
         private bool _disableCastShadows = true;
         private bool _skipTransparentMaterials = true;
 
+        // --- Gradient ---
+        private bool _enableGradient = false;
+        private float _gradientAngle = 0f;
+        private float _gradientPosition = 0.5f;
+        private float _gradientWidth = 1f;
+        private Color _gradientColor = new Color(1, 1, 1, 1);
+
         // --- Output ---
         private string _outputFolder = "Assets/BakedShadows";
 
@@ -72,7 +79,7 @@ namespace ShadowBakerTool.Editor
 
             EditorGUILayout.LabelField("Shadow Baker", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
-                "Bakes a soft top-down shadow texture for a building and generates a ground-decal quad.",
+                "为建筑烘培一张柔和的俯视投影贴图，并生成对应的地面贴花面片。",
                 MessageType.None);
 
             DrawSourceSection();
@@ -113,9 +120,9 @@ namespace ShadowBakerTool.Editor
 
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("从选中项填入"))
+                if (GUILayout.Button("Fill From Selection"))
                     FillBatchFromSelection();
-                if (GUILayout.Button("清空", GUILayout.Width(60)))
+                if (GUILayout.Button("Clear", GUILayout.Width(60)))
                     _batchTargets.Clear();
             }
 
@@ -132,11 +139,11 @@ namespace ShadowBakerTool.Editor
             }
             if (removeIdx >= 0) _batchTargets.RemoveAt(removeIdx);
 
-            if (GUILayout.Button("+ 添加"))
+            if (GUILayout.Button("+ Add"))
                 _batchTargets.Add(null);
 
             int valid = _batchTargets.FindAll(t => t != null).Count;
-            EditorGUILayout.LabelField($"有效目标: {valid}", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField($"Valid Targets: {valid}", EditorStyles.miniLabel);
         }
 
         private void FillBatchFromSelection()
@@ -175,7 +182,7 @@ namespace ShadowBakerTool.Editor
                     break;
                 case LightSourceMode.DirectionVector:
                     _lightDir = EditorGUILayout.Vector3Field("Direction (world)", _lightDir);
-                    EditorGUILayout.HelpBox("Light points from sun toward ground. Y should be negative.", MessageType.None);
+                    EditorGUILayout.HelpBox("光从太阳指向地面，Y 分量应为负值。", MessageType.None);
                     break;
             }
 
@@ -205,17 +212,16 @@ namespace ShadowBakerTool.Editor
                 _samples = EditorGUILayout.IntSlider("Distance Samples", _samples, 8, 96);
 
                 EditorGUILayout.HelpBox(
-                    "Distance-field falloff: pixel darkness depends on distance from the shadow's edge. " +
-                    "Contact areas stay deep; far edges fade out smoothly.\n" +
-                    "• Falloff Distance: how many pixels the soft halo extends.\n" +
-                    "• Curve > 1 = stays dark longer then falls off fast (solid core).\n" +
-                    "• Curve < 1 = fades immediately (very soft, like ambient occlusion).",
+                    "距离场柔边：像素深浅取决于到影子边缘的距离。接触处保持深色，远端边缘平滑淡出。\n" +
+                    "• Falloff Distance：柔边光晕向外延伸的像素数。\n" +
+                    "• Curve > 1：深色保持更久、再快速衰减（实心核心）。\n" +
+                    "• Curve < 1：立即淡出（非常柔和，类似环境光遮蔽）。",
                     MessageType.None);
             }
             else
             {
                 _falloffPx = EditorGUILayout.Slider("Blur Radius (px)", _falloffPx, 1f, 40f);
-                EditorGUILayout.HelpBox("Plain uniform Gaussian blur.", MessageType.None);
+                EditorGUILayout.HelpBox("普通的均匀高斯模糊。", MessageType.None);
             }
 
             // Updated padding UI (fixed world units)
@@ -223,11 +229,32 @@ namespace ShadowBakerTool.Editor
             _footprintPadding = Mathf.Max(0f, _footprintPadding);
 
             EditorGUILayout.HelpBox(
-                "Padding in world units (meters) around the shadow. Smaller " +
-                "values = tighter fit & higher UV utilization, but if padding " +
-                "is less than FalloffPx in world units, the halo will be clipped.\n" +
-                "Recommended: 0.1-0.3m for most buildings.",
+                "影子四周的留白，单位为世界单位（米）。值越小贴合越紧、UV 利用率越高；" +
+                "但若留白小于 FalloffPx 换算成的世界尺寸，光晕会被裁掉。\n" +
+                "推荐：大多数建筑用 0.1-0.3 米。",
                 MessageType.None);
+
+            // Gradient
+            EditorGUILayout.Space(4);
+            _enableGradient = EditorGUILayout.Toggle("Enable Gradient", _enableGradient);
+            if (_enableGradient)
+            {
+                EditorGUI.indentLevel++;
+                _gradientAngle = EditorGUILayout.Slider("Angle", _gradientAngle, 0f, 360f);
+                _gradientPosition = EditorGUILayout.Slider("Position", _gradientPosition, 0f, 1f);
+                _gradientWidth = EditorGUILayout.Slider("Width", _gradientWidth, 0f, 1f);
+                _gradientColor = EditorGUILayout.ColorField(new GUIContent(
+                    "Color",
+                    "渐变目标颜色。RGB=色调，Alpha=渐变强度（0=无效果，1=完全过渡）。\n" +
+                    "例如白色 Alpha=0.1 → 影子只轻微变淡 10%。"),
+                    _gradientColor, true, true, false);
+                EditorGUILayout.HelpBox(
+                    "Angle: 0°=上→下, 90°=左→右, 180°=下→上, 270°=右→左\n" +
+                    "Position: 渐变过渡的中心位置 (0=起点端, 1=终点端)\n" +
+                    "Width: 过渡带的宽度 (0=锐利边界, 1=铺满全图)",
+                    MessageType.None);
+                EditorGUI.indentLevel--;
+            }
         }
 
         private void DrawDecalSection()
@@ -241,8 +268,12 @@ namespace ShadowBakerTool.Editor
                 "颜色 = 影子色调 (RGB) + 强度 (Alpha)"),
                 _shadowColor, true, true, false);
             _attachUnderBuilding = EditorGUILayout.Toggle("Attach Under Building", _attachUnderBuilding);
-            _disableCastShadows = EditorGUILayout.Toggle("烘培后关闭 Cast Shadows", _disableCastShadows);
-            _skipTransparentMaterials = EditorGUILayout.Toggle("跳过半透材质（不参与烘培）", _skipTransparentMaterials);
+            _disableCastShadows = EditorGUILayout.Toggle(new GUIContent(
+                "Disable Cast Shadows After Bake",
+                "烘培完成后，把参与烘培的网格的 Cast Shadows 关掉。"), _disableCastShadows);
+            _skipTransparentMaterials = EditorGUILayout.Toggle(new GUIContent(
+                "Skip Transparent Materials",
+                "跳过半透明材质的子网格，不计入影子剪影。"), _skipTransparentMaterials);
         }
 
         private void DrawOutputSection()
@@ -264,8 +295,8 @@ namespace ShadowBakerTool.Editor
                         }
                         else
                         {
-                            EditorUtility.DisplayDialog("Invalid folder",
-                                "Please pick a folder inside the project's Assets directory.", "OK");
+                            EditorUtility.DisplayDialog("无效目录",
+                                "请选择工程 Assets 目录内的文件夹。", "OK");
                         }
                     }
                 }
@@ -313,8 +344,17 @@ namespace ShadowBakerTool.Editor
                         $"{target.name} ({i + 1}/{valid.Count})",
                         (float)i / valid.Count);
 
-                    if (BakeOneTarget(target))
-                        success++;
+                    // Isolate per-target failures: an exception here must NOT escape OnGUI, or it
+                    // corrupts the IMGUI layout stack ("Invalid GUILayout state").
+                    try
+                    {
+                        if (BakeOneTarget(target))
+                            success++;
+                    }
+                    catch (System.Exception e)
+                    {
+                        Debug.LogError($"[ShadowBaker] '{target.name}' 烘培失败，已跳过：{e.Message}\n{e}");
+                    }
                 }
             }
             finally
@@ -330,8 +370,8 @@ namespace ShadowBakerTool.Editor
         private bool BakeOneTarget(GameObject target)
         {
             bool isSceneObject = target.scene.IsValid() && !string.IsNullOrEmpty(target.scene.name);
-            GameObject loadedPrefab = null;
-            string prefabPath = null;
+            GameObject loadedPrefab = null;   // editable copy — ONLY for real .prefab files
+            string prefabPath = null;          // source asset path (.prefab, .fbx, … or null)
             Transform attachTo = null;
 
             var targetRenderers = new List<MeshRenderer>();
@@ -339,31 +379,46 @@ namespace ShadowBakerTool.Editor
             if (isSceneObject)
             {
                 attachTo = target.transform;
-                // Bake from the SCENE renderers (correct world positions)
+                // Bake from the SCENE renderers (correct world positions). Works for FBX/model
+                // instances, prefab instances, and plain scene objects alike.
                 targetRenderers.AddRange(target.GetComponentsInChildren<MeshRenderer>(false));
-                // Also get prefab path for saving cast-shadow changes later
+                // Source asset path — only used to write cast-shadow changes back to a .prefab.
                 prefabPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(target);
-                if (!string.IsNullOrEmpty(prefabPath))
-                {
+                // LoadPrefabContents only accepts real .prefab files; an FBX/model source would
+                // throw "is not a prefab file". Guard it so models bake from the scene instead.
+                if (IsRegularPrefab(prefabPath))
                     loadedPrefab = PrefabUtility.LoadPrefabContents(prefabPath);
-                }
             }
             else
             {
                 prefabPath = AssetDatabase.GetAssetPath(target);
-                if (!string.IsNullOrEmpty(prefabPath))
+                if (IsRegularPrefab(prefabPath))
+                {
+                    // Regular .prefab asset: edit an isolated copy.
                     loadedPrefab = PrefabUtility.LoadPrefabContents(prefabPath);
-                if (loadedPrefab != null)
-                    targetRenderers.AddRange(loadedPrefab.GetComponentsInChildren<MeshRenderer>(false));
+                    if (loadedPrefab != null)
+                        targetRenderers.AddRange(loadedPrefab.GetComponentsInChildren<MeshRenderer>(false));
+                }
+                else
+                {
+                    // FBX / model asset (or any other GameObject asset): read renderers straight
+                    // from the imported asset — LoadPrefabContents can't open these.
+                    var assetRoot = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+                    if (assetRoot != null)
+                        targetRenderers.AddRange(assetRoot.GetComponentsInChildren<MeshRenderer>(false));
+                }
             }
 
-            if (prefabPath == null && !isSceneObject)
+            if (string.IsNullOrEmpty(prefabPath) && !isSceneObject)
             {
                 Debug.LogWarning($"[ShadowBaker] '{target.name}' is not a valid asset, skipped.");
                 return false;
             }
 
-            targetRenderers.RemoveAll(r => r == null);
+            // Drop nulls and any previously-baked shadow decals. A leftover "*_ShadowDecal"
+            // quad would otherwise inflate the footprint (it's counted) but be skipped from the
+            // silhouette (it's transparent), shrinking the real shadow toward a blank/white map.
+            targetRenderers.RemoveAll(r => r == null || IsShadowDecal(r));
             if (targetRenderers.Count == 0)
             {
                 Debug.LogWarning($"[ShadowBaker] '{target.name}' has no MeshRenderers, skipped.");
@@ -385,6 +440,11 @@ namespace ShadowBakerTool.Editor
                 Samples = _samples,
                 FootprintPadding = _footprintPadding,
                 SkipTransparentMaterials = _skipTransparentMaterials,
+                EnableGradient = _enableGradient,
+                GradientAngle = _gradientAngle,
+                GradientPosition = _gradientPosition,
+                GradientWidth = _gradientWidth,
+                GradientColor = _gradientColor,
                 OutputFolder = _outputFolder,
                 AssetName = target.name,
             };
@@ -402,17 +462,19 @@ namespace ShadowBakerTool.Editor
             {
                 if (loadedPrefab != null)
                 {
-                    // Prefab instance or asset: modify the prefab asset only
+                    // Regular .prefab: modify the prefab asset copy and save it back.
                     var prefabRenderers = new List<MeshRenderer>();
                     prefabRenderers.AddRange(loadedPrefab.GetComponentsInChildren<MeshRenderer>(false));
                     DisableCastShadowsOnRenderers(prefabRenderers);
                     PrefabUtility.SaveAsPrefabAsset(loadedPrefab, prefabPath);
                 }
-                else
+                else if (isSceneObject)
                 {
-                    // Pure scene object: modify directly
+                    // Scene instance (incl. FBX/model instances): modify the instance renderers.
                     DisableCastShadowsOnRenderers(targetRenderers);
                 }
+                // else: an FBX/model baked straight from the asset — cast-shadow state can't be
+                // persisted into an imported model, so we leave it untouched.
             }
 
             if (loadedPrefab != null)
@@ -428,6 +490,11 @@ namespace ShadowBakerTool.Editor
                 ShadowColor = _shadowColor,
                 ShaderType = _decalShader,
             };
+
+            // Replace any previous "*_ShadowDecal" under the building instead of stacking a new
+            // one on top, so re-baking stays clean and old decals don't pollute later bakes.
+            if (isSceneObject)
+                RemoveExistingDecals(target);
 
             var decal = ShadowDecalGenerator.Generate(result, opts);
             if (decal != null)
@@ -450,6 +517,45 @@ namespace ShadowBakerTool.Editor
                 Debug.Log($"[ShadowBaker] Disabled Cast Shadows on {count} renderers");
         }
 
+        // LoadPrefabContents / SaveAsPrefabAsset only work on real .prefab files. FBX and other
+        // imported models are "model prefabs" and must be handled via the scene instance or
+        // AssetDatabase.LoadAssetAtPath instead — calling LoadPrefabContents on them throws
+        // "is not a prefab file".
+        private static bool IsRegularPrefab(string path)
+        {
+            return !string.IsNullOrEmpty(path)
+                && path.EndsWith(".prefab", System.StringComparison.OrdinalIgnoreCase);
+        }
+
+        // A previously-generated ground shadow decal. Identified by the generator's naming
+        // convention ("<asset>_ShadowDecal") or by the dedicated decal shader. Such objects must
+        // never be baked as if they were the building geometry.
+        private static bool IsShadowDecal(MeshRenderer r)
+        {
+            if (r == null) return false;
+            if (r.gameObject.name.EndsWith("_ShadowDecal", System.StringComparison.OrdinalIgnoreCase))
+                return true;
+            foreach (var m in r.sharedMaterials)
+                if (m != null && m.shader != null && m.shader.name == "Custom/ShadowDecal_Gradient_URP")
+                    return true;
+            return false;
+        }
+
+        // Destroy any "*_ShadowDecal" objects under root so a re-bake replaces the previous decal
+        // instead of stacking new ones on top. Only scene instances are touched.
+        private static void RemoveExistingDecals(GameObject root)
+        {
+            if (root == null) return;
+            var transforms = root.GetComponentsInChildren<Transform>(true);
+            foreach (var t in transforms)
+            {
+                if (t == null || t == root.transform) continue;
+                var go = t.gameObject;
+                if (go != null && go.name.EndsWith("_ShadowDecal", System.StringComparison.OrdinalIgnoreCase))
+                    Undo.DestroyObjectImmediate(go);
+            }
+        }
+
         // ── EditorPrefs persistence (used by Workflow) ──
         private const string PrefKey = "ShadowBaker.Settings";
 
@@ -469,6 +575,9 @@ namespace ShadowBakerTool.Editor
             public float yOffset;
             public float shadowColorR, shadowColorG, shadowColorB, shadowColorA;
             public bool attachUnderBuilding, disableCastShadows, skipTransparent;
+            public bool enableGradient;
+            public float gradientAngle, gradientPosition, gradientWidth;
+            public float gradientColorR, gradientColorG, gradientColorB, gradientColorA;
             public string outputFolder;
         }
 
@@ -489,6 +598,11 @@ namespace ShadowBakerTool.Editor
                 yOffset = _yOffset,
                 shadowColorR = _shadowColor.r, shadowColorG = _shadowColor.g, shadowColorB = _shadowColor.b, shadowColorA = _shadowColor.a,
                 attachUnderBuilding = _attachUnderBuilding, disableCastShadows = _disableCastShadows, skipTransparent = _skipTransparentMaterials,
+                enableGradient = _enableGradient,
+                gradientAngle = _gradientAngle,
+                gradientPosition = _gradientPosition,
+                gradientWidth = _gradientWidth,
+                gradientColorR = _gradientColor.r, gradientColorG = _gradientColor.g, gradientColorB = _gradientColor.b, gradientColorA = _gradientColor.a,
                 outputFolder = _outputFolder,
             };
             EditorPrefs.SetString(PrefKey, JsonUtility.ToJson(s));
@@ -516,6 +630,11 @@ namespace ShadowBakerTool.Editor
                 _attachUnderBuilding = s.attachUnderBuilding;
                 _disableCastShadows = s.disableCastShadows;
                 _skipTransparentMaterials = s.skipTransparent;
+                _enableGradient = s.enableGradient;
+                _gradientAngle = s.gradientAngle;
+                _gradientPosition = s.gradientPosition;
+                _gradientWidth = s.gradientWidth;
+                _gradientColor = new Color(s.gradientColorR, s.gradientColorG, s.gradientColorB, s.gradientColorA);
                 _outputFolder = s.outputFolder;
             }
             catch { /* ignore corrupt data */ }

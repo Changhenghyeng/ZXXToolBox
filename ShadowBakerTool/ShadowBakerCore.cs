@@ -37,6 +37,12 @@ namespace ShadowBakerTool.Editor
         public float FootprintPadding = 0.2f;
         // Whether to skip semi-transparent materials in the shadow silhouette
         public bool SkipTransparentMaterials;
+        // Gradient overlay on the output shadow texture
+        public bool EnableGradient = false;
+        public float GradientAngle = 0f;     // degrees, 0=top→bottom, 90=left→right
+        public float GradientPosition = 0.5f; // 0-1, center of the gradient transition zone
+        public float GradientWidth = 1f;     // 0-1, width of the transition zone
+        public Color GradientColor = new Color(1, 1, 1, 1); // target color at the far end of the gradient
         // Output
         public string OutputFolder = "Assets/BakedShadows";
         public string AssetName = "Building";
@@ -295,11 +301,15 @@ namespace ShadowBakerTool.Editor
                     {
                         if (s.SkipTransparentMaterials && sm < mats.Length && mats[sm] != null)
                         {
-                            // Skip submeshes with semi-transparent materials
-                            float a = mats[sm].GetColor("_BaseColor").a;
-                            if (a < 0.99f) continue;
-                            // Also skip if surface type is Transparent
-                            if (mats[sm].HasProperty("_Surface") && mats[sm].GetFloat("_Surface") > 0.5f)
+                            var subMat = mats[sm];
+                            // Only treat the submesh as transparent when the material actually
+                            // exposes these properties. Calling GetColor/GetFloat on a shader that
+                            // lacks them (e.g. Custom/BakedLightMap has no _BaseColor) logs a Unity
+                            // error AND returns 0 — which would wrongly skip OPAQUE geometry and
+                            // leave the building out of the silhouette (blank/white shadow).
+                            if (subMat.HasProperty("_BaseColor") && subMat.GetColor("_BaseColor").a < 0.99f)
+                                continue;
+                            if (subMat.HasProperty("_Surface") && subMat.GetFloat("_Surface") > 0.5f)
                                 continue;
                         }
                         cmd.DrawMesh(mesh, r.transform.localToWorldMatrix, silhouetteMat, sm, 0);
@@ -410,6 +420,53 @@ namespace ShadowBakerTool.Editor
                     float mask = (1f - p.r) * intensityFactor;
                     float v = 1f - mask;
                     flippedPixels[dstRowStart + x] = new Color(v, v, v, 1f);
+                }
+            }
+
+            // Apply gradient overlay if enabled
+            if (s.EnableGradient)
+            {
+                float angleRad = s.GradientAngle * Mathf.Deg2Rad;
+                float dirU = Mathf.Sin(angleRad);
+                float dirV = Mathf.Cos(angleRad);
+
+                // Compute the projection range of the [0,1]×[0,1] UV square onto this direction
+                float p1 = 0f, p2 = dirU, p3 = dirV, p4 = dirU + dirV;
+                float minProj = Mathf.Min(Mathf.Min(p1, p2), Mathf.Min(p3, p4));
+                float maxProj = Mathf.Max(Mathf.Max(p1, p2), Mathf.Max(p3, p4));
+                float projRange = maxProj - minProj;
+
+                // Map Position/Width to a [0,1] blend range
+                float halfW = Mathf.Clamp01(s.GradientWidth) * 0.5f;
+                float center = Mathf.Clamp01(s.GradientPosition);
+                float blendStart = Mathf.Max(0f, center - halfW);
+                float blendEnd = Mathf.Min(1f, center + halfW);
+                float blendRange = blendEnd - blendStart;
+
+                for (int y = 0; y < h; y++)
+                {
+                    for (int x = 0; x < w; x++)
+                    {
+                        float u = (float)x / Mathf.Max(w - 1, 1);
+                        float v = (float)y / Mathf.Max(h - 1, 1);
+                        float proj = u * dirU + v * dirV;
+                        float rawT = projRange > 0.0001f ? (proj - minProj) / projRange : 0f;
+
+                        // Remap: rawT in [blendStart, blendEnd] → factor in [0, 1]
+                        float t;
+                        if (rawT <= blendStart)
+                            t = 0f;
+                        else if (rawT >= blendEnd)
+                            t = 1f;
+                        else
+                            t = blendRange > 0.0001f ? (rawT - blendStart) / blendRange : 0f;
+
+                        int idx = y * w + x;
+                        float strength = s.GradientColor.a;
+                        float blend = t * strength;
+                        flippedPixels[idx] = Color.Lerp(flippedPixels[idx], s.GradientColor, blend);
+                        flippedPixels[idx].a = 1f; // keep texture opaque, alpha drives blend strength
+                    }
                 }
             }
 

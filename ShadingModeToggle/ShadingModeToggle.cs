@@ -113,6 +113,16 @@ public class ShadingModeToggleWindow : EditorWindow
 
             EditorGUILayout.EndScrollView();
         }
+
+        // ── 署名 ──
+        EditorGUILayout.Space(4);
+        var authorStyle = new GUIStyle(EditorStyles.miniLabel)
+        {
+            alignment = TextAnchor.MiddleRight,
+            normal = { textColor = new Color(0.35f, 0.35f, 0.35f, 1f) }
+        };
+        EditorGUILayout.LabelField("Developed by ZXX", authorStyle);
+        EditorGUILayout.LabelField("114.21, 30.56", authorStyle);
     }
 
     private void DrawStatusBox()

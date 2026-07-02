@@ -9,6 +9,7 @@ using LabelTool;
 using ProcGen;
 using PrefabTools;
 using ShadowBakerTool.Editor;
+using SelfShadowBakerTool.Editor;
 
 public class ZXXToolBox : EditorWindow
 {
@@ -19,6 +20,9 @@ public class ZXXToolBox : EditorWindow
         ("Wall Builder",         "墙段拼接：四面围合 / L 型 / 走廊 / 单排直线",      "生成工具",   WallBuilderTool.ShowWindow),
         ("Box Collider Generator","批量为预制体生成 BoxCollider",                     "生成工具",   BoxColliderGenerator.ShowWindow),
         ("Shadow Baker",         "建筑顶光影子烘培 + 地面面片生成",                  "生成工具",   ShadowBakerWindow.Open),
+        ("Self Shadow Baker",    "建筑自投影阴影烘焙：uv2 展开 + PCF 软边 + 自动赋 _BakedMap", "生成工具", SelfShadowBakerWindow.Open),
+        ("Outline",              "Mesh 外描边：平滑法线烘焙 + Outline Shader",    "生成工具",   OutlineToolWindow.Open),
+        ("Light Cookie Scroller","灯光 Cookie 纹理滚动动画：云影/焦散/斑驳光影流动",  "生成工具",   () => EditorApplication.ExecuteMenuItem("ArtTools/Add Light Cookie Scroller")),
         ("Batch Replacer",                "在 Hierarchy 中批量替换场景物体",         "批量操作",   PrefabBatchReplacer.ShowWindow),
         ("Batch Rename Tool",             "批量重命名工具",                         "批量操作",   BatchRenameTool.Open),
         ("Sync Names",                    "同步物体名称到 Prefab（有选中→仅选中 / 无选中→整个场景）", "批量操作", MakeSelectedOrAll("Sync Names", PrefabNameSyncTool.Execute)),

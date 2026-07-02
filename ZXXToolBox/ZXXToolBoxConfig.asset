@@ -81,6 +81,24 @@ MonoBehaviour:
       Ctrl+G"
     category: "\u5176\u4ED6"
     visible: 1
+  - id: Self Shadow Baker
+    desc: "\u5EFA\u7B51\u81EA\u6295\u5F71\u9634\u5F71\u70D8\u7119\uFF1Auv2 \u5C55\u5F00
+      + PCF \u8F6F\u8FB9 + \u81EA\u52A8\u8D4B _BakedMap"
+    category: "\u751F\u6210\u5DE5\u5177"
+    visible: 1
+  - id: Outline
+    desc: " \u5916\u63CF\u8FB9\uFF1A\u5E73\u6ED1\u6CD5\u7EBF\u70D8\u7119 + Outline
+      Shader"
+    category: "\u751F\u6210\u5DE5\u5177"
+    visible: 1
+  - id: Shading Mode
+    desc: "\u5207\u6362\u9009\u4E2D\u6A21\u578B\u7684\u8F6F\u786C\u8FB9\u6CD5\u7EBF\u663E\u793A\uFF08\u975E\u7834\u574F\u6027\u9884\u89C8\uFF09"
+    category: "\u5176\u4ED6"
+    visible: 1
+  - id: Light Cookie Scroller
+    desc: "\u706F\u5149 Cookie \u7EB9\u7406\u6EDA\u52A8\u52A8\u753B"
+    category: "\u751F\u6210\u5DE5\u5177"
+    visible: 1
   workflows:
   - name: "\u5EFA\u7B51\u9884\u5236\u4F53\u5236\u4F5C"
     steps:
