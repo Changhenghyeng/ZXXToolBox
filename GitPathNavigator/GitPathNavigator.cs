@@ -208,7 +208,7 @@ public class GitPathNavigator : EditorWindow
             alignment = TextAnchor.MiddleRight,
             normal    = { textColor = new Color(0.45f, 0.45f, 0.45f, 0.5f) }
         };
-        EditorGUILayout.LabelField("Developed by ZZ", authorStyle);
+        EditorGUILayout.LabelField("Developed by ZXX", authorStyle);
         EditorGUILayout.LabelField("114.21, 30.56", authorStyle);
     }
 

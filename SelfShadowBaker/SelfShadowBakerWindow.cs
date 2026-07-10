@@ -385,7 +385,7 @@ namespace SelfShadowBakerTool.Editor
                 _outputFolder = EditorGUILayout.TextField("Folder", _outputFolder);
                 if (GUILayout.Button("…", GUILayout.Width(28)))
                 {
-                    string picked = EditorUtility.OpenFolderPanel("Pick output folder", _outputFolder, "");
+                    string picked = EditorUtility.OpenFolderPanel("选择输出目录", _outputFolder, "");
                     if (!string.IsNullOrEmpty(picked))
                     {
                         string projectAssets = Application.dataPath.Replace('\\', '/');
@@ -393,7 +393,7 @@ namespace SelfShadowBakerTool.Editor
                         if (p.StartsWith(projectAssets))
                             _outputFolder = "Assets" + p.Substring(projectAssets.Length);
                         else
-                            EditorUtility.DisplayDialog("Invalid folder", "请选工程 Assets 目录内的文件夹。", "OK");
+                            EditorUtility.DisplayDialog("提示", "请选工程 Assets 目录内的文件夹。", "OK");
                     }
                 }
             }
@@ -469,7 +469,7 @@ namespace SelfShadowBakerTool.Editor
             string what = string.Join("+", whatParts);
             string msg = $"完成({what}): {success}/{valid.Count}\n输出: {_outputFolder}";
             if (failures.Count > 0) msg += "\n\n失败:\n• " + string.Join("\n• ", failures);
-            EditorUtility.DisplayDialog("Bake Complete", msg, "OK");
+            EditorUtility.DisplayDialog("完成", msg, "OK");
         }
 
         // scene object: use the live renderers (world transforms are correct);

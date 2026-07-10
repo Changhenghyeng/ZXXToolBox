@@ -1,4 +1,4 @@
-// Outline Tool — 外描边工具，平滑法线写入 UV2，配合 Custom/Outline Shader 使用
+// Outline Tool — 外描边工具，平滑法线写入 UV2，配合 Custom/ToonOutline Shader 使用
 // Author: ZXX
 using System.Collections.Generic;
 using System.IO;
@@ -232,7 +232,7 @@ public class OutlineToolWindow : EditorWindow
 
     Material CreateOutlineMaterial()
     {
-        var shader = Shader.Find("Custom/Outline");
+        var shader = Shader.Find("Custom/ToonOutline");
         if (shader == null) { Debug.LogError("[Outline] Shader not found."); return null; }
 
         string folder = string.IsNullOrEmpty(_outputPath)
@@ -294,7 +294,7 @@ public class OutlineToolWindow : EditorWindow
             var mats = r.sharedMaterials;
             foreach (var mat in mats)
             {
-                if (mat != null && mat.shader != null && mat.shader.name == "Custom/Outline")
+                if (mat != null && mat.shader != null && mat.shader.name == "Custom/ToonOutline")
                     mat.DisableKeyword("_SMOOTH_ON");
             }
         }

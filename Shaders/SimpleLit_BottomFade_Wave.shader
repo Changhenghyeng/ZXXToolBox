@@ -16,6 +16,8 @@ Shader "Custom/SimpleLit_BottomFade_Wave"
         _FadeStart ("Fade Start (底部完全透明的世界Y)", Float) = 0.0
         _FadeRange ("Fade Range (渐变宽度)",           Float) = 1.0
 
+        [Toggle(_RECEIVE_LIGHTING_ON)] _ReceiveLighting ("Receive Lighting (受光)", Float) = 1
+
         [Enum(UnityEngine.Rendering.CullMode)] _Cull ("Cull Mode", Float) = 2
     }
 
@@ -55,6 +57,7 @@ Shader "Custom/SimpleLit_BottomFade_Wave"
                 float  _WindSpeed;
                 float  _WindScale;
                 float  _WindChaos;
+                float  _ReceiveLighting;
             CBUFFER_END
 
             // ---- Wind displacement shared by both passes ----
@@ -139,6 +142,7 @@ Shader "Custom/SimpleLit_BottomFade_Wave"
             #pragma multi_compile _ _SHADOWS_SOFT
             #pragma multi_compile_fog
             #pragma multi_compile_instancing
+            #pragma shader_feature_local _RECEIVE_LIGHTING_ON
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
@@ -156,6 +160,7 @@ Shader "Custom/SimpleLit_BottomFade_Wave"
                 float  _WindSpeed;
                 float  _WindScale;
                 float  _WindChaos;
+                float  _ReceiveLighting;
             CBUFFER_END
 
             float3 CalculateWindOffset(float3 positionOS)
@@ -223,7 +228,9 @@ Shader "Custom/SimpleLit_BottomFade_Wave"
 
                 // FadeStart = 完全透明起点，FadeStart + FadeRange = 完全不透明终点
                 float fadeT = smoothstep(_FadeStart, _FadeStart + max(_FadeRange, 0.0001), IN.positionWS.y);
+                float alpha = albedo.a * fadeT;
 
+            #ifdef _RECEIVE_LIGHTING_ON
                 InputData inputData;
                 ZERO_INITIALIZE(InputData, inputData);
                 inputData.positionWS      = IN.positionWS;
@@ -236,7 +243,7 @@ Shader "Custom/SimpleLit_BottomFade_Wave"
                 SurfaceData surfaceData;
                 ZERO_INITIALIZE(SurfaceData, surfaceData);
                 surfaceData.albedo    = albedo.rgb;
-                surfaceData.alpha     = albedo.a * fadeT;
+                surfaceData.alpha     = alpha;
                 surfaceData.specular  = half3(0, 0, 0);  // 无高光
                 surfaceData.occlusion = 1.0;
 
@@ -245,6 +252,11 @@ Shader "Custom/SimpleLit_BottomFade_Wave"
                 color.a     = surfaceData.alpha;
 
                 return color;
+            #else
+                // 不受光：直接输出贴图颜色 + 雾效
+                half3 rgb = MixFog(albedo.rgb, IN.fogFactor);
+                return half4(rgb, alpha);
+            #endif
             }
             ENDHLSL
         }

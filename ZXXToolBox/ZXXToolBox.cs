@@ -10,6 +10,8 @@ using ProcGen;
 using PrefabTools;
 using ShadowBakerTool.Editor;
 using SelfShadowBakerTool.Editor;
+using FogOfWarTool.Editor;
+using DayChangeTransitionTool.Editor;
 
 public class ZXXToolBox : EditorWindow
 {
@@ -21,6 +23,8 @@ public class ZXXToolBox : EditorWindow
         ("Box Collider Generator","批量为预制体生成 BoxCollider",                     "生成工具",   BoxColliderGenerator.ShowWindow),
         ("Shadow Baker",         "建筑顶光影子烘培 + 地面面片生成",                  "生成工具",   ShadowBakerWindow.Open),
         ("Self Shadow Baker",    "建筑自投影阴影烘焙：uv2 展开 + PCF 软边 + 自动赋 _BakedMap", "生成工具", SelfShadowBakerWindow.Open),
+        ("Fog Of War Tool",      "战争迷雾 RGBA Mask：R 探索 / G 选中 / B 溶解边缘", "生成工具",   FogOfWarToolWindow.Open),
+        ("Day Change Transition","SLG 跨天短夜晚过渡：一键创建 Night Volume + 主光过渡控制", "生成工具",   DayChangeTransitionToolWindow.Open),
         ("Outline",              "Mesh 外描边：平滑法线烘焙 + Outline Shader",    "生成工具",   OutlineToolWindow.Open),
         ("Light Cookie Scroller","灯光 Cookie 纹理滚动动画：云影/焦散/斑驳光影流动",  "生成工具",   () => EditorApplication.ExecuteMenuItem("ArtTools/Add Light Cookie Scroller")),
         ("Batch Replacer",                "在 Hierarchy 中批量替换场景物体",         "批量操作",   PrefabBatchReplacer.ShowWindow),
