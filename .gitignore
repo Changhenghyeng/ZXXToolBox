@@ -1,1 +1,45 @@
+# Unity - 资源元数据（每个项目应生成自己的 GUID）
 *.meta
+
+# Unity - 编译产物
+[Bb]in/
+[Oo]bj/
+*.csproj
+*.unityproj
+*.sln
+*.userprefs
+*.user
+*.tmp
+*.log
+*.cache
+*.pdb
+
+# OS - 系统垃圾
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# IDE - Rider
+.idea/
+*.sln.DotSettings.user
+*.DotSettings.user
+
+# IDE - VS / VS Code
+.vs/
+.vscode/
+
+# Unity - 临时目录
+Temp/
+Library/
+Build/
+Builds/
+Logs/
+UserSettings/
+
+# Unity - Package Manager（如果是 UPM 包则忽略 lockfile）
+Packages/
