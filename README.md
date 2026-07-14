@@ -35,6 +35,7 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.1.0
 | **FogOfWarTool** | 战争迷雾系统设置与生成 | 工具箱面板 |
 | **GitPathNavigator** | 在 Unity 内快速跳转到 Git 仓库路径 | 工具箱面板 / `Ctrl+G` |
 | **LabelTool** | 场景视图名称标签（Billboard 模式），含竹简气泡框样式 | 工具箱面板 |
+| **LightCookieScroller** | 灯光 Cookie 纹理滚动动画（云影/焦散/斑驳光影） | 工具箱面板 |
 | **MeasureTool** | 场景视图距离/角度测量 | 工具箱面板 |
 | **OutlineTool** | 卡通描边效果设置 | 工具箱面板 |
 | **PrefabBatchReplacer** | 批量替换场景中的 Prefab 实例 | 工具箱面板 |
@@ -55,6 +56,7 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.1.0
 |------|------|------|
 | **DayChangeTransitionController** | 昼夜切换运行时过渡（材质属性动画） | `Runtime/DayChangeTransition/` |
 | **FogGridClickSystem** | 战争迷雾点击交互，正方形网格显露/遮蔽 | `Runtime/FogOfWar/` |
+| **LightCookieScroller** | Light Cookie UV 滚动（需 PlayMode） | `LightCookieScroller/` |
 
 ### 🎨 Shader
 
