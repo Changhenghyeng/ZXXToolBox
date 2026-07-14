@@ -33,8 +33,8 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.1.0
 | **ConvertVariantToNormalPrefab** | 将 Prefab Variant 转换为普通 Prefab | 右键菜单 |
 | **DayChangeTransitionTool** | 昼夜切换材质过渡编辑与预览 | EditorWindow |
 | **FogOfWarTool** | 战争迷雾系统设置与生成 | EditorWindow |
-| **GitPathNavigator** | 在 Unity 内快速跳转到 Git 仓库路径 | EditorWindow |
-| **LabelTool** | 场景视图名称标签（Billboard 模式），含竹简气泡框样式 | `Window > 名称标签` |
+| **GitPathNavigator** | 在 Unity 内快速跳转到 Git 仓库路径 | 工具箱面板 / `Ctrl+G` |
+| **LabelTool** | 场景视图名称标签（Billboard 模式），含竹简气泡框样式 | 工具箱面板 |
 | **MeasureTool** | 场景视图距离/角度测量 | EditorWindow |
 | **OutlineTool** | 卡通描边效果设置 | EditorWindow |
 | **PrefabBatchReplacer** | 批量替换场景中的 Prefab 实例 | EditorWindow |
@@ -42,10 +42,10 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.1.0
 | **PrefabNameSyncTool** | 将 Prefab 实例名称同步为 Prefab 资源名称 | 静态方法 |
 | **PrefabRootNormalizer** | 规范化 Prefab 根节点（包裹/批量处理） | EditorWindow + 静态方法 |
 | **ProcGen** | 程序化生成系统，基于 SpatialHash 的摆放与去重 | EditorWindow |
-| **SelfShadowBaker** | 自阴影（SDF 投影）烘焙 | `Tools > Self Shadow Baker` |
+| **SelfShadowBaker** | 自阴影（SDF 投影）烘焙 | 工具箱面板 |
 | **ShadingModeToggle** | 一键切换场景视图着色模式（Lit/Wireframe/Unlit 等） | EditorWindow |
 | **ShadowBakerTool** | 阴影贴图烘焙 + 贴花生成，含 Blur/Silhouette Shader | EditorWindow |
-| **ShadowCastOffTool** | 批量关闭选中物体的阴影投射 | 静态方法 |
+| **ShadowCastOffTool** | 批量关闭选中物体的阴影投射 | 右键菜单 / 静态方法 |
 | **TransparentScreenshot** | 透明背景截图 + 粒子序列渲染 | EditorWindow |
 | **WallBuilderTool** | 场景墙体快速搭建 | EditorWindow |
 
