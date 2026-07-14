@@ -27,7 +27,7 @@ public class ZXXToolBox : EditorWindow
         ("Fog Of War Tool",      "战争迷雾 RGBA Mask：R 探索 / G 选中 / B 溶解边缘", "生成工具",   FogOfWarToolWindow.Open),
         ("Day Change Transition","SLG 跨天短夜晚过渡：一键创建 Night Volume + 主光过渡控制", "生成工具",   DayChangeTransitionToolWindow.Open),
         ("Outline",              "Mesh 外描边：平滑法线烘焙 + Outline Shader",    "生成工具",   OutlineToolWindow.Open),
-        ("Light Cookie Scroller","灯光 Cookie 纹理滚动动画：云影/焦散/斑驳光影流动",  "生成工具",   () => EditorApplication.ExecuteMenuItem("ArtTools/Add Light Cookie Scroller")),
+        ("Light Cookie Scroller","灯光 Cookie 纹理滚动动画：云影/焦散/斑驳光影流动",  "生成工具",   AddLightCookieScrollerToSelected),
         ("Batch Replacer",                "在 Hierarchy 中批量替换场景物体",         "批量操作",   PrefabBatchReplacer.ShowWindow),
         ("Batch Rename Tool",             "批量重命名工具",                         "批量操作",   BatchRenameTool.Open),
         ("Sync Names",                    "同步物体名称到 Prefab（有选中→仅选中 / 无选中→整个场景）", "批量操作", MakeSelectedOrAll("Sync Names", PrefabNameSyncTool.Execute)),
@@ -105,6 +105,42 @@ public class ZXXToolBox : EditorWindow
 
     private const string MenuBasePath = "ArtTools/";
     private static string _currentMenuPath = null;
+
+    private static Type FindLightCookieScrollerType()
+    {
+        return TypeCache.GetTypesDerivedFrom<MonoBehaviour>()
+            .FirstOrDefault(type => type.Name == "LightCookieScroller");
+    }
+
+    /// <summary>
+    /// ArtCode 是独立运行时程序集，Unity.Editor 没有直接引用它。
+    /// 通过类型缓存调用其编辑器方法，避免工具箱依赖一个可见的顶部菜单字符串。
+    /// </summary>
+    private static void AddLightCookieScrollerToSelected()
+    {
+        var componentType = FindLightCookieScrollerType();
+        var addMethod = componentType?.GetMethod(
+            "AddToSelectedLights",
+            BindingFlags.Public | BindingFlags.Static);
+
+        if (addMethod == null)
+        {
+            EditorUtility.DisplayDialog(
+                "Light Cookie Scroller",
+                "未找到 LightCookieScroller.AddToSelectedLights，请确认 ArtCode 程序集已成功编译。",
+                "确定");
+            return;
+        }
+
+        try
+        {
+            addMethod.Invoke(null, null);
+        }
+        catch (TargetInvocationException exception)
+        {
+            Debug.LogException(exception.InnerException ?? exception);
+        }
+    }
 
     /// <summary>注册或刷新 Unity 顶部菜单项，使菜单名称跟随显示名称。</summary>
     private static void RefreshMenu(string newDisplayName)
@@ -320,23 +356,7 @@ public class ZXXToolBox : EditorWindow
         // 鼠标移动时立即重绘，让悬停高亮跟手
         if (Event.current.type == EventType.MouseMove) Repaint();
 
-        // Keyboard shortcuts
         Event e = Event.current;
-        if (e != null && e.type == EventType.KeyDown && e.control)
-        {
-            if (e.shift && e.keyCode == KeyCode.N)
-            {
-                PrefabRootNormalizer.WrapSelected();
-                e.Use();
-                return;
-            }
-            if (e.shift && e.keyCode == KeyCode.X)
-            {
-                TransparentScreenshot.OpenWindow();
-                e.Use();
-                return;
-            }
-        }
 
         // Height mode check
         if (_editMode && e.type == EventType.KeyDown && e.keyCode == KeyCode.Escape)

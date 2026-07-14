@@ -6,6 +6,18 @@ using UnityEngine.Rendering;
 
 public static class ShadowCastOffTool
 {
+    [MenuItem("GameObject/Cast Shadows OFF", false, 31)]
+    private static void ExecuteFromHierarchy()
+    {
+        Execute(Selection.gameObjects);
+    }
+
+    [MenuItem("GameObject/Cast Shadows OFF", true)]
+    private static bool ValidateExecuteFromHierarchy()
+    {
+        return Selection.gameObjects != null && Selection.gameObjects.Length > 0;
+    }
+
     public static void Execute(GameObject[] roots)
     {
         int changed = 0;

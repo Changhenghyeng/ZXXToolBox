@@ -102,6 +102,15 @@ public sealed class BuildingCardTool : EditorWindow
         public float residual;
     }
 
+    private struct OutputGeometry
+    {
+        public float groundWidth;
+        public float groundDepth;
+        public float scaleFactor;
+        public float colliderWidth;
+        public float colliderDepth;
+    }
+
     private sealed class MathGuideWindow : EditorWindow
     {
         private Vector2 scrollPosition;
@@ -296,8 +305,8 @@ public sealed class BuildingCardTool : EditorWindow
             "Ground W = Grid W × Cell Size；Ground D = Grid D × Cell Size。\n" +
             "Margin Scale = 1 - 2 × Ground Margin ÷ min(Ground W, Ground D)。\n" +
             "Size X/Z = Ground W/D × Margin Scale + 2 × Horizontal Padding。\n" +
-            "Size Y = 自动投影拟合高度 × Margin Scale；Center = (0, Size Y ÷ 2, 0)。\n" +
-            "因此碰撞底面始终位于 Y=0；Height Padding 会在最终缩放前加入自动高度。");
+            "Size Y = 最终缩放比例下的自动拟合高度 + Height Padding；Center = (0, Size Y ÷ 2, 0)。\n" +
+            "两个 Padding 都在缩放完成后以世界距离加入，因此不跟随 Ground Margin 缩放；碰撞底面始终位于 Y=0。");
 
         DrawGuideSection(
             "6. Point Controls",
@@ -327,6 +336,9 @@ public sealed class BuildingCardTool : EditorWindow
         DrawFloatWithUnit(Content("Height Padding", "在自动拟合出的点击碰撞高度上额外增加的余量。"), ref settings.clickHeightPadding, "m");
         DrawFloatWithUnit(Content("Horizontal Padding", "在格子定义的 X/Z 碰撞尺寸外侧增加的余量。"), ref settings.clickHorizontalPadding, "m");
         DrawFloatWithUnit(Content("Ground Margin", "底面短边每侧的世界间距。默认 0 m；正值会以底面中心等比缩小 Visual 与 BoxCollider，短边两侧各精确留出该距离；长边按同一比例变化以保持图片不变形。"), ref settings.visualMargin, "m");
+        settings.clickHeightPadding = Mathf.Max(0f, settings.clickHeightPadding);
+        settings.clickHorizontalPadding = Mathf.Max(0f, settings.clickHorizontalPadding);
+        settings.visualMargin = Mathf.Max(0f, settings.visualMargin);
         settings.placePrefabsInScene = EditorGUILayout.Toggle(Content("Place In Scene", "开启后，预制体会放入当前场景的 Building Card Preview 节点并沿 X 轴排列；同名预览实例会被替换，不影响该节点外的正式建筑。"), settings.placePrefabsInScene);
 
         EditorGUILayout.BeginHorizontal();
@@ -987,6 +999,61 @@ public sealed class BuildingCardTool : EditorWindow
         Repaint();
     }
 
+    private bool TryGetOutputGeometry(Entry entry, out OutputGeometry geometry, out string error)
+    {
+        geometry = new OutputGeometry();
+        error = null;
+        if (entry == null || entry.gridWidth < 1 || entry.gridDepth < 1)
+        {
+            error = "Grid W / D 必须大于 0。";
+            return false;
+        }
+        if (!IsFinite(settings.cellWorldSize) || settings.cellWorldSize <= 0f)
+        {
+            error = "Cell Size 必须是大于 0 的有效数值。";
+            return false;
+        }
+        if (!IsFinite(settings.visualMargin) || !IsFinite(settings.clickHorizontalPadding) ||
+            !IsFinite(settings.clickHeightPadding) || settings.visualMargin < 0f ||
+            settings.clickHorizontalPadding < 0f || settings.clickHeightPadding < 0f)
+        {
+            error = "Ground Margin 与 Padding 必须是大于或等于 0 的有效世界距离。";
+            return false;
+        }
+
+        geometry.groundWidth = entry.gridWidth * settings.cellWorldSize;
+        geometry.groundDepth = entry.gridDepth * settings.cellWorldSize;
+        var shortSide = Mathf.Min(geometry.groundWidth, geometry.groundDepth);
+        if (!IsFinite(shortSide) || shortSide <= 0f)
+        {
+            error = "计算出的建筑底面尺寸无效。";
+            return false;
+        }
+        if (settings.visualMargin * 2f >= shortSide)
+        {
+            error = "Ground Margin 必须小于底面短边的一半（当前上限 " +
+                    (shortSide * 0.5f).ToString("0.###") + " m）。";
+            return false;
+        }
+
+        geometry.scaleFactor = 1f - settings.visualMargin * 2f / shortSide;
+        geometry.colliderWidth = geometry.groundWidth * geometry.scaleFactor + settings.clickHorizontalPadding * 2f;
+        geometry.colliderDepth = geometry.groundDepth * geometry.scaleFactor + settings.clickHorizontalPadding * 2f;
+        if (!IsFinite(geometry.scaleFactor) || !IsFinite(geometry.colliderWidth) ||
+            !IsFinite(geometry.colliderDepth) || geometry.scaleFactor <= 0f ||
+            geometry.colliderWidth <= 0f || geometry.colliderDepth <= 0f)
+        {
+            error = "计算出的 Visual 缩放或 BoxCollider X/Z 尺寸无效。";
+            return false;
+        }
+        return true;
+    }
+
+    private static bool IsFinite(float value)
+    {
+        return !float.IsNaN(value) && !float.IsInfinity(value);
+    }
+
     private AnalysisResult Analyze(Entry entry)
     {
         var result = new AnalysisResult();
@@ -1000,6 +1067,8 @@ public sealed class BuildingCardTool : EditorWindow
             result.message = "图片为空。";
             return result;
         }
+        if (!TryGetOutputGeometry(entry, out var outputGeometry, out result.message))
+            return result;
 
         Texture2D analysisTexture = null;
         try
@@ -1183,10 +1252,13 @@ public sealed class BuildingCardTool : EditorWindow
             }
             result.analysisPixelsPerWorldUnit = pixelsPerWorld;
             result.worldPerSourcePixel = ((width / (float)entry.texture.width) + (height / (float)entry.texture.height)) * 0.5f / pixelsPerWorld;
-            var colliderWidth = entry.gridWidth * settings.cellWorldSize + settings.clickHorizontalPadding * 2f;
-            var colliderDepth = entry.gridDepth * settings.cellWorldSize + settings.clickHorizontalPadding * 2f;
+            // The source image represents the unscaled footprint. After Ground Margin uniformly
+            // scales the Visual, one final-world metre spans more source pixels by 1 / scaleFactor.
+            // Fitting with the final Box dimensions keeps both paddings as exact world distances.
+            var finalPixelsPerWorld = pixelsPerWorld / outputGeometry.scaleFactor;
             result.clickHeight = FitColliderHeight(
-                pixels, width, height, footprintCenter, pixelsPerWorld, colliderWidth, colliderDepth,
+                pixels, width, height, footprintCenter, finalPixelsPerWorld,
+                outputGeometry.colliderWidth, outputGeometry.colliderDepth,
                 minBodyY, maxBodyY, out result.clickFitScore);
             result.clickHeight = Mathf.Max(0.1f, result.clickHeight + settings.clickHeightPadding);
             // The parent is the footprint centre on Y=0. The fitted Box bottom is always on the ground.
@@ -1546,6 +1618,7 @@ public sealed class BuildingCardTool : EditorWindow
     {
         CancelScheduledAnalysis();
         if (!ValidateInputs(true)) return;
+        if (!TryPrepareGeneration(out var generationEntries)) return;
         EnsureOutputFolders();
         var generated = 0;
         var failed = 0;
@@ -1554,20 +1627,15 @@ public sealed class BuildingCardTool : EditorWindow
         var scenePreviewRoot = settings.placePrefabsInScene ? GetOrCreateScenePreviewRoot() : null;
         try
         {
-            for (var i = 0; i < entries.Count; i++)
+            for (var i = 0; i < generationEntries.Count; i++)
             {
-                var entry = entries[i];
-                if (!entry.enabled || entry.texture == null) continue;
-                EditorUtility.DisplayProgressBar("Building Card", "生成 " + entry.texture.name, (float)i / entries.Count);
+                var entry = generationEntries[i];
+                EditorUtility.DisplayProgressBar("Building Card", "生成 " + entry.texture.name, (float)i / generationEntries.Count);
                 try
                 {
                     entry.generationError = null;
-                    entry.result = Analyze(entry);
-                    if (entry.result == null || !entry.result.success)
-                        throw new InvalidOperationException(entry.result == null ? "分析结果为空。" : entry.result.message);
-
                     var prefabAsset = CreatePrefab(entry, entry.result);
-                    if (scenePreviewRoot != null && prefabAsset != null)
+                    if (scenePreviewRoot != null)
                     {
                         var sceneObject = PlaceOrReplaceScenePreview(prefabAsset, scenePreviewRoot);
                         if (sceneObject != null) placedObjects.Add(sceneObject);
@@ -1603,6 +1671,88 @@ public sealed class BuildingCardTool : EditorWindow
         }
         EditorUtility.DisplayDialog("Building Card", dialogMessage, "确定");
         Repaint();
+    }
+
+    private bool TryPrepareGeneration(out List<Entry> generationEntries)
+    {
+        generationEntries = new List<Entry>();
+        var errors = new List<string>();
+        var outputOwners = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        for (var i = 0; i < entries.Count; i++)
+        {
+            var entry = entries[i];
+            if (!entry.enabled) continue;
+            entry.generationError = null;
+            if (entry.texture == null)
+            {
+                entry.generationError = "图片为空。";
+                errors.Add("第 " + (i + 1) + " 项：图片为空。");
+                continue;
+            }
+            if (!TryGetOutputGeometry(entry, out _, out var geometryError))
+            {
+                entry.generationError = geometryError;
+                errors.Add(entry.texture.name + "：" + geometryError);
+                continue;
+            }
+
+            var outputKey = SanitizeAssetName(entry.texture.name);
+            var sourcePath = AssetDatabase.GetAssetPath(entry.texture);
+            if (outputOwners.TryGetValue(outputKey, out var existingSource))
+            {
+                entry.generationError = "输出名称与另一张图片冲突。";
+                errors.Add("输出 B_" + outputKey + " 冲突：\n  " + existingSource + "\n  " + sourcePath);
+                continue;
+            }
+            outputOwners.Add(outputKey, sourcePath);
+            generationEntries.Add(entry);
+        }
+
+        if (generationEntries.Count == 0 && errors.Count == 0)
+            errors.Add("没有可生成的图片。");
+        if (errors.Count > 0)
+        {
+            ShowGenerationValidationErrors(errors);
+            Repaint();
+            return false;
+        }
+
+        try
+        {
+            for (var i = 0; i < generationEntries.Count; i++)
+            {
+                var entry = generationEntries[i];
+                EditorUtility.DisplayProgressBar(
+                    "Building Card",
+                    "生成前检查 " + entry.texture.name,
+                    (float)i / generationEntries.Count);
+                entry.result = Analyze(entry);
+                if (entry.result != null && entry.result.success) continue;
+
+                entry.generationError = entry.result == null ? "分析结果为空。" : entry.result.message;
+                errors.Add(entry.texture.name + "：" + entry.generationError);
+            }
+        }
+        finally
+        {
+            EditorUtility.ClearProgressBar();
+        }
+
+        SaveWorkspaceState();
+        if (errors.Count == 0) return true;
+        ShowGenerationValidationErrors(errors);
+        Repaint();
+        return false;
+    }
+
+    private static void ShowGenerationValidationErrors(List<string> errors)
+    {
+        var message = "生成前检查未通过，尚未写入任何资源：";
+        var shownCount = Mathf.Min(8, errors.Count);
+        for (var i = 0; i < shownCount; i++) message += "\n• " + errors[i];
+        if (errors.Count > shownCount) message += "\n• 其余 " + (errors.Count - shownCount) + " 项请在列表中查看。";
+        EditorUtility.DisplayDialog("Building Card", message, "确定");
     }
 
     private static Transform GetOrCreateScenePreviewRoot()
@@ -1662,6 +1812,8 @@ public sealed class BuildingCardTool : EditorWindow
         var prefabPath = settings.outputFolder + "/B_" + cleanName + ".prefab";
         var materialPath = settings.outputFolder + "/Materials/M_" + cleanName + ".mat";
         var meshPath = settings.outputFolder + "/Meshes/Q_" + cleanName + ".asset";
+        if (!TryGetOutputGeometry(entry, out var outputGeometry, out var geometryError))
+            throw new InvalidOperationException(geometryError);
 
         var material = LoadOrCreateMaterial(materialPath, entry.texture);
         var mesh = LoadOrCreateQuadMesh(meshPath, new Vector4(
@@ -1676,20 +1828,9 @@ public sealed class BuildingCardTool : EditorWindow
             root.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
             root.transform.localScale = Vector3.one;
 
-            var groundWidth = entry.gridWidth * settings.cellWorldSize;
-            var groundDepth = entry.gridDepth * settings.cellWorldSize;
-            var shortSideHalfExtent = Mathf.Max(0.0001f, Mathf.Min(groundWidth, groundDepth) * 0.5f);
-            if (settings.visualMargin >= shortSideHalfExtent)
-                throw new InvalidOperationException(
-                    "Ground Margin 必须小于底面短边的一半（当前上限 " + shortSideHalfExtent.ToString("0.###") + " m）。");
-            // The margin is exact on both sides of the shorter footprint dimension. One uniform
-            // scale preserves the authored image aspect; the longer dimension follows that ratio.
-            var prefabScaleFactor = (shortSideHalfExtent - settings.visualMargin) / shortSideHalfExtent;
-            var clickWidth = groundWidth * prefabScaleFactor + settings.clickHorizontalPadding * 2f;
-            var clickDepth = groundDepth * prefabScaleFactor + settings.clickHorizontalPadding * 2f;
             var collider = root.AddComponent<BoxCollider>();
-            collider.center = new Vector3(0f, result.clickCenterY * prefabScaleFactor, 0f);
-            collider.size = new Vector3(clickWidth, result.clickHeight * prefabScaleFactor, clickDepth);
+            collider.center = new Vector3(0f, result.clickCenterY, 0f);
+            collider.size = new Vector3(outputGeometry.colliderWidth, result.clickHeight, outputGeometry.colliderDepth);
 
             var visual = new GameObject("Visual");
             visual.transform.SetParent(root.transform, false);
@@ -1697,8 +1838,8 @@ public sealed class BuildingCardTool : EditorWindow
             visual.transform.localRotation = rotation;
             var visualPixelSize = result.visualMaxPixel - result.visualMinPixel + Vector2.one;
             visual.transform.localScale = new Vector3(
-                visualPixelSize.x * result.worldPerSourcePixel * prefabScaleFactor,
-                visualPixelSize.y * result.worldPerSourcePixel * prefabScaleFactor,
+                visualPixelSize.x * result.worldPerSourcePixel * outputGeometry.scaleFactor,
+                visualPixelSize.y * result.worldPerSourcePixel * outputGeometry.scaleFactor,
                 1f);
 
             var visualPixelCenter = (result.visualMinPixel + result.visualMaxPixel) * 0.5f;
@@ -1706,9 +1847,9 @@ public sealed class BuildingCardTool : EditorWindow
                 (result.nearCorner.x - visualPixelCenter.x) * result.worldPerSourcePixel,
                 (result.nearCorner.y - visualPixelCenter.y) * result.worldPerSourcePixel,
                 0f);
-            visual.transform.localPosition = -result.colliderCenterFromRoot * prefabScaleFactor -
-                                             (rotation * (nearAnchorInQuadUnits * prefabScaleFactor)) +
-                                             Vector3.up * (result.visualGroundLift * prefabScaleFactor);
+            visual.transform.localPosition = -result.colliderCenterFromRoot * outputGeometry.scaleFactor -
+                                             (rotation * (nearAnchorInQuadUnits * outputGeometry.scaleFactor)) +
+                                             Vector3.up * (result.visualGroundLift * outputGeometry.scaleFactor);
 
             var filter = visual.AddComponent<MeshFilter>();
             filter.sharedMesh = mesh;
@@ -1716,6 +1857,8 @@ public sealed class BuildingCardTool : EditorWindow
             renderer.sharedMaterial = material;
 
             prefabAsset = PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
+            if (prefabAsset == null)
+                throw new InvalidOperationException("Prefab 保存失败：" + prefabPath);
             Debug.Log("[BuildingCardTool] " + entry.texture.name +
                 " → " + prefabPath +
                 " | 原点像素 " + result.rootPixel.ToString("F1") +
@@ -1797,11 +1940,19 @@ public sealed class BuildingCardTool : EditorWindow
 
     private bool ValidateInputs(bool showDialog)
     {
-        var valid = referenceCamera != null && referenceCamera.orthographic && settings.cellWorldSize > 0f &&
-                    settings.bodyAlphaThreshold > 0f && settings.bodyAlphaThreshold <= 1f &&
+        var valid = referenceCamera != null && referenceCamera.orthographic &&
+                    IsFinite(settings.cellWorldSize) && settings.cellWorldSize > 0f &&
+                    IsFinite(settings.bodyAlphaThreshold) && settings.bodyAlphaThreshold > 0f && settings.bodyAlphaThreshold <= 1f &&
+                    IsFinite(settings.visualMargin) && settings.visualMargin >= 0f &&
+                    IsFinite(settings.clickHorizontalPadding) && settings.clickHorizontalPadding >= 0f &&
+                    IsFinite(settings.clickHeightPadding) && settings.clickHeightPadding >= 0f &&
+                    !string.IsNullOrEmpty(settings.outputFolder) &&
                     (settings.outputFolder == "Assets" || settings.outputFolder.StartsWith("Assets/", StringComparison.Ordinal));
         if (!valid && showDialog)
-            EditorUtility.DisplayDialog("Building Card", "请指定正交参考相机、有效单格长度，并将输出目录设在 Assets 下。", "确定");
+            EditorUtility.DisplayDialog(
+                "Building Card",
+                "请指定正交参考相机；Cell Size 必须大于 0；Margin 与 Padding 不得为负数；输出目录必须位于 Assets 下。",
+                "确定");
         return valid;
     }
 

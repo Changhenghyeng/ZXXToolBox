@@ -47,7 +47,6 @@ namespace LabelTool
         private bool _foldStyle, _foldPosition, _foldLod, _foldAlias;
         private int _lastToggledIdx = -1;
 
-        [MenuItem("Window/名称标签")]
         public static void Open()
         {
             var w = GetWindow<LabelManagerWindow>("名称标签");

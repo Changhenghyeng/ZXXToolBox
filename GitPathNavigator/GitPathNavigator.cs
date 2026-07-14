@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using UnityEditor;
+using UnityEditor.ShortcutManagement;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
@@ -37,6 +38,12 @@ public class GitPathNavigator : EditorWindow
     {
         var win = GetWindow<GitPathNavigator>(false, "Git Path Navigator", true);
         win.minSize = new Vector2(500, 250);
+    }
+
+    [Shortcut("ZXX Tools/Open Git Path Navigator", null, KeyCode.G, ShortcutModifiers.Control)]
+    private static void OpenFromShortcut()
+    {
+        ShowWindow();
     }
 
     private void OnEnable()

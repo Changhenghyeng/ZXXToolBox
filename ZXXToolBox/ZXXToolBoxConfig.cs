@@ -4,7 +4,6 @@ using UnityEngine;
 /// <summary>
 /// ZXX 工具箱配置文件 — 团队共享设置（跟 Git 走）。
 /// </summary>
-[CreateAssetMenu(fileName = "ZXXToolBoxConfig", menuName = "ZXX/工具箱配置")]
 public class ZXXToolBoxConfig : ScriptableObject
 {
     [Tooltip("工具箱窗口标题和菜单名称")]

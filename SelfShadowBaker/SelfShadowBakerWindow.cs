@@ -57,7 +57,6 @@ namespace SelfShadowBakerTool.Editor
         Vector2 _scroll;
         bool _sceneHooked;
 
-        [MenuItem("Tools/Self Shadow Baker")]
         public static void Open()
         {
             var w = GetWindow<SelfShadowBakerWindow>("Self Shadow Baker");
