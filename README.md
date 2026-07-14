@@ -30,7 +30,7 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.1.0
 | **BatchRenameTool** | 批量重命名 Hierarchy 中的 GameObject，支持查找替换/前缀后缀/正则 | 工具箱面板 |
 | **BoxColliderGenerator** | 根据 Renderer 包围盒自动生成 BoxCollider | 工具箱面板 |
 | **BuildingCardTool** | 建筑面片预制体批量生成，用于快速搭建主城建筑白模 | 工具箱面板 |
-| **ConvertVariantToNormalPrefab** | 将 Prefab Variant 转换为普通 Prefab | 右键菜单 |
+| **ConvertVariantToNormalPrefab** | 将 Prefab Variant 转换为普通 Prefab | 工具箱面板 |
 | **DayChangeTransitionTool** | 昼夜切换材质过渡编辑与预览 | 工具箱面板 |
 | **FogOfWarTool** | 战争迷雾系统设置与生成 | 工具箱面板 |
 | **GitPathNavigator** | 在 Unity 内快速跳转到 Git 仓库路径 | 工具箱面板 / `Ctrl+G` |
