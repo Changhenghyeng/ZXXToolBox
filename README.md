@@ -125,6 +125,19 @@ Unity 中 `Editor` 文件夹下的代码**无法在 PlayMode 运行时访问**�
 
 > 每个 Runtime 组件目录下都有 `README.md` 说明其作用和放置路径。
 
+### 版本发布
+
+- 每次同步新工具或重大更新后打 **Git Tag**（当前 `v0.1.0`）
+- Tag 可通过 Unity Package Manager 以 git URL 导入固定版本
+- 格式：`v<major>.<minor>.<patch>`，遵循语义化版本
+
+### 提交规范
+
+- `feat:` — 新增工具或 Shader
+- `refactor:` — 重构（如入口整理）
+- `docs:` — README 及文档更新
+- `chore:` — 格式/配置类变更
+
 ---
 
 ## 贡献
