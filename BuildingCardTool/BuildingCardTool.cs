@@ -6,10 +6,8 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 
 /// <summary>
-/// Creates SLG building-card prefabs from transparent orthographic renders.
-/// The image may be cropped differently for every asset.  Its individual
-/// world scale is solved from the visible ground footprint, grid size and a
-/// reference camera orientation.
+/// SLG 建筑面片预制体生成工具：从透明底正交渲染图一键生成带碰撞体的面片预制体。
+/// 世界缩放根据图像中可见地脚面、网格尺寸和参考相机朝向自动计算。
 /// </summary>
 public sealed class BuildingCardTool : EditorWindow
 {
@@ -813,9 +811,8 @@ public sealed class BuildingCardTool : EditorWindow
     }
 
     /// <summary>
-    /// A ground rectangle under an orthographic camera has only three editable degrees of
-    /// freedom in the image: translation plus one shared pixel/world scale. Its two side
-    /// directions and its aspect ratio come from the camera and the grid dimensions.
+    /// 正交相机下的地面矩形在图像中只有三个可编辑自由度：平移 + 统一像素/世界缩放比。
+    /// 两个侧边方向和宽高比由相机朝向和网格尺寸决定。
     /// </summary>
     private void ResizeManualFootprint(Entry entry, PreviewPoint point, Vector2 pixel)
     {
@@ -1289,8 +1286,7 @@ public sealed class BuildingCardTool : EditorWindow
     }
 
     /// <summary>
-    /// Builds the two world-rectangle sides expressed in camera-plane coordinates, before their
-    /// common image pixel scale is applied. Their directions are entirely camera-defined.
+    /// 构建世界矩形两个边在相机平面中的投影（未应用像素缩放），方向由相机定义。
     /// </summary>
     private bool TryGetConstrainedFootprintBasis(int gridWidth, int gridDepth,
         Vector2 near, Vector2 left, Vector2 right, out Vector2 leftSide, out Vector2 rightSide)
@@ -1321,8 +1317,7 @@ public sealed class BuildingCardTool : EditorWindow
     }
 
     /// <summary>
-    /// Least-squares fit of four detected/annotated points to the orthographic projection of the
-    /// known grid rectangle. It preserves paired equal sides and camera-defined corner angles.
+    /// 四点标注点最小二乘拟合到已知网格矩形正射投影，保持两对等边和相机夹角。
     /// </summary>
     private bool TryConstrainFootprint(int gridWidth, int gridDepth,
         ref Vector2 near, ref Vector2 left, ref Vector2 right, ref Vector2 far, out float pixelsPerWorld)
@@ -1372,8 +1367,7 @@ public sealed class BuildingCardTool : EditorWindow
     }
 
     /// <summary>
-    /// Inverts the orthographic ground projection:
-    /// pixelDelta = pixelsPerWorld * [projectedX projectedZ] * worldDeltaXZ.
+    /// 逆正交地面投影：pixelDelta = pixelsPerWorld * [projectedX projectedZ] * worldDeltaXZ。
     /// </summary>
     private static bool TryUnprojectGroundDelta(Vector2 pixelDelta, float pixelsPerWorld,
         Vector2 projectedX, Vector2 projectedZ, out Vector3 worldDelta)
@@ -1420,8 +1414,7 @@ public sealed class BuildingCardTool : EditorWindow
     }
 
     /// <summary>
-    /// Finds the click-box height that best overlaps the opaque building mask when both are
-    /// viewed through the same orthographic camera. The box bottom is constrained to Y=0.
+    /// 在正交相机下搜索碰撞盒高度，使盒子与建筑不透明区域的像素重叠最匹配，底部固定在 Y=0。
     /// </summary>
     private float FitColliderHeight(Color32[] pixels, int imageWidth, int imageHeight,
         Vector2 footprintCenterPixel, float pixelsPerWorld, float boxWidth, float boxDepth,

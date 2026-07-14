@@ -5,9 +5,7 @@ using UnityEditor;
 namespace ShadowBakerTool.Editor
 {
     /// <summary>
-    /// Main window for the Shadow Baker tool.
-    /// Opens via menu: Tools / Shadow Baker.
-    /// Workflow: add targets → set light → tune softness → batch bake + generate decal.
+    /// 阴影烘焙工具主窗口。流程：添加目标 → 设置灯光 → 调软硬度 → 批量烘焙 + 生成贴花。
     /// </summary>
     public class ShadowBakerWindow : EditorWindow
     {

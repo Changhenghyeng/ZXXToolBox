@@ -7,15 +7,14 @@ using UnityEngine.Rendering;
 namespace SelfShadowBakerTool.Editor
 {
     /// <summary>
-    /// Bakes a self-shadow mask (R) and/or ambient occlusion (G) into a mesh's uv2 atlas,
-    /// matching the Lit_BakedOcclusion shader (R = self-shadow 1=lit, G = AO 1=open).
-    /// R and G can be baked independently; baking one preserves the other channel.
+    /// 将自阴影遮罩(R)和/或环境遮蔽(G)烘焙到模型 uv2 图集，配合 Lit_BakedOcclusion 着色器。
+    /// R/G 可独立烘焙，互不覆盖。
     /// </summary>
     public class SelfShadowBakeSettings
     {
         public List<MeshRenderer> Renderers = new List<MeshRenderer>();
 
-        /// <summary>World-space light forward (from the sun toward the ground, Y usually negative).</summary>
+        /// <summary>世界空间光照方向（太阳照向地面，Y 一般为负）。</summary>
         public Vector3 LightDirection = new Vector3(0.3f, -1f, 0.2f);
 
         // what to bake this run (the other channel is preserved from the existing texture)
@@ -426,8 +425,7 @@ namespace SelfShadowBakerTool.Editor
             return px;
         }
 
-        /// <summary>Grow covered values into the gutter so bilinear/mip sampling at UV-island
-        /// edges doesn't bleed the clear color (kills black seams).</summary>
+        /// <summary>将被覆盖像素值向外扩张到 gutter，避免 UV 岛边缘双线性/mip 采样漏出底色造成黑边。</summary>
         static void Dilate(float[] val, bool[] cov, int n, int iterations)
         {
             if (iterations <= 0) return;

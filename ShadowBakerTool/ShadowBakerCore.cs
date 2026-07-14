@@ -13,7 +13,7 @@ namespace ShadowBakerTool.Editor
     }
 
     /// <summary>
-    /// Parameters describing one shadow bake. Built from the editor UI.
+    /// 单次阴影烘焙参数，由编辑器 UI 构建。
     /// </summary>
     public class BakeSettings
     {
@@ -49,7 +49,7 @@ namespace ShadowBakerTool.Editor
     }
 
     /// <summary>
-    /// Information needed by the mesh-generation step after a bake.
+    /// 烘焙后的网格生成步骤所需信息。
     /// </summary>
     public class BakeResult
     {
@@ -67,7 +67,7 @@ namespace ShadowBakerTool.Editor
         private const string BlurShaderName = "Hidden/ShadowBaker/Blur";
 
         /// <summary>
-        /// Perform a bake. Returns null on failure (and logs the reason).
+        /// 执行烘焙。失败返回 null 并打印原因。
         /// </summary>
         public static BakeResult Bake(BakeSettings s)
         {
@@ -392,8 +392,7 @@ namespace ShadowBakerTool.Editor
         }
 
         /// <summary>
-        /// Read the RT to a Texture2D, applying light color tint and intensity.
-        /// Performs a VERTICAL FLIP here so the output PNG matches world orientation.
+        /// 从 RT 读取到 Texture2D，应用灯光颜色和强度，做垂直翻转使输出 PNG 与世界方向一致。
         /// </summary>
         private static Texture2D ReadRT(RenderTexture rt, BakeSettings s)
         {

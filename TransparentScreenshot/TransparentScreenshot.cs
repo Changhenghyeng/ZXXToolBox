@@ -1437,22 +1437,6 @@ return CapturePipeline.CaptureFrame(cam, outW, outH, superSize,
 
     // ---- Shadow Catcher ----
 
-    /// <summary>
-    /// Render a normal transparent screenshot at the given resolution and return it
-    /// in LINEAR color space (no gamma correction applied).
-    /// Uses the same GameView-capture + dual-background-alpha pipeline as the normal mode.
-    /// </summary>
-
-
-
-
-
-    /// <summary>
-    /// Composite: objects from normalTransparent render (correct Game-view colors),
-    /// shadows extracted from ground passes underneath.
-    /// All inputs are in LINEAR color space.
-    /// </summary>
-
     // 获取 Hierarchy 中当前选中 GameObject 的名称。
     private static string GetSelectedGameObjectName()
     {

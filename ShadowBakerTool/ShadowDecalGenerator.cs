@@ -28,8 +28,7 @@ namespace ShadowBakerTool.Editor
         private const string CustomDecalShader = "Custom/ShadowDecal_Gradient_URP";
 
         /// <summary>
-        /// Build a quad mesh + material + GameObject from a bake result, save it as a prefab.
-        /// Returns the instantiated scene GameObject (so the user sees it immediately).
+        /// 从烘焙结果构建 Quad 网格 + 材质 + GameObject，保存为预制体，返回场景实例。
         /// </summary>
         public static GameObject Generate(BakeResult bake, DecalGenerateSettings opts)
         {
@@ -136,8 +135,7 @@ namespace ShadowBakerTool.Editor
         }
 
         /// <summary>
-        /// Build a flat quad on the XZ plane, centered on origin, facing up (+Y).
-        /// UVs cover the full quad (0,0) → (1,1) so the baked texture maps 1:1.
+        /// 在 XZ 平面构建平面 Quad，原点居中朝上(+Y)，UV 覆盖 0→1 使贴图 1:1 映射。
         /// </summary>
         private static Mesh BuildGroundQuad(float sizeX, float sizeZ)
         {

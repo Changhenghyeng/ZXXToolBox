@@ -6,10 +6,8 @@ using UnityEditor;
 namespace SelfShadowBakerTool.Editor
 {
     /// <summary>
-    /// Self-shadow baking window. Menu: Tools / Self Shadow Baker.
-    /// Bakes a fixed-sun self-shadow mask into a mesh's uv2 (lightmap UV) atlas,
-    /// for use with the Lit_BakedOcclusion shader (_Baked_Map, R channel, 1 = lit).
-    /// The sun direction must match the scene's real-time main light or shadows won't line up.
+    /// 自阴影烘焙窗口。将固定太阳方向的自阴影遮罩烘焙到模型 uv2 图集，配合 Lit_BakedOcclusion 着色器使用。
+    /// 光照方向需与场景主光源一致，否则阴影对不齐。
     /// </summary>
     public class SelfShadowBakerWindow : EditorWindow
     {
@@ -186,8 +184,7 @@ namespace SelfShadowBakerTool.Editor
             return false;
         }
 
-        /// <summary>Collect model asset names (with target name) for meshes whose
-        /// ModelImporter has generateSecondaryUV turned OFF.</summary>
+        /// <summary>收集未开启 generateSecondaryUV 的模型资源名（含目标名）。</summary>
         static List<string> GetModelsWithLightmapUVOff(GameObject go)
         {
             var result = new List<string>();
@@ -207,8 +204,7 @@ namespace SelfShadowBakerTool.Editor
             return result;
         }
 
-        /// <summary>Turn on generateSecondaryUV for all ModelImporters under the
-        /// given targets that currently have it off. Returns count changed.</summary>
+        /// <summary>为目标下未开启 generateSecondaryUV 的 ModelImporter 开启该选项，返回修改数量。</summary>
         static int FixLightmapUVImport(List<GameObject> targets)
         {
             var changed = new HashSet<string>();
