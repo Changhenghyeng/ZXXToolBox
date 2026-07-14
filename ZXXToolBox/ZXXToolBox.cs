@@ -20,6 +20,7 @@ public class ZXXToolBox : EditorWindow
     {
         ("ProcGen",              "在模型表面按规则散布预制体",                       "生成工具",   ProcGenWindow.Open),
         ("Wall Builder",         "墙段拼接：四面围合 / L 型 / 走廊 / 单排直线",      "生成工具",   WallBuilderTool.ShowWindow),
+        ("Building Card Prefab", "SLG 建筑 PNG：自动原点、面片和点击 BoxCollider",    "生成工具",   BuildingCardTool.ShowWindow),
         ("Box Collider Generator","批量为预制体生成 BoxCollider",                     "生成工具",   BoxColliderGenerator.ShowWindow),
         ("Shadow Baker",         "建筑顶光影子烘培 + 地面面片生成",                  "生成工具",   ShadowBakerWindow.Open),
         ("Self Shadow Baker",    "建筑自投影阴影烘焙：uv2 展开 + PCF 软边 + 自动赋 _BakedMap", "生成工具", SelfShadowBakerWindow.Open),
