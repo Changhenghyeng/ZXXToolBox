@@ -127,9 +127,15 @@ Unity 中 `Editor` 文件夹下的代码**无法在 PlayMode 运行时访问**�
 
 ### 版本发布
 
-- 每次同步新工具或重大更新后打 **Git Tag**（当前 `v0.1.0`）
-- Tag 可通过 Unity Package Manager 以 git URL 导入固定版本
-- 格式：`v<major>.<minor>.<patch>`，遵循语义化版本
+| 版本位 | 触发条件 | 示例 |
+|--------|----------|------|
+| **MAJOR** (`x.0.0`) | 不兼容的 API 改动、工具大改导致旧配置失效 | `v1.0.0`：API 稳定，正式版 |
+| **MINOR** (`0.x.0`) | 新增工具 / Shader / 运行时组件，向下兼容 | `v0.2.0`：新增 3 个工具 + 架构重构 |
+| **PATCH** (`0.0.x`) | Bug 修复、小优化，无新功能 | `v0.2.1`：修了个渲染问题 |
+
+- 当前 `v0.x` 表示早期开发阶段，工具数量和结构还在快速迭代
+- 每次同步前检查是否达到了 bump 条件，达标则打 tag
+- Tag 可通过 Unity Package Manager 以 git URL 导入固定版本：`https://github.com/Changhenghyeng/ZXXToolBox.git#v0.2.0`
 
 ### 提交规范
 
