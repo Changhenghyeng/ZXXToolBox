@@ -29,6 +29,7 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.1.0
 | **ZXXToolBox** | 工具箱主面板，可自定义工作流串联多个工具 | `Tools > ZXX ToolBox` |
 | **BatchRenameTool** | 批量重命名 Hierarchy 中的 GameObject，支持查找替换/前缀后缀/正则 | EditorWindow |
 | **BoxColliderGenerator** | 根据 Renderer 包围盒自动生成 BoxCollider | EditorWindow |
+| **BuildingCardTool** | 建筑面片预制体批量生成，用于快速搭建主城建筑白模 | EditorWindow |
 | **ConvertVariantToNormalPrefab** | 将 Prefab Variant 转换为普通 Prefab | 右键菜单 |
 | **DayChangeTransitionTool** | 昼夜切换材质过渡编辑与预览 | EditorWindow |
 | **FogOfWarTool** | 战争迷雾系统设置与生成 | EditorWindow |
@@ -96,6 +97,31 @@ ZXXToolBox/
 ```
 
 > 目录结构目前按功能平铺，计划逐步迁移至 `Editor/` + `Runtime/` 分离结构。
+
+---
+
+## 管理规则
+
+### 目录分类
+
+| 目录 | 用途 | 说明 |
+|------|------|------|
+| 根目录各工具文件夹 | **Editor 工具** | 仅 Editor 下运行，入口在 `Tools > ZXX ToolBox` |
+| `Runtime/` | **运行时组件** | 需要 PlayMode 执行，对应公司项目 `HotUpdate/` 路径 |
+| `Shaders/` | **通用 Shader** | 独立于具体工具的渲染 Shader |
+| `ZXXToolBox/` | **工具箱主入口** | 面板配置 `.asset` + 注册逻辑 |
+
+### 为什么有些文件不在 Editor 目录？
+
+Unity 中 `Editor` 文件夹下的代码**无法在 PlayMode 运行时访问**。以下组件因运行时需求被移到 `Runtime/`：
+
+| 组件 | 原 Editor 位置 | 原因 |
+|------|---------------|------|
+| DayChangeTransitionController | DayChangeTransitionTool | 昼夜过渡需在运行时驱动材质属性动画 |
+| FogGridClickSystem + Fog Of War.shader | FogOfWarTool | 战争迷雾需运行时响应点击交互和渲染 |
+| LightCookieScroller | LightCookieScroller | Light Cookie UV 滚动需在 PlayMode 下持续更新 |
+
+> 每个 Runtime 组件目录下都有 `README.md` 说明其作用和放置路径。
 
 ---
 
