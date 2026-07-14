@@ -40,14 +40,14 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.1.0
 | **OutlineTool** | 卡通描边效果设置 | 工具箱面板 |
 | **PrefabBatchReplacer** | 批量替换场景中的 Prefab 实例 | 工具箱面板 |
 | **PrefabExtractorTool** | 从场景中提取选中物体为 Prefab（支持 Undo/Backup） | 工具箱面板 |
-| **PrefabNameSyncTool** | 将 Prefab 实例名称同步为 Prefab 资源名称 | 静态方法 |
-| **PrefabRootNormalizer** | 规范化 Prefab 根节点（包裹/批量处理） | 工具箱面板 / 静态方法 |
+| **PrefabNameSyncTool** | 将 Prefab 实例名称同步为 Prefab 资源名称 | 工具箱面板 |
+| **PrefabRootNormalizer** | 规范化 Prefab 根节点（包裹/批量处理） | 工具箱面板 / `Ctrl+Shift+N` |
 | **ProcGen** | 程序化生成系统，基于 SpatialHash 的摆放与去重 | 工具箱面板 |
 | **SelfShadowBaker** | 自阴影（SDF 投影）烘焙 | 工具箱面板 |
 | **ShadingModeToggle** | 一键切换场景视图着色模式（Lit/Wireframe/Unlit 等） | 工具箱面板 |
 | **ShadowBakerTool** | 阴影贴图烘焙 + 贴花生成，含 Blur/Silhouette Shader | 工具箱面板 |
-| **ShadowCastOffTool** | 批量关闭选中物体的阴影投射 | 右键菜单 / 静态方法 |
-| **TransparentScreenshot** | 透明背景截图 + 粒子序列渲染 | 工具箱面板 |
+| **ShadowCastOffTool** | 批量关闭选中物体的阴影投射 | 工具箱面板 / `GameObject/Cast Shadows OFF` |
+| **TransparentScreenshot** | 透明背景截图 + 粒子序列渲染 | 工具箱面板 / `Ctrl+Shift+X` |
 | **WallBuilderTool** | 场景墙体快速搭建 | 工具箱面板 |
 
 ### 🏃 运行时组件
