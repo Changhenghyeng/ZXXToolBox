@@ -27,27 +27,27 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.1.0
 | 工具 | 功能 | 入口 |
 |------|------|------|
 | **ZXXToolBox** | 工具箱主面板，可自定义工作流串联多个工具 | `Tools > ZXX ToolBox` |
-| **BatchRenameTool** | 批量重命名 Hierarchy 中的 GameObject，支持查找替换/前缀后缀/正则 | EditorWindow |
-| **BoxColliderGenerator** | 根据 Renderer 包围盒自动生成 BoxCollider | EditorWindow |
-| **BuildingCardTool** | 建筑面片预制体批量生成，用于快速搭建主城建筑白模 | EditorWindow |
+| **BatchRenameTool** | 批量重命名 Hierarchy 中的 GameObject，支持查找替换/前缀后缀/正则 | 工具箱面板 |
+| **BoxColliderGenerator** | 根据 Renderer 包围盒自动生成 BoxCollider | 工具箱面板 |
+| **BuildingCardTool** | 建筑面片预制体批量生成，用于快速搭建主城建筑白模 | 工具箱面板 |
 | **ConvertVariantToNormalPrefab** | 将 Prefab Variant 转换为普通 Prefab | 右键菜单 |
-| **DayChangeTransitionTool** | 昼夜切换材质过渡编辑与预览 | EditorWindow |
-| **FogOfWarTool** | 战争迷雾系统设置与生成 | EditorWindow |
+| **DayChangeTransitionTool** | 昼夜切换材质过渡编辑与预览 | 工具箱面板 |
+| **FogOfWarTool** | 战争迷雾系统设置与生成 | 工具箱面板 |
 | **GitPathNavigator** | 在 Unity 内快速跳转到 Git 仓库路径 | 工具箱面板 / `Ctrl+G` |
 | **LabelTool** | 场景视图名称标签（Billboard 模式），含竹简气泡框样式 | 工具箱面板 |
-| **MeasureTool** | 场景视图距离/角度测量 | EditorWindow |
-| **OutlineTool** | 卡通描边效果设置 | EditorWindow |
-| **PrefabBatchReplacer** | 批量替换场景中的 Prefab 实例 | EditorWindow |
-| **PrefabExtractorTool** | 从场景中提取选中物体为 Prefab（支持 Undo/Backup） | EditorWindow |
+| **MeasureTool** | 场景视图距离/角度测量 | 工具箱面板 |
+| **OutlineTool** | 卡通描边效果设置 | 工具箱面板 |
+| **PrefabBatchReplacer** | 批量替换场景中的 Prefab 实例 | 工具箱面板 |
+| **PrefabExtractorTool** | 从场景中提取选中物体为 Prefab（支持 Undo/Backup） | 工具箱面板 |
 | **PrefabNameSyncTool** | 将 Prefab 实例名称同步为 Prefab 资源名称 | 静态方法 |
-| **PrefabRootNormalizer** | 规范化 Prefab 根节点（包裹/批量处理） | EditorWindow + 静态方法 |
-| **ProcGen** | 程序化生成系统，基于 SpatialHash 的摆放与去重 | EditorWindow |
+| **PrefabRootNormalizer** | 规范化 Prefab 根节点（包裹/批量处理） | 工具箱面板 / 静态方法 |
+| **ProcGen** | 程序化生成系统，基于 SpatialHash 的摆放与去重 | 工具箱面板 |
 | **SelfShadowBaker** | 自阴影（SDF 投影）烘焙 | 工具箱面板 |
-| **ShadingModeToggle** | 一键切换场景视图着色模式（Lit/Wireframe/Unlit 等） | EditorWindow |
-| **ShadowBakerTool** | 阴影贴图烘焙 + 贴花生成，含 Blur/Silhouette Shader | EditorWindow |
+| **ShadingModeToggle** | 一键切换场景视图着色模式（Lit/Wireframe/Unlit 等） | 工具箱面板 |
+| **ShadowBakerTool** | 阴影贴图烘焙 + 贴花生成，含 Blur/Silhouette Shader | 工具箱面板 |
 | **ShadowCastOffTool** | 批量关闭选中物体的阴影投射 | 右键菜单 / 静态方法 |
-| **TransparentScreenshot** | 透明背景截图 + 粒子序列渲染 | EditorWindow |
-| **WallBuilderTool** | 场景墙体快速搭建 | EditorWindow |
+| **TransparentScreenshot** | 透明背景截图 + 粒子序列渲染 | 工具箱面板 |
+| **WallBuilderTool** | 场景墙体快速搭建 | 工具箱面板 |
 
 ### 🏃 运行时组件
 
