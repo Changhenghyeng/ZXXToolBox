@@ -23,10 +23,14 @@ public class OutlineToolWindow : EditorWindow
         w.Show();
     }
 
+    private static GUIContent Content(string label, string tooltip) => new GUIContent(label, tooltip);
+
     private void OnGUI()
     {
-        _target = (GameObject)EditorGUILayout.ObjectField("Target", _target, typeof(GameObject), true);
-        _mat    = (Material)  EditorGUILayout.ObjectField("Material", _mat, typeof(Material), false);
+        _target = (GameObject)EditorGUILayout.ObjectField(
+            Content("Target", "拖入 Prefab 或场景物体。"), _target, typeof(GameObject), true);
+        _mat    = (Material)  EditorGUILayout.ObjectField(
+            Content("Material", "用于外描边的材质球，需使用 Custom/ToonOutline Shader。"), _mat, typeof(Material), false);
 
         // 切换 Target 时自动填入目标目录
         if (_target != _lastTarget)
@@ -36,10 +40,11 @@ public class OutlineToolWindow : EditorWindow
                 _outputPath = GetAssetFolder(_target);
         }
 
-        // 输出路径
+        // Output Path
         EditorGUILayout.BeginHorizontal();
-        _outputPath = EditorGUILayout.TextField("输出路径", _outputPath);
-        if (GUILayout.Button("...", GUILayout.Width(28)))
+        _outputPath = EditorGUILayout.TextField(
+            Content("Output Path", "输出目录：烘焙后的 _baked.mesh 文件存放位置。留空则输出到各源文件所在目录。"), _outputPath);
+        if (GUILayout.Button(Content("...", "选择输出目录，必须在当前项目 Assets 内。"), GUILayout.Width(28)))
         {
             string defaultFolder = Application.dataPath;
             if (!string.IsNullOrEmpty(_outputPath))
@@ -83,9 +88,9 @@ public class OutlineToolWindow : EditorWindow
             EditorStyles.miniLabel);
 
         EditorGUILayout.BeginHorizontal();
-        if (GUILayout.Button("Bake", GUILayout.Height(30)))         BakeAll();
-        if (GUILayout.Button("Add Material", GUILayout.Height(30))) AddMaterial();
-        if (GUILayout.Button("Clear", GUILayout.Height(30)))        ClearBake();
+        if (GUILayout.Button(Content("Bake", "复制 Mesh，平滑法线写入 UV2，存为 XXX_baked.mesh。重复 Bake 会覆盖旧文件，原始 fbx 不会被修改。"), GUILayout.Height(30)))         BakeAll();
+        if (GUILayout.Button(Content("Add Material", "为所有 Renderer 追加 Outline 材质。若未指定 Material 则自动创建。"), GUILayout.Height(30))) AddMaterial();
+        if (GUILayout.Button(Content("Clear", "还原所有 Renderer 的 Mesh 为原始 fbx Mesh，删除已生成的 _baked.mesh 文件。"), GUILayout.Height(30)))        ClearBake();
         EditorGUILayout.EndHorizontal();
 
         EditorGUILayout.HelpBox(

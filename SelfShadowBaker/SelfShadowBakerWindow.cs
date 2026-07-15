@@ -11,6 +11,8 @@ namespace SelfShadowBakerTool.Editor
     /// </summary>
     public class SelfShadowBakerWindow : EditorWindow
     {
+        private static GUIContent Content(string label, string tooltip) => new GUIContent(label, tooltip);
+
         // ---- 1. Source ----
         List<GameObject> _targets = new List<GameObject>();
 
@@ -121,8 +123,8 @@ namespace SelfShadowBakerTool.Editor
             EditorGUILayout.LabelField("1. Source", EditorStyles.boldLabel);
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("从选中项填入")) FillFromSelection();
-                if (GUILayout.Button("清空", GUILayout.Width(60))) _targets.Clear();
+                if (GUILayout.Button(Content("Fill From Selection", "从选中项填入"))) FillFromSelection();
+                if (GUILayout.Button(Content("Clear", "清空"), GUILayout.Width(60))) _targets.Clear();
             }
 
             int removeIdx = -1;
@@ -135,7 +137,7 @@ namespace SelfShadowBakerTool.Editor
                 }
             }
             if (removeIdx >= 0) _targets.RemoveAt(removeIdx);
-            if (GUILayout.Button("+ 添加")) _targets.Add(null);
+            if (GUILayout.Button(Content("+ Add", "添加"))) _targets.Add(null);
 
             int valid = 0;
             var disabledModels = new List<string>(); // "FBX名 ← 目标名"
@@ -146,9 +148,10 @@ namespace SelfShadowBakerTool.Editor
                 disabledModels.AddRange(GetModelsWithLightmapUVOff(t));
             }
 
-            EditorGUILayout.LabelField($"有效目标: {valid}" +
-                (disabledModels.Count > 0 ? $"   ⚠ {disabledModels.Count} 个模型未开启 Lightmap UV" : "   ✓ Lightmap UV 均已开启"),
-                EditorStyles.miniLabel);
+            string statusSuffix = disabledModels.Count > 0
+                ? $"   ⚠ {disabledModels.Count} model(s) missing Lightmap UV"
+                : "   ✓ All Lightmap UV enabled";
+            EditorGUILayout.LabelField(Content($"Valid Targets: {valid}{statusSuffix}", "有效目标统计"), EditorStyles.miniLabel);
 
             if (disabledModels.Count > 0)
             {
@@ -157,7 +160,7 @@ namespace SelfShadowBakerTool.Editor
                     "以下模型的「生成灯光贴图 UV」未勾选：\n• " +
                     string.Join("\n• ", disabledModels),
                     MessageType.Warning);
-                if (GUILayout.Button("生成灯光贴图 UV"))
+                if (GUILayout.Button(Content("Generate Lightmap UVs", "生成灯光贴图 UV")))
                 {
                     int n = FixLightmapUVImport(_targets);
                     EditorUtility.DisplayDialog("完成",
@@ -233,19 +236,19 @@ namespace SelfShadowBakerTool.Editor
         // ---------------------------------------------------------- Light
         void DrawLight()
         {
-            EditorGUILayout.LabelField("2. Light（太阳方向）", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("2. Light (Sun Direction)", EditorStyles.boldLabel);
             _lightMode = (LightMode)EditorGUILayout.EnumPopup("Source Mode", _lightMode);
 
             switch (_lightMode)
             {
                 case LightMode.SceneMainLight:
                     var main = FindSceneMainLight();
-                    EditorGUILayout.LabelField("主光",
-                        main != null ? main.name : "（未找到方向光，回退默认方向）");
+                    EditorGUILayout.LabelField(Content("Main Light", "主光"),
+                        main != null ? main.name : "(No directional light found, using default direction)");
                     break;
                 case LightMode.ManualLight:
                     _manualLight = (Light)EditorGUILayout.ObjectField("Light", _manualLight, typeof(Light), true);
-                    if (GUILayout.Button("抓取场景主光")) _manualLight = FindSceneMainLight();
+                    if (GUILayout.Button(Content("Grab Scene Main Light", "抓取场景主光"))) _manualLight = FindSceneMainLight();
                     break;
                 case LightMode.EulerAngles:
                     _lightEuler = EditorGUILayout.Vector3Field("Euler (X=pitch, Y=yaw)", _lightEuler);
@@ -259,7 +262,7 @@ namespace SelfShadowBakerTool.Editor
             EditorGUILayout.LabelField("→ Direction", ResolveLightDirection().ToString("F3"), EditorStyles.miniLabel);
 
             bool prev = _previewInScene;
-            _previewInScene = EditorGUILayout.ToggleLeft("在场景中预览光照范围（黄=方向, 橙=覆盖框）", _previewInScene);
+            _previewInScene = EditorGUILayout.ToggleLeft(Content("Preview light range in Scene View (Yellow=Direction, Orange=Coverage box)", "在场景中预览光照范围（黄=方向, 橙=覆盖框）"), _previewInScene);
             if (_previewInScene != prev) { HookSceneGui(_previewInScene); SceneView.RepaintAll(); }
         }
 
@@ -297,20 +300,20 @@ namespace SelfShadowBakerTool.Editor
         // ---------------------------------------------------------- Bake settings
         void DrawBakeSettings()
         {
-            EditorGUILayout.LabelField("3. Self-Shadow (R) + 通用参数", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("3. Self-Shadow (R) + Common Params", EditorStyles.boldLabel);
 
             _resolution = ResPopup("Bake Resolution (uv2)", _resolution);
             _shadowRes = ResPopup("Shadow Map Resolution", _shadowRes);
 
             EditorGUILayout.Space(2);
-            EditorGUILayout.LabelField("软边 (PCF)", EditorStyles.miniBoldLabel);
+            EditorGUILayout.LabelField(Content("Soft Edges (PCF)", "软边 (PCF)"), EditorStyles.miniBoldLabel);
             _pcfRadius = EditorGUILayout.Slider("PCF Radius (texel)", _pcfRadius, 0f, 8f);
             _pcfTaps = EditorGUILayout.IntPopup("PCF Taps", _pcfTaps,
-                new[] { "1x1 (硬)", "3x3", "5x5", "7x7", "9x9" },
+                new[] { "1x1 (Hard)", "3x3", "5x5", "7x7", "9x9" },
                 new[] { 1, 3, 5, 7, 9 });
 
             EditorGUILayout.Space(2);
-            EditorGUILayout.LabelField("去 Acne (bias，单位=阴影贴图纹素)", EditorStyles.miniBoldLabel);
+            EditorGUILayout.LabelField(Content("Anti-Acne (bias, unit=shadow map texel)", "去 Acne (bias, 单位=阴影贴图纹素)"), EditorStyles.miniBoldLabel);
             _depthBias = EditorGUILayout.Slider("Depth Bias", _depthBias, 0f, 16f);
             _normalBias = EditorGUILayout.Slider("Normal Bias", _normalBias, 0f, 16f);
             EditorGUILayout.HelpBox(
@@ -319,10 +322,10 @@ namespace SelfShadowBakerTool.Editor
                 MessageType.None);
 
             EditorGUILayout.Space(2);
-            EditorGUILayout.LabelField("收尾", EditorStyles.miniBoldLabel);
+            EditorGUILayout.LabelField(Content("Finishing", "收尾"), EditorStyles.miniBoldLabel);
             _dilate = EditorGUILayout.IntSlider("Seam Dilation (px)", _dilate, 0, 16);
-            _invert = EditorGUILayout.Toggle("Invert R (1=阴影)", _invert);
-            _flipV = EditorGUILayout.Toggle("Flip V (展开翻转)", _flipV);
+            _invert = EditorGUILayout.Toggle(Content("Invert R (1=Shadow)", "Invert R (1=阴影)"), _invert);
+            _flipV = EditorGUILayout.Toggle(Content("Flip V (UV Flip)", "Flip V (展开翻转)"), _flipV);
             EditorGUILayout.HelpBox("R 通道存自阴影、G/B=1（匹配 _Baked_Map）。朝向已在 shader 内按平台适配，Flip V 常态保持关闭；仅个别模型上下镜像时才勾。",
                 MessageType.None);
         }
@@ -340,13 +343,13 @@ namespace SelfShadowBakerTool.Editor
         // ---------------------------------------------------------- AO
         void DrawAoSettings()
         {
-            EditorGUILayout.LabelField("3b. Ambient Occlusion (G 通道)", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("3b. Ambient Occlusion (G Channel)", EditorStyles.boldLabel);
             _aoSamples = EditorGUILayout.IntPopup("AO Samples", _aoSamples,
-                new[] { "16 (快/糙)", "32", "64", "128", "256 (慢/细)" }, _aoSampleChoices);
+                new[] { "16 (Fast/Rough)", "32", "64", "128", "256 (Slow/Fine)" }, _aoSampleChoices);
             _aoDepthRes = ResPopup("AO Depth Res", _aoDepthRes);
-            _aoMaxDistance = Mathf.Max(0f, EditorGUILayout.FloatField("Max Distance (0=自动)", _aoMaxDistance));
-            _aoLightBias = EditorGUILayout.Slider("Light Bias (0=环境 1=偏光)", _aoLightBias, 0f, 1f);
-            _aoPower = EditorGUILayout.Slider("Power (对比)", _aoPower, 0.2f, 4f);
+            _aoMaxDistance = Mathf.Max(0f, EditorGUILayout.FloatField(Content("Max Distance (0=Auto)", "Max Distance (0=自动)"), _aoMaxDistance));
+            _aoLightBias = EditorGUILayout.Slider(Content("Light Bias (0=Ambient 1=Directional)", "Light Bias (0=环境 1=偏光)"), _aoLightBias, 0f, 1f);
+            _aoPower = EditorGUILayout.Slider(Content("Power (Contrast)", "Power (对比)"), _aoPower, 0.2f, 4f);
             EditorGUILayout.HelpBox(
                 "局部 AO：只统计 Max Distance 内的遮挡(0=按模型自动)。Light Bias 让 AO 偏向太阳方向(0=普通环境 AO)。\n" +
                 "结果写入 G 通道、不动 R。采样越多越细但越慢。",
@@ -356,8 +359,8 @@ namespace SelfShadowBakerTool.Editor
         // ---------------------------------------------------------- Fill (reflected light)
         void DrawFillSettings()
         {
-            EditorGUILayout.LabelField("3c. 反光 / 暗部回光 (B 通道)", EditorStyles.boldLabel);
-            _fillOffset = EditorGUILayout.Vector3Field("Fill 方向偏移 (加到 -太阳)", _fillOffset);
+            EditorGUILayout.LabelField("3c. Fill / Reflected Light (B Channel)", EditorStyles.boldLabel);
+            _fillOffset = EditorGUILayout.Vector3Field(Content("Fill Direction Offset (added to -Sun)", "Fill 方向偏移 (加到 -太阳)"), _fillOffset);
 
             Vector3 fillDir = -ResolveLightDirection() + _fillOffset;
             if (fillDir.sqrMagnitude < 1e-6f) fillDir = -ResolveLightDirection();
@@ -402,18 +405,18 @@ namespace SelfShadowBakerTool.Editor
             {
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    if (GUILayout.Button("Bake 自阴影 R", GUILayout.Height(30))) DoBatchBake(true, false, false);
-                    if (GUILayout.Button("Bake AO G", GUILayout.Height(30))) DoBatchBake(false, true, false);
-                    if (GUILayout.Button("Bake 反光 B", GUILayout.Height(30))) DoBatchBake(false, false, true);
+                    if (GUILayout.Button(Content("Bake Self-Shadow R", "Bake 自阴影 R"), GUILayout.Height(30))) DoBatchBake(true, false, false);
+                    if (GUILayout.Button(Content("Bake AO G", "Bake AO G"), GUILayout.Height(30))) DoBatchBake(false, true, false);
+                    if (GUILayout.Button(Content("Bake Fill B", "Bake 反光 B"), GUILayout.Height(30))) DoBatchBake(false, false, true);
                 }
-                if (GUILayout.Button($"Bake R+G+B 全部 ({count} targets)", GUILayout.Height(26))) DoBatchBake(true, true, true);
+                if (GUILayout.Button(Content($"Bake R+G+B All ({count} targets)", "Bake R+G+B 全部"), GUILayout.Height(26))) DoBatchBake(true, true, true);
             }
-            EditorGUILayout.LabelField("分开烘各自保留其它通道；全部则三者都重算。", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField(Content("Bake separately to preserve other channels; 'All' recomputes all three.", "分开烘各自保留其它通道；全部则三者都重算。"), EditorStyles.miniLabel);
         }
 
         void DrawPreviews()
         {
-            EditorGUILayout.LabelField("最近烘焙结果", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(Content("Latest Bake Results", "最近烘焙结果"), EditorStyles.boldLabel);
             foreach (var p in _previews)
             {
                 using (new EditorGUILayout.HorizontalScope("box"))
@@ -492,7 +495,7 @@ namespace SelfShadowBakerTool.Editor
             renderers.RemoveAll(r => r == null);
             if (renderers.Count == 0)
             {
-                error = "无 MeshRenderer";
+                error = "No MeshRenderer";
                 if (loadedPrefab != null) PrefabUtility.UnloadPrefabContents(loadedPrefab);
                 return false;
             }
@@ -530,10 +533,10 @@ namespace SelfShadowBakerTool.Editor
             if (result != null)
             {
                 string info = $"{result.MeshCount} mesh";
-                if (bakeShadow) info += $" · 阴影 {result.ShadowedPercent:F0}%";
+                if (bakeShadow) info += $" · Shadow {result.ShadowedPercent:F0}%";
                 if (bakeAO) info += $" · AO {result.AoPercent:F0}%";
-                if (bakeFill) info += " · 反光 B";
-                if (result.Skipped.Count > 0) info += $" · 跳过 {result.Skipped.Count}";
+                if (bakeFill) info += " · Fill B";
+                if (result.Skipped.Count > 0) info += $" · Skipped {result.Skipped.Count}";
                 _previews.Add(new PreviewItem { name = target.name, tex = result.Texture, info = info });
                 return true;
             }

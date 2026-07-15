@@ -75,7 +75,7 @@ namespace ShadowBakerTool.Editor
         {
             _scroll = EditorGUILayout.BeginScrollView(_scroll);
 
-            EditorGUILayout.LabelField("Shadow Baker", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(Content("Shadow Baker", "为建筑烘培柔和的俯视投影贴图并生成地面贴花面片。"), EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
                 "为建筑烘培一张柔和的俯视投影贴图，并生成对应的地面贴花面片。",
                 MessageType.None);
@@ -108,19 +108,19 @@ namespace ShadowBakerTool.Editor
         // ---------- Sections ----------
         private void DrawSourceSection()
         {
-            EditorGUILayout.LabelField("1. Source", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(Content("1. Source", "添加烘焙目标建筑。"), EditorStyles.boldLabel);
             DrawBatchSourceList();
         }
 
         private void DrawBatchSourceList()
         {
-            EditorGUILayout.LabelField("Batch Targets", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(Content("Batch Targets", "要烘焙阴影的建筑物体列表。"), EditorStyles.boldLabel);
 
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("Fill From Selection"))
+                if (GUILayout.Button(Content("Fill From Selection", "从当前 Hierarchy 选中的物体填入列表。")))
                     FillBatchFromSelection();
-                if (GUILayout.Button("Clear", GUILayout.Width(60)))
+                if (GUILayout.Button(Content("Clear", "清空目标列表。"), GUILayout.Width(60)))
                     _batchTargets.Clear();
             }
 
@@ -131,17 +131,17 @@ namespace ShadowBakerTool.Editor
                 {
                     _batchTargets[i] = (GameObject)EditorGUILayout.ObjectField(
                         _batchTargets[i], typeof(GameObject), true);
-                    if (GUILayout.Button("-", GUILayout.Width(22)))
+                    if (GUILayout.Button(Content("-", "移除此项。"), GUILayout.Width(22)))
                         removeIdx = i;
                 }
             }
             if (removeIdx >= 0) _batchTargets.RemoveAt(removeIdx);
 
-            if (GUILayout.Button("+ Add"))
+            if (GUILayout.Button(Content("+ Add", "添加一个空槽位。")))
                 _batchTargets.Add(null);
 
             int valid = _batchTargets.FindAll(t => t != null).Count;
-            EditorGUILayout.LabelField($"Valid Targets: {valid}", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField(Content($"Valid Targets: {valid}", "列表中有效（非空）的目标数量。"), EditorStyles.miniLabel);
         }
 
         private void FillBatchFromSelection()
@@ -163,33 +163,33 @@ namespace ShadowBakerTool.Editor
 
         private void DrawLightSection()
         {
-            EditorGUILayout.LabelField("2. Light", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(Content("2. Light", "设置光源方向与强度。"), EditorStyles.boldLabel);
 
-            _lightMode = (LightSourceMode)EditorGUILayout.EnumPopup("Source Mode", _lightMode);
+            _lightMode = (LightSourceMode)EditorGUILayout.EnumPopup(Content("Source Mode", "光源方向输入方式：手动拖入灯光、欧拉角或方向向量。"), _lightMode);
             switch (_lightMode)
             {
                 case LightSourceMode.ManualLight:
-                    _manualLight = (Light)EditorGUILayout.ObjectField("Light", _manualLight, typeof(Light), true);
+                    _manualLight = (Light)EditorGUILayout.ObjectField(Content("Light", "拖入场景中的 Directional Light。"), _manualLight, typeof(Light), true);
                     if (_manualLight != null)
                     {
                         EditorGUILayout.LabelField("→ Direction", _manualLight.transform.forward.ToString("F2"));
                     }
                     break;
                 case LightSourceMode.EulerAngles:
-                    _lightEuler = EditorGUILayout.Vector3Field("Euler (X=pitch, Y=yaw)", _lightEuler);
+                    _lightEuler = EditorGUILayout.Vector3Field(Content("Euler (X=pitch, Y=yaw)", "用欧拉角指定光源方向。X=俯仰角，Y=偏航角。"), _lightEuler);
                     break;
                 case LightSourceMode.DirectionVector:
-                    _lightDir = EditorGUILayout.Vector3Field("Direction (world)", _lightDir);
+                    _lightDir = EditorGUILayout.Vector3Field(Content("Direction (world)", "世界空间中的光源方向向量。"), _lightDir);
                     EditorGUILayout.HelpBox("光从太阳指向地面，Y 分量应为负值。", MessageType.None);
                     break;
             }
 
-            _lightIntensity = EditorGUILayout.Slider("Intensity", _lightIntensity, 0f, 1f);
+            _lightIntensity = EditorGUILayout.Slider(Content("Intensity", "光源强度，影响阴影的深浅。"), _lightIntensity, 0f, 1f);
         }
 
         private void DrawBakeSettingsSection()
         {
-            EditorGUILayout.LabelField("3. Bake Settings", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(Content("3. Bake Settings", "阴影烘焙质量与柔边参数。"), EditorStyles.boldLabel);
 
             // Resolution dropdown
             int curIdx = System.Array.IndexOf(_resolutionChoices, _resolution);
@@ -197,17 +197,17 @@ namespace ShadowBakerTool.Editor
             string[] labels = new string[_resolutionChoices.Length];
             for (int i = 0; i < _resolutionChoices.Length; i++)
                 labels[i] = _resolutionChoices[i].ToString();
-            curIdx = EditorGUILayout.Popup("Base Resolution", curIdx, labels);
+            curIdx = EditorGUILayout.Popup(Content("Base Resolution", "烘焙阴影贴图的基础分辨率（像素）。"), curIdx, labels);
             _resolution = _resolutionChoices[curIdx];
 
-            _softness = (SoftnessMode)EditorGUILayout.EnumPopup("Softness Mode", _softness);
+            _softness = (SoftnessMode)EditorGUILayout.EnumPopup(Content("Softness Mode", "柔边算法：Gaussian 均匀模糊 / DistanceField 距离场柔边。"), _softness);
             if (_softness == SoftnessMode.DistanceField)
             {
-                _falloffPx = EditorGUILayout.Slider("Falloff Distance (px)", _falloffPx, 1f, 128f);
-                _maxAlpha = EditorGUILayout.Slider("Max Alpha (at contact)", _maxAlpha, 0f, 1f);
-                _minAlpha = EditorGUILayout.Slider("Min Alpha (far edge)", _minAlpha, 0f, 1f);
-                _falloffPow = EditorGUILayout.Slider("Falloff Curve (1 = linear)", _falloffPow, 0.2f, 4f);
-                _samples = EditorGUILayout.IntSlider("Distance Samples", _samples, 8, 96);
+                _falloffPx = EditorGUILayout.Slider(Content("Falloff Distance (px)", "柔边光晕向外延伸的像素数。"), _falloffPx, 1f, 128f);
+                _maxAlpha = EditorGUILayout.Slider(Content("Max Alpha (at contact)", "阴影接触点的最大不透明度。"), _maxAlpha, 0f, 1f);
+                _minAlpha = EditorGUILayout.Slider(Content("Min Alpha (far edge)", "阴影远端边缘的最小不透明度。"), _minAlpha, 0f, 1f);
+                _falloffPow = EditorGUILayout.Slider(Content("Falloff Curve (1 = linear)", "衰减曲线指数：>1 深色保持更久再快速衰减，<1 立即淡出。"), _falloffPow, 0.2f, 4f);
+                _samples = EditorGUILayout.IntSlider(Content("Distance Samples", "距离场计算的采样次数，越高越精确但越慢。"), _samples, 8, 96);
 
                 EditorGUILayout.HelpBox(
                     "距离场柔边：像素深浅取决于到影子边缘的距离。接触处保持深色，远端边缘平滑淡出。\n" +
@@ -218,12 +218,12 @@ namespace ShadowBakerTool.Editor
             }
             else
             {
-                _falloffPx = EditorGUILayout.Slider("Blur Radius (px)", _falloffPx, 1f, 40f);
+                _falloffPx = EditorGUILayout.Slider(Content("Blur Radius (px)", "高斯模糊的半径像素数。"), _falloffPx, 1f, 40f);
                 EditorGUILayout.HelpBox("普通的均匀高斯模糊。", MessageType.None);
             }
 
             // Updated padding UI (fixed world units)
-            _footprintPadding = EditorGUILayout.FloatField("Footprint Padding (m)", _footprintPadding);
+            _footprintPadding = EditorGUILayout.FloatField(Content("Footprint Padding (m)", "阴影四周留白的世界单位（米）。"), _footprintPadding);
             _footprintPadding = Mathf.Max(0f, _footprintPadding);
 
             EditorGUILayout.HelpBox(
@@ -234,14 +234,14 @@ namespace ShadowBakerTool.Editor
 
             // Gradient
             EditorGUILayout.Space(4);
-            _enableGradient = EditorGUILayout.Toggle("Enable Gradient", _enableGradient);
+            _enableGradient = EditorGUILayout.Toggle(Content("Enable Gradient", "启用阴影渐变效果，可让影子随方向逐渐变淡。"), _enableGradient);
             if (_enableGradient)
             {
                 EditorGUI.indentLevel++;
-                _gradientAngle = EditorGUILayout.Slider("Angle", _gradientAngle, 0f, 360f);
-                _gradientPosition = EditorGUILayout.Slider("Position", _gradientPosition, 0f, 1f);
-                _gradientWidth = EditorGUILayout.Slider("Width", _gradientWidth, 0f, 1f);
-                _gradientColor = EditorGUILayout.ColorField(new GUIContent(
+                _gradientAngle = EditorGUILayout.Slider(Content("Angle", "渐变方向角度：0°=上→下，90°=左→右。"), _gradientAngle, 0f, 360f);
+                _gradientPosition = EditorGUILayout.Slider(Content("Position", "渐变过渡的中心位置（0=起点端，1=终点端）。"), _gradientPosition, 0f, 1f);
+                _gradientWidth = EditorGUILayout.Slider(Content("Width", "渐变过渡带的宽度（0=锐利边界，1=铺满全图）。"), _gradientWidth, 0f, 1f);
+                _gradientColor = EditorGUILayout.ColorField(Content(
                     "Color",
                     "渐变目标颜色。RGB=色调，Alpha=渐变强度（0=无效果，1=完全过渡）。\n" +
                     "例如白色 Alpha=0.1 → 影子只轻微变淡 10%。"),
@@ -257,30 +257,30 @@ namespace ShadowBakerTool.Editor
 
         private void DrawDecalSection()
         {
-            EditorGUILayout.LabelField("4. Decal Output", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(Content("4. Decal Output", "地面贴花面片生成设置。"), EditorStyles.boldLabel);
 
-            _decalShader = (DecalShaderType)EditorGUILayout.EnumPopup("Decal Shader", _decalShader);
-            _yOffset = EditorGUILayout.FloatField("Y Offset (from pivot)", _yOffset);
-            _shadowColor = EditorGUILayout.ColorField(new GUIContent(
+            _decalShader = (DecalShaderType)EditorGUILayout.EnumPopup(Content("Decal Shader", "生成贴花面片使用的 Shader 类型。"), _decalShader);
+            _yOffset = EditorGUILayout.FloatField(Content("Y Offset (from pivot)", "贴花面片相对于建筑 pivot 的 Y 轴偏移量。"), _yOffset);
+            _shadowColor = EditorGUILayout.ColorField(Content(
                 "Shadow Color",
                 "颜色 = 影子色调 (RGB) + 强度 (Alpha)"),
                 _shadowColor, true, true, false);
-            _attachUnderBuilding = EditorGUILayout.Toggle("Attach Under Building", _attachUnderBuilding);
-            _disableCastShadows = EditorGUILayout.Toggle(new GUIContent(
+            _attachUnderBuilding = EditorGUILayout.Toggle(Content("Attach Under Building", "将生成的贴花面片挂载到建筑物体下。"), _attachUnderBuilding);
+            _disableCastShadows = EditorGUILayout.Toggle(Content(
                 "Disable Cast Shadows After Bake",
                 "烘培完成后，把参与烘培的网格的 Cast Shadows 关掉。"), _disableCastShadows);
-            _skipTransparentMaterials = EditorGUILayout.Toggle(new GUIContent(
+            _skipTransparentMaterials = EditorGUILayout.Toggle(Content(
                 "Skip Transparent Materials",
                 "跳过半透明材质的子网格，不计入影子剪影。"), _skipTransparentMaterials);
         }
 
         private void DrawOutputSection()
         {
-            EditorGUILayout.LabelField("5. Output Paths", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(Content("5. Output Paths", "设置输出目录。"), EditorStyles.boldLabel);
 
             using (new EditorGUILayout.HorizontalScope())
             {
-                _outputFolder = EditorGUILayout.TextField("Folder", _outputFolder);
+                _outputFolder = EditorGUILayout.TextField(Content("Folder", "阴影贴图和贴花预制体的输出目录。"), _outputFolder);
                 if (GUILayout.Button("…", GUILayout.Width(28)))
                 {
                     string picked = EditorUtility.OpenFolderPanel("Pick output folder", _outputFolder, "");
@@ -552,6 +552,11 @@ namespace ShadowBakerTool.Editor
                 if (go != null && go.name.EndsWith("_ShadowDecal", System.StringComparison.OrdinalIgnoreCase))
                     Undo.DestroyObjectImmediate(go);
             }
+        }
+
+        private static GUIContent Content(string label, string tooltip)
+        {
+            return new GUIContent(label, tooltip);
         }
 
         // ── EditorPrefs persistence (used by Workflow) ──

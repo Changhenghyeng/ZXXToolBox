@@ -136,6 +136,7 @@ public sealed class BuildingCardTool : EditorWindow
 
     private readonly List<Entry> entries = new List<Entry>();
     private readonly Settings settings = new Settings();
+    private readonly BuildingCardAtlasPanel atlasPanel = new BuildingCardAtlasPanel();
 
     private Camera referenceCamera;
     private Vector2 scroll;
@@ -198,6 +199,7 @@ public sealed class BuildingCardTool : EditorWindow
         EditorGUILayout.Space(4);
         DrawInputToolbar();
         DrawEntries();
+        atlasPanel.Draw(settings.outputFolder);
         EditorGUILayout.EndVertical();
 
         var splitterRect = GUILayoutUtility.GetRect(SplitterWidth, 0f, GUILayout.Width(SplitterWidth), GUILayout.ExpandHeight(true));
@@ -214,7 +216,7 @@ public sealed class BuildingCardTool : EditorWindow
 
         EditorGUILayout.BeginVertical(EditorStyles.helpBox, GUILayout.Width(previewPanelWidth));
         DrawPreview(previewPanelWidth);
-        DrawActions();
+        if (!atlasPanel.IsPreviewActive) DrawActions();
         GUILayout.FlexibleSpace();
         DrawSignature();
         EditorGUILayout.EndVertical();
@@ -312,6 +314,7 @@ public sealed class BuildingCardTool : EditorWindow
             "黄色 ↔ 绿色：互为对角点；拖动其中一个时，另一个固定。\n" +
             "青色 ↔ 青色：互为对角点；规则相同。\n" +
             "角点拖动只改变统一比例，不允许破坏相机角度、对边关系或 Grid 宽深比；红点会自动移动到新的对角线交点。");
+
     }
 
     private static void DrawGuideSection(string title, string body)
@@ -344,6 +347,7 @@ public sealed class BuildingCardTool : EditorWindow
         if (GUILayout.Button(Content("Browse", "选择位于当前 Unity 项目 Assets 下的输出目录。"), GUILayout.Width(66)))
             SelectOutputFolder();
         EditorGUILayout.EndHorizontal();
+
         EditorGUILayout.EndVertical();
 
         if (EditorGUI.EndChangeCheck())
@@ -440,18 +444,25 @@ public sealed class BuildingCardTool : EditorWindow
                 typeof(Texture2D),
                 false) as Texture2D;
             if (replacementTexture != null && replacementTexture != entry.texture &&
-                !entries.Exists(other => other != entry && other.texture == replacementTexture))
+                BuildingCardAtlasBuilder.IsGeneratedAtlasTexture(replacementTexture))
+            {
+                ShowNotification(Content("Atlas output is read-only", "生成的图集不能用于再次生成建筑预制体。"));
+            }
+            else if (replacementTexture != null && replacementTexture != entry.texture &&
+                     !entries.Exists(other => other != entry && other.texture == replacementTexture))
             {
                 entry.texture = replacementTexture;
                 entry.useManualGroundPoints = false;
                 entry.generationError = null;
                 entry.result = Analyze(entry);
                 previewIndex = i;
+                atlasPanel.HidePreview();
                 SaveWorkspaceState();
             }
             if (GUILayout.Button(Content("Preview", "查看分析结果；可直接拖动四个角点或红色中心点，松开鼠标后会立即保存并重新计算。"), GUILayout.Width(60)))
             {
                 previewIndex = i;
+                atlasPanel.HidePreview();
                 SaveWorkspaceState();
             }
             if (GUILayout.Button(Content("×", "从当前工具列表移除此图片，不删除源文件或已生成资源。"), GUILayout.Width(22)))
@@ -482,6 +493,7 @@ public sealed class BuildingCardTool : EditorWindow
             EditorGUILayout.LabelField(resultText, EditorStyles.miniLabel, GUILayout.ExpandWidth(true));
             GUI.color = oldColor;
             EditorGUILayout.EndHorizontal();
+
             EditorGUILayout.EndVertical();
 
             if (removeRequested)
@@ -510,6 +522,11 @@ public sealed class BuildingCardTool : EditorWindow
 
     private void DrawPreview(float previewPanelWidth)
     {
+        if (atlasPanel.TryGetPreview(out var atlasTexture, out var atlasPage, out var atlasPageCount))
+        {
+            DrawAtlasPreview(previewPanelWidth, atlasTexture, atlasPage, atlasPageCount);
+            return;
+        }
         DrawPreviewHeader();
         if (previewIndex < 0 || previewIndex >= entries.Count)
         {
@@ -562,6 +579,7 @@ public sealed class BuildingCardTool : EditorWindow
 
         if (result == null || !result.success)
         {
+            HandlePreviewTexturePing(rect, entry.texture);
             EditorGUILayout.HelpBox(result == null ? "请先分析此图片。" : result.message, MessageType.Warning);
             return;
         }
@@ -575,11 +593,72 @@ public sealed class BuildingCardTool : EditorWindow
         var centerPoint = GetPreviewFootprintCenter(entry, result, nearPoint, leftPoint, rightPoint, farPoint);
         DrawMarker(rect, entry.texture, centerPoint, Color.red);
         HandlePreviewPointEditing(rect, entry);
+        HandlePreviewTexturePing(rect, entry.texture);
         GUILayout.Label(constraintText, previewTextStyle, GUILayout.Width(textWidth));
         GUILayout.Label(
             new GUIContent(detailsText, "Collider Fit：碰撞投影与高 Alpha 建筑实体轮廓的重合度。Ground Fit：自动地面边的拟合质量；Manual 表示已采用手动控制点。"),
             previewTextStyle,
             GUILayout.Width(textWidth));
+    }
+
+    private static void HandlePreviewTexturePing(Rect imageRect, Texture2D texture)
+    {
+        if (texture == null) return;
+        var evt = Event.current;
+        if (evt.type != EventType.MouseDown || evt.button != 0 || !imageRect.Contains(evt.mousePosition)) return;
+        Selection.activeObject = texture;
+        EditorGUIUtility.PingObject(texture);
+        evt.Use();
+    }
+
+    private void DrawAtlasPreview(float previewPanelWidth, Texture2D texture, int pageIndex, int pageCount)
+    {
+        EditorGUILayout.Space(5f);
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.LabelField("Atlas Preview", EditorStyles.boldLabel);
+        GUILayout.FlexibleSpace();
+        if (pageCount > 1)
+        {
+            if (GUILayout.Button("◀", EditorStyles.miniButtonLeft, GUILayout.Width(24f)))
+                atlasPanel.MovePreviewPage(-1);
+            GUILayout.Label((pageIndex + 1) + " / " + pageCount, EditorStyles.miniLabel, GUILayout.Width(42f));
+            if (GUILayout.Button("▶", EditorStyles.miniButtonRight, GUILayout.Width(24f)))
+                atlasPanel.MovePreviewPage(1);
+        }
+        var nextUnityPreview = GUILayout.Toggle(
+            useUnityPreview,
+            Content("Alpha Preview", "切换图集透明棋盘预览。"),
+            EditorStyles.miniButton,
+            GUILayout.Width(105f));
+        if (nextUnityPreview != useUnityPreview)
+        {
+            useUnityPreview = nextUnityPreview;
+            EditorPrefs.SetBool(UnityPreviewPrefsKey, useUnityPreview);
+        }
+        EditorGUILayout.EndHorizontal();
+
+        var previewMaxHeight = Mathf.Max(120f, position.height - 105f);
+        var rect = GUILayoutUtility.GetAspectRect(
+            (float)texture.width / Mathf.Max(1, texture.height),
+            GUILayout.ExpandWidth(true),
+            GUILayout.MaxHeight(previewMaxHeight));
+        if (useUnityPreview)
+            DrawUnityStyleTexturePreview(rect, texture);
+        else
+            EditorGUI.DrawPreviewTexture(rect, texture, null, ScaleMode.ScaleToFit);
+        EditorGUIUtility.AddCursorRect(rect, MouseCursor.Link);
+        var evt = Event.current;
+        if (evt.type == EventType.MouseDown && evt.button == 0 && rect.Contains(evt.mousePosition))
+        {
+            Selection.activeObject = texture;
+            EditorGUIUtility.PingObject(texture);
+            evt.Use();
+        }
+        GUILayout.Label(
+            new GUIContent("Read-only Atlas output · Click the image to locate it in Project.",
+                "图集只用于预览和定位，不能作为建筑预制体的输入图片。"),
+            EditorStyles.wordWrappedMiniLabel,
+            GUILayout.Width(Mathf.Max(80f, previewPanelWidth - 16f)));
     }
 
     private void DrawPreviewHeader()
@@ -886,7 +965,18 @@ public sealed class BuildingCardTool : EditorWindow
     {
         var evt = Event.current;
         if ((evt.type != EventType.DragUpdated && evt.type != EventType.DragPerform) || !rect.Contains(evt.mousePosition)) return;
-        DragAndDrop.visualMode = DragAndDropVisualMode.Copy;
+        var hasBuildingSource = false;
+        var hasAtlasOutput = false;
+        foreach (var obj in DragAndDrop.objectReferences)
+        {
+            var texture = GetTextureFromObject(obj);
+            if (texture == null) continue;
+            if (BuildingCardAtlasBuilder.IsGeneratedAtlasTexture(texture)) hasAtlasOutput = true;
+            else hasBuildingSource = true;
+        }
+        DragAndDrop.visualMode = hasBuildingSource
+            ? DragAndDropVisualMode.Copy
+            : hasAtlasOutput ? DragAndDropVisualMode.Rejected : DragAndDropVisualMode.None;
         if (evt.type != EventType.DragPerform) return;
 
         DragAndDrop.AcceptDrag();
@@ -898,25 +988,31 @@ public sealed class BuildingCardTool : EditorWindow
     private void AddObject(UnityEngine.Object obj)
     {
         if (obj == null) return;
+        AddTexture(GetTextureFromObject(obj));
+    }
+
+    private static Texture2D GetTextureFromObject(UnityEngine.Object obj)
+    {
         var texture = obj as Texture2D;
-        if (texture == null && obj is Sprite sprite)
-            texture = sprite.texture;
-        if (texture == null)
-        {
-            var assetPath = AssetDatabase.GetAssetPath(obj);
-            if (!string.IsNullOrEmpty(assetPath))
-                texture = AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath);
-        }
-        AddTexture(texture);
+        if (texture == null && obj is Sprite sprite) texture = sprite.texture;
+        if (texture != null) return texture;
+        var assetPath = AssetDatabase.GetAssetPath(obj);
+        return string.IsNullOrEmpty(assetPath) ? null : AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath);
     }
 
     private void AddTexture(Texture2D texture)
     {
         if (texture == null || entries.Exists(e => e.texture == texture)) return;
+        if (BuildingCardAtlasBuilder.IsGeneratedAtlasTexture(texture))
+        {
+            ShowNotification(Content("Atlas output is read-only", "生成的图集不能用于再次生成建筑预制体。"));
+            return;
+        }
         var entry = new Entry { texture = texture };
         entries.Add(entry);
         entry.result = Analyze(entry);
         previewIndex = entries.Count - 1;
+        atlasPanel.HidePreview();
         SaveWorkspaceState();
         Repaint();
     }
@@ -1689,7 +1785,6 @@ public sealed class BuildingCardTool : EditorWindow
                 errors.Add(entry.texture.name + "：" + geometryError);
                 continue;
             }
-
             var outputKey = SanitizeAssetName(entry.texture.name);
             var sourcePath = AssetDatabase.GetAssetPath(entry.texture);
             if (outputOwners.TryGetValue(outputKey, out var existingSource))
@@ -1802,7 +1897,7 @@ public sealed class BuildingCardTool : EditorWindow
     private GameObject CreatePrefab(Entry entry, AnalysisResult result)
     {
         var cleanName = SanitizeAssetName(entry.texture.name);
-        var prefabPath = settings.outputFolder + "/B_" + cleanName + ".prefab";
+        var prefabPath = GetPrefabPath(entry.texture);
         var materialPath = settings.outputFolder + "/Materials/M_" + cleanName + ".mat";
         var meshPath = settings.outputFolder + "/Meshes/Q_" + cleanName + ".asset";
         if (!TryGetOutputGeometry(entry, out var outputGeometry, out var geometryError))
@@ -1849,9 +1944,16 @@ public sealed class BuildingCardTool : EditorWindow
             var renderer = visual.AddComponent<MeshRenderer>();
             renderer.sharedMaterial = material;
 
+            // Transparent MeshRenderers are sorted from Renderer.bounds.center. Keep the soft
+            // alpha edge, but make that comparison point the building's ground Root instead of
+            // the visual image centre (which moves with transparent padding and building height).
+            BuildingCardTransparentSortUtility.AlignBoundsCenterToRoot(root);
+
             prefabAsset = PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
             if (prefabAsset == null)
                 throw new InvalidOperationException("Prefab 保存失败：" + prefabPath);
+            BuildingCardMetadataStore.RecordGeneratedPrefab(
+                prefabPath, entry.texture, material, entry.gridWidth, entry.gridDepth);
             Debug.Log("[BuildingCardTool] " + entry.texture.name +
                 " → " + prefabPath +
                 " | 原点像素 " + result.rootPixel.ToString("F1") +
@@ -1864,6 +1966,11 @@ public sealed class BuildingCardTool : EditorWindow
         return prefabAsset;
     }
 
+    private string GetPrefabPath(Texture2D texture)
+    {
+        return settings.outputFolder.TrimEnd('/') + "/B_" + SanitizeAssetName(texture.name) + ".prefab";
+    }
+
     private static string SanitizeAssetName(string name)
     {
         foreach (var character in Path.GetInvalidFileNameChars())
@@ -1873,28 +1980,38 @@ public sealed class BuildingCardTool : EditorWindow
 
     private static Mesh LoadOrCreateQuadMesh(string path, Vector4 uvRect)
     {
-        // Recreate the derived mesh asset instead of clearing and mutating an existing one.
-        // Unity can otherwise serialize the cleared state when the same asset is referenced by
-        // the prefab being overwritten in this editor pass.
-        if (AssetDatabase.LoadAssetAtPath<Mesh>(path) != null)
-            AssetDatabase.DeleteAsset(path);
+        var mesh = AssetDatabase.LoadAssetAtPath<Mesh>(path);
+        var isNew = mesh == null;
+        if (isNew)
+            mesh = new Mesh { name = Path.GetFileNameWithoutExtension(path) };
+        else
+            Undo.RecordObject(mesh, "Update Building Card Mesh");
 
-        var mesh = new Mesh { name = Path.GetFileNameWithoutExtension(path) };
-        AssetDatabase.CreateAsset(mesh, path);
+        // UV0 is the permanent standalone mapping. TEXCOORD2 (the third UV set / Mesh.uv3) is
+        // reserved for atlas UVs and preserved when the standalone prefab is regenerated.
+        var atlasUvs = new List<Vector2>();
+        if (!isNew)
+        {
+            mesh.GetUVs(2, atlasUvs);
+            if (atlasUvs.Count != 4) mesh.GetUVs(3, atlasUvs); // Migrate the former fourth UV set.
+        }
         mesh.vertices = new[]
         {
             new Vector3(-0.5f, -0.5f, 0f), new Vector3(0.5f, -0.5f, 0f),
             new Vector3(0.5f, 0.5f, 0f), new Vector3(-0.5f, 0.5f, 0f)
         };
-        mesh.uv = new[]
+        mesh.SetUVs(0, new[]
         {
             new Vector2(uvRect.x, uvRect.y), new Vector2(uvRect.z, uvRect.y),
             new Vector2(uvRect.z, uvRect.w), new Vector2(uvRect.x, uvRect.w)
-        };
+        });
+        if (atlasUvs.Count == 4) mesh.SetUVs(2, atlasUvs);
+        mesh.SetUVs(3, new List<Vector2>());
         // Visual.rotation equals the reference camera rotation, so the Quad front must face -Z.
         mesh.triangles = new[] { 0, 2, 1, 0, 3, 2 };
         mesh.normals = new[] { Vector3.back, Vector3.back, Vector3.back, Vector3.back };
         mesh.RecalculateBounds();
+        if (isNew) AssetDatabase.CreateAsset(mesh, path);
         EditorUtility.SetDirty(mesh);
         AssetDatabase.SaveAssets();
         if (mesh.vertexCount != 4 || mesh.triangles.Length != 6)
@@ -1907,8 +2024,10 @@ public sealed class BuildingCardTool : EditorWindow
         var material = AssetDatabase.LoadAssetAtPath<Material>(path);
         if (material == null)
         {
-            var shader = Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Transparent") ?? Shader.Find("Sprites/Default");
-            if (shader == null) throw new InvalidOperationException("未找到透明 Unlit Shader。");
+            var shader = Shader.Find("Universal Render Pipeline/Unlit") ??
+                         Shader.Find("Unlit/Transparent") ??
+                         Shader.Find("Sprites/Default");
+            if (shader == null) throw new InvalidOperationException("No transparent Unlit shader was found.");
             material = new Material(shader) { name = Path.GetFileNameWithoutExtension(path) };
             AssetDatabase.CreateAsset(material, path);
         }
@@ -1919,8 +2038,8 @@ public sealed class BuildingCardTool : EditorWindow
         {
             material.SetFloat("_Surface", 1f);
             if (material.HasProperty("_Blend")) material.SetFloat("_Blend", 0f);
-            if (material.HasProperty("_SrcBlend")) material.SetFloat("_SrcBlend", 5f); // SrcAlpha
-            if (material.HasProperty("_DstBlend")) material.SetFloat("_DstBlend", 10f); // OneMinusSrcAlpha
+            if (material.HasProperty("_SrcBlend")) material.SetFloat("_SrcBlend", 5f);
+            if (material.HasProperty("_DstBlend")) material.SetFloat("_DstBlend", 10f);
             if (material.HasProperty("_ZWrite")) material.SetFloat("_ZWrite", 0f);
             material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
             material.SetOverrideTag("RenderType", "Transparent");
@@ -1944,7 +2063,7 @@ public sealed class BuildingCardTool : EditorWindow
         if (!valid && showDialog)
             EditorUtility.DisplayDialog(
                 "Building Card",
-                "请指定正交参考相机；Cell Size 必须大于 0；Margin 与 Padding 不得为负数；输出目录必须位于 Assets 下。",
+                "请指定正交参考相机；尺寸参数必须有效；Output Folder 必须位于 Assets 下。",
                 "确定");
         return valid;
     }
@@ -1988,7 +2107,7 @@ public sealed class BuildingCardTool : EditorWindow
                     var assetPath = AssetDatabase.GUIDToAssetPath(savedEntry.textureGuid);
                     var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath);
                     if (texture == null) continue;
-                    entries.Add(new Entry
+                    var entry = new Entry
                     {
                         texture = texture,
                         gridWidth = Mathf.Max(1, savedEntry.gridWidth),
@@ -1999,7 +2118,8 @@ public sealed class BuildingCardTool : EditorWindow
                         manualLeftPoint = savedEntry.manualLeftPoint,
                         manualRightPoint = savedEntry.manualRightPoint,
                         manualFarPoint = savedEntry.manualFarPoint
-                    });
+                    };
+                    entries.Add(entry);
                 }
             }
             previewIndex = entries.Count == 0 ? -1 : Mathf.Clamp(saved.previewIndex, 0, entries.Count - 1);

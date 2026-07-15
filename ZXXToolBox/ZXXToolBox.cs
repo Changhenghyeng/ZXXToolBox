@@ -77,35 +77,6 @@ public class ZXXToolBox : EditorWindow
 
     private static readonly string[] _catNames = { "生成工具", "批量操作", "预制体处理", "其他", "工作流" };
 
-    // ── Runtime data (loaded from EditorPrefs) ──
-    private List<ToolEntry> _tools;
-    private bool _editMode;
-
-    private class ToolEntry
-    {
-        public string id;
-        public string desc;
-        public string category;
-        public Action action;
-        public bool visible = true;
-        public bool confirmOnAll = true; // 无选中时操作前是否弹窗确认
-    }
-
-    private Vector2 _scroll;
-    private Vector2 _wfScroll;
-    private int _selectedCat;
-
-    // Workflow state
-    private List<WorkflowDef> _workflows = new List<WorkflowDef>();
-    private int _editingWfIdx = -1;
-    private bool _wfCreating;
-    private string _wfNewName = "";
-
-    // ════════════════ Dynamic Menu ════════════════
-
-    private const string MenuBasePath = "ArtTools/";
-    private static string _currentMenuPath = null;
-
     private static Type FindLightCookieScrollerType()
     {
         return TypeCache.GetTypesDerivedFrom<MonoBehaviour>()
@@ -141,6 +112,35 @@ public class ZXXToolBox : EditorWindow
             Debug.LogException(exception.InnerException ?? exception);
         }
     }
+
+    // ── Runtime data (loaded from EditorPrefs) ──
+    private List<ToolEntry> _tools;
+    private bool _editMode;
+
+    private class ToolEntry
+    {
+        public string id;
+        public string desc;
+        public string category;
+        public Action action;
+        public bool visible = true;
+        public bool confirmOnAll = true; // 无选中时操作前是否弹窗确认
+    }
+
+    private Vector2 _scroll;
+    private Vector2 _wfScroll;
+    private int _selectedCat;
+
+    // Workflow state
+    private List<WorkflowDef> _workflows = new List<WorkflowDef>();
+    private int _editingWfIdx = -1;
+    private bool _wfCreating;
+    private string _wfNewName = "";
+
+    // ════════════════ Dynamic Menu ════════════════
+
+    private const string MenuBasePath = "ArtTools/";
+    private static string _currentMenuPath = null;
 
     /// <summary>注册或刷新 Unity 顶部菜单项，使菜单名称跟随显示名称。</summary>
     private static void RefreshMenu(string newDisplayName)
@@ -347,6 +347,8 @@ public class ZXXToolBox : EditorWindow
 
     // ════════════════ GUI ════════════════
 
+    private static GUIContent Content(string label, string tooltip) => new GUIContent(label, tooltip);
+
     private void OnGUI()
     {
         // 防护：OnEnable 可能还没跑完就被 Unity 调用 OnGUI
@@ -356,7 +358,23 @@ public class ZXXToolBox : EditorWindow
         // 鼠标移动时立即重绘，让悬停高亮跟手
         if (Event.current.type == EventType.MouseMove) Repaint();
 
+        // Keyboard shortcuts
         Event e = Event.current;
+        if (e != null && e.type == EventType.KeyDown && e.control)
+        {
+            if (e.shift && e.keyCode == KeyCode.N)
+            {
+                PrefabRootNormalizer.WrapSelected();
+                e.Use();
+                return;
+            }
+            if (e.shift && e.keyCode == KeyCode.X)
+            {
+                TransparentScreenshot.OpenWindow();
+                e.Use();
+                return;
+            }
+        }
 
         // Height mode check
         if (_editMode && e.type == EventType.KeyDown && e.keyCode == KeyCode.Escape)
@@ -388,8 +406,10 @@ public class ZXXToolBox : EditorWindow
         EditorGUILayout.BeginHorizontal();
         _selectedCat = GUILayout.Toolbar(_selectedCat, _catNames, GUILayout.Height(20));
         GUI.backgroundColor = _editMode ? new Color(1f, 0.9f, 0.6f) : Color.white;
+        var gearIcon = EditorGUIUtility.IconContent("d_Settings");
+        gearIcon.tooltip = _editMode ? "退出编辑模式" : "编辑模式：排序、描述、分类、可见性";
         var gearStyle = new GUIStyle(GUI.skin.button) { padding = new RectOffset(1, 1, 1, 1) };
-        if (GUILayout.Button(EditorGUIUtility.IconContent("d_Settings"), gearStyle, GUILayout.Width(24), GUILayout.Height(20)))
+        if (GUILayout.Button(gearIcon, gearStyle, GUILayout.Width(24), GUILayout.Height(20)))
             ToggleEditMode();
         GUI.backgroundColor = Color.white;
         EditorGUILayout.EndHorizontal();
@@ -419,12 +439,12 @@ public class ZXXToolBox : EditorWindow
                     EditorGUILayout.LabelField(tool.id, EditorStyles.boldLabel, GUILayout.Width(200));
                     GUILayout.FlexibleSpace();
                     using (new EditorGUI.DisabledScope(idx == 0))
-                        if (GUILayout.Button("▲", GUILayout.Width(25), GUILayout.Height(18)))
+                        if (GUILayout.Button(new GUIContent("▲", "上移"), GUILayout.Width(25), GUILayout.Height(18)))
                             SwapTools(idx, idx - 1);
                     using (new EditorGUI.DisabledScope(idx == _tools.Count - 1))
-                        if (GUILayout.Button("▼", GUILayout.Width(25), GUILayout.Height(18)))
+                        if (GUILayout.Button(new GUIContent("▼", "下移"), GUILayout.Width(25), GUILayout.Height(18)))
                             SwapTools(idx, idx + 1);
-                    tool.visible = GUILayout.Toggle(tool.visible, tool.visible ? "可见" : "隐藏", "Button", GUILayout.Width(50), GUILayout.Height(18));
+                    tool.visible = GUILayout.Toggle(tool.visible, new GUIContent(tool.visible ? "可见" : "隐藏", "在工具箱中显示/隐藏此工具"), "Button", GUILayout.Width(50), GUILayout.Height(18));
                     EditorGUILayout.EndHorizontal();
 
                     tool.desc = EditorGUILayout.TextField(tool.desc);
@@ -461,6 +481,9 @@ public class ZXXToolBox : EditorWindow
                     bool hover = boxRect.Contains(Event.current.mousePosition);
                     EditorGUIUtility.AddCursorRect(boxRect, MouseCursor.Link);
 
+                    // 悬停 tooltip
+                    if (hover) GUI.tooltip = tool.desc;
+
                     if (hover && Event.current.type == EventType.Repaint)
                         GUI.color = new Color(0.78f, 0.87f, 1f, 1f);  // 悬停浅蓝
                     GUI.Box(boxRect, "", GUI.skin.box);
@@ -489,11 +512,11 @@ public class ZXXToolBox : EditorWindow
         {
             EditorGUILayout.Space(6);
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("保存并退出", GUILayout.Height(28)))
+            if (GUILayout.Button(new GUIContent("保存并退出", "保存当前编辑并退出编辑模式"), GUILayout.Height(28)))
                 ToggleEditMode();
-            if (GUILayout.Button("取消", GUILayout.Height(28)))
+            if (GUILayout.Button(new GUIContent("取消", "放弃修改并退出编辑模式"), GUILayout.Height(28)))
                 CancelEdit();
-            if (GUILayout.Button("恢复默认", GUILayout.Height(28)))
+            if (GUILayout.Button(new GUIContent("恢复默认", "恢复所有工具到默认排序和描述"), GUILayout.Height(28)))
                 ResetToDefaults();
             EditorGUILayout.EndHorizontal();
             EditorGUILayout.HelpBox("编辑模式：拖动 ▲▼ 排序，修改描述，切换可见/隐藏，调整分类。\nEsc 取消修改。", MessageType.Info);
@@ -595,7 +618,7 @@ public class ZXXToolBox : EditorWindow
         {
             EditorGUILayout.BeginHorizontal();
             _wfNewName = EditorGUILayout.TextField("工作流名称", _wfNewName);
-            if (GUILayout.Button("确认创建", GUILayout.Width(80)) && !string.IsNullOrWhiteSpace(_wfNewName))
+            if (GUILayout.Button(new GUIContent("确认创建", "创建新的工作流"), GUILayout.Width(80)) && !string.IsNullOrWhiteSpace(_wfNewName))
             {
                 _workflows.Add(new WorkflowDef { name = _wfNewName.Trim() });
                 _editingWfIdx = _workflows.Count - 1;
@@ -603,7 +626,7 @@ public class ZXXToolBox : EditorWindow
                 _wfNewName = "";
                 SaveWorkflows();
             }
-            if (GUILayout.Button("取消", GUILayout.Width(50)))
+            if (GUILayout.Button(new GUIContent("取消", "取消创建工作流"), GUILayout.Width(50)))
             {
                 _wfCreating = false;
                 _wfNewName = "";
@@ -613,7 +636,7 @@ public class ZXXToolBox : EditorWindow
         }
         else
         {
-            if (GUILayout.Button("+ 新建工作流", GUILayout.Height(26)))
+            if (GUILayout.Button(new GUIContent("+ 新建工作流", "创建一个新的自定义工作流"), GUILayout.Height(26)))
                 _wfCreating = true;
             EditorGUILayout.Space(4);
         }
@@ -639,10 +662,10 @@ public class ZXXToolBox : EditorWindow
             if (expanded != (_editingWfIdx == w))
                 _editingWfIdx = expanded ? w : -1;
             GUILayout.FlexibleSpace();
-            if (GUILayout.Button("运行", GUILayout.Width(50), GUILayout.Height(20)))
+            if (GUILayout.Button(new GUIContent("运行", "按步骤引导执行此工作流"), GUILayout.Width(50), GUILayout.Height(20)))
                 WorkflowRunner.Open(wf);
             GUI.backgroundColor = new Color(1f, 0.6f, 0.6f);
-            if (GUILayout.Button("删除", GUILayout.Width(40), GUILayout.Height(20)))
+            if (GUILayout.Button(new GUIContent("删除", "删除此工作流"), GUILayout.Width(40), GUILayout.Height(20)))
             {
                 if (EditorUtility.DisplayDialog("删除工作流", $"确定删除「{wf.name}」？", "删除", "取消"))
                 {
@@ -717,12 +740,12 @@ public class ZXXToolBox : EditorWindow
 
                 // Add step
                 EditorGUILayout.BeginHorizontal();
-                if (GUILayout.Button("+ 添加手动步骤"))
+                if (GUILayout.Button(new GUIContent("+ 添加手动步骤", "添加一个手动操作步骤（显示提示文字）")))
                 {
                     wf.steps.Add(new WorkflowStepData { stepType = "manual", label = "新步骤" });
                     SaveWorkflows();
                 }
-                if (GUILayout.Button("+ 添加工具步骤"))
+                if (GUILayout.Button(new GUIContent("+ 添加工具步骤", "添加一个打开工具窗口并配置参数的步骤")))
                 {
                     wf.steps.Add(new WorkflowStepData { stepType = "tool", toolId = _registry.Length > 0 ? _registry[0].id : "" });
                     SaveWorkflows();
@@ -849,7 +872,7 @@ public class ZXXToolBox : EditorWindow
                 var action = FindToolAction(step.toolId);
                 using (new EditorGUI.DisabledScope(action == null))
                 {
-                    if (GUILayout.Button("打开工具窗口", GUILayout.Height(30)))
+                    if (GUILayout.Button(new GUIContent("打开工具窗口", "打开对应工具窗口进行参数配置"), GUILayout.Height(30)))
                         action?.Invoke();
                 }
                 string hasSaved = string.IsNullOrEmpty(step.settingsJson)
@@ -863,10 +886,10 @@ public class ZXXToolBox : EditorWindow
 
             EditorGUILayout.BeginHorizontal();
             using (new EditorGUI.DisabledScope(_stepIdx == 0))
-                if (GUILayout.Button("◀ 上一步", GUILayout.Height(28)))
+                if (GUILayout.Button(new GUIContent("◀ 上一步", "返回上一个步骤"), GUILayout.Height(28)))
                     GoToStep(_stepIdx - 1);
             using (new EditorGUI.DisabledScope(_stepIdx >= _wf.steps.Count - 1))
-                if (GUILayout.Button("下一步 ▶", GUILayout.Height(28)))
+                if (GUILayout.Button(new GUIContent("下一步 ▶", "进入下一个步骤"), GUILayout.Height(28)))
                     GoToStep(_stepIdx + 1);
             EditorGUILayout.EndHorizontal();
 
@@ -874,7 +897,7 @@ public class ZXXToolBox : EditorWindow
             {
                 EditorGUILayout.Space(4);
                 GUI.backgroundColor = new Color(0.6f, 1f, 0.6f);
-                if (GUILayout.Button("完成工作流", GUILayout.Height(30)))
+                if (GUILayout.Button(new GUIContent("完成工作流", "结束工作流并关闭此窗口"), GUILayout.Height(30)))
                 {
                     CaptureStepSettings(_stepIdx);
                     RestoreBackup();
