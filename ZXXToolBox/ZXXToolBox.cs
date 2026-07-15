@@ -18,28 +18,28 @@ public class ZXXToolBox : EditorWindow
     // ── Tool registry ──
     private static readonly (string id, string defaultDesc, string category, Action action)[] _registry =
     {
-        ("ProcGen",              "在模型表面按规则散布预制体",                       "生成工具",   ProcGenWindow.Open),
-        ("Wall Builder",         "墙段拼接：四面围合 / L 型 / 走廊 / 单排直线",      "生成工具",   WallBuilderTool.ShowWindow),
-        ("Building Card Prefab", "SLG 建筑 PNG：自动原点、面片和点击 BoxCollider",    "生成工具",   BuildingCardTool.ShowWindow),
-        ("Box Collider Generator","批量为预制体生成 BoxCollider",                     "生成工具",   BoxColliderGenerator.ShowWindow),
-        ("Shadow Baker",         "建筑顶光影子烘培 + 地面面片生成",                  "生成工具",   ShadowBakerWindow.Open),
-        ("Self Shadow Baker",    "建筑自投影阴影烘焙：uv2 展开 + PCF 软边 + 自动赋 _BakedMap", "生成工具", SelfShadowBakerWindow.Open),
-        ("Fog Of War Tool",      "战争迷雾 RGBA Mask：R 探索 / G 选中 / B 溶解边缘", "生成工具",   FogOfWarToolWindow.Open),
-        ("Day Change Transition","SLG 跨天短夜晚过渡：一键创建 Night Volume + 主光过渡控制", "生成工具",   DayChangeTransitionToolWindow.Open),
-        ("Outline",              "Mesh 外描边：平滑法线烘焙 + Outline Shader",    "生成工具",   OutlineToolWindow.Open),
-        ("Light Cookie Scroller","灯光 Cookie 纹理滚动动画：云影/焦散/斑驳光影流动",  "生成工具",   AddLightCookieScrollerToSelected),
+        ("ProcGen",              "在模型表面按规则散布预制体",                       "场景搭建",   ProcGenWindow.Open),
+        ("Wall Builder",         "墙段拼接：四面围合 / L 型 / 走廊 / 单排直线",      "场景搭建",   WallBuilderTool.ShowWindow),
+        ("Building Card Prefab", "SLG 建筑 PNG：自动原点、面片和点击 BoxCollider",    "资源制作",   BuildingCardTool.ShowWindow),
+        ("Box Collider Generator","批量为预制体生成 BoxCollider",                     "资源制作",   BoxColliderGenerator.ShowWindow),
+        ("Shadow Baker",         "建筑顶光影子烘培 + 地面面片生成",                  "视觉烘焙",   ShadowBakerWindow.Open),
+        ("Self Shadow Baker",    "建筑自投影阴影烘焙：uv2 展开 + PCF 软边 + 自动赋 _BakedMap", "视觉烘焙", SelfShadowBakerWindow.Open),
+        ("Fog Of War Tool",      "战争迷雾 RGBA Mask：R 探索 / G 选中 / B 溶解边缘", "场景搭建",   FogOfWarToolWindow.Open),
+        ("Day Change Transition","SLG 跨天短夜晚过渡：一键创建 Night Volume + 主光过渡控制", "场景搭建",   DayChangeTransitionToolWindow.Open),
+        ("Outline",              "Mesh 外描边：平滑法线烘焙 + Outline Shader",    "视觉烘焙",   OutlineToolWindow.Open),
+        ("Light Cookie Scroller","灯光 Cookie 纹理滚动动画：云影/焦散/斑驳光影流动",  "视觉烘焙",   AddLightCookieScrollerToSelected),
         ("Batch Replacer",                "在 Hierarchy 中批量替换场景物体",         "批量操作",   PrefabBatchReplacer.ShowWindow),
         ("Batch Rename Tool",             "批量重命名工具",                         "批量操作",   BatchRenameTool.Open),
         ("Sync Names",                    "同步物体名称到 Prefab（有选中→仅选中 / 无选中→整个场景）", "批量操作", MakeSelectedOrAll("Sync Names", PrefabNameSyncTool.Execute)),
         ("Cast Shadows OFF",              "关闭 Cast Shadows（有选中→仅选中 / 无选中→整个场景）", "批量操作", MakeSelectedOrAll("Cast Shadows OFF", ShadowCastOffTool.Execute)),
-        ("Convert Variant To Normal Prefab","Prefab Variant 转换为普通 Prefab",      "预制体处理", ConvertVariantToNormalPrefab.ConvertSelectedVariant),
-        ("Prefab Extractor",              "从场景提取子物体为独立 Prefab",           "预制体处理", PrefabExtractorTool.Open),
-        ("Normalize Prefab Root",         "规范化根节点 Transform，重置为 identity  Ctrl+Shift+N", "预制体处理", PrefabRootNormalizerWindow.ShowWindow),
-        ("Transparent Screenshot",        "截取透明背景的 Game 视图截图  Ctrl+Shift+X","其他",       TransparentScreenshot.OpenWindow),
-        ("Shading Mode",                  "切换选中模型的软硬边法线显示（非破坏性预览）", "其他",       ShadingModeToggleWindow.Open),
-        ("Label Tool",                    "场景预制体名称标签显示工具",               "其他",       LabelManagerWindow.Open),
-        ("Measure Tool",                  "三维测量：包围盒尺寸 / 距离 / 标尺",          "其他",       MeasureTool.Open),
-        ("Git Path Navigator",          "粘贴 Git 路径自动定位到 Project 窗口  Ctrl+G",  "其他",       GitPathNavigator.ShowWindow),
+        ("Convert Variant To Normal Prefab","Prefab Variant 转换为普通 Prefab",      "资源制作", ConvertVariantToNormalPrefab.ConvertSelectedVariant),
+        ("Prefab Extractor",              "从场景提取子物体为独立 Prefab",           "资源制作", PrefabExtractorTool.Open),
+        ("Normalize Prefab Root",         "规范化根节点 Transform，重置为 identity  Ctrl+Shift+N", "资源制作", PrefabRootNormalizerWindow.ShowWindow),
+        ("Transparent Screenshot",        "截取透明背景的 Game 视图截图  Ctrl+Shift+X","检查与输出", TransparentScreenshot.OpenWindow),
+        ("Shading Mode",                  "切换选中模型的软硬边法线显示（非破坏性预览）", "视觉烘焙",   ShadingModeToggleWindow.Open),
+        ("Label Tool",                    "场景预制体名称标签显示工具",               "检查与输出", LabelManagerWindow.Open),
+        ("Measure Tool",                  "三维测量：包围盒尺寸 / 距离 / 标尺",          "检查与输出", MeasureTool.Open),
+        ("Git Path Navigator",          "粘贴 Git 路径自动定位到 Project 窗口  Ctrl+G",  "检查与输出", GitPathNavigator.ShowWindow),
     };
 
     // ── Selected / All helper ──
@@ -75,7 +75,9 @@ public class ZXXToolBox : EditorWindow
         return toolId == "Sync Names" || toolId == "Cast Shadows OFF";
     }
 
-    private static readonly string[] _catNames = { "生成工具", "批量操作", "预制体处理", "其他", "工作流" };
+    private static readonly string[] _toolCatNames = { "场景搭建", "资源制作", "视觉烘焙", "批量操作", "检查与输出" };
+    private static readonly string[] _catNames = { "场景搭建", "资源制作", "视觉烘焙", "批量操作", "检查与输出", "工作流" };
+    private const int WorkflowTabIndex = 5;
 
     private static Type FindLightCookieScrollerType()
     {
@@ -311,6 +313,7 @@ public class ZXXToolBox : EditorWindow
     {
         // 共享设置 → 配置文件
         var config = LoadOrCreateConfig();
+        config.displayName = _displayName;
         config.toolOverrides.Clear();
         foreach (var t in _tools)
             config.toolOverrides.Add(new ToolOverride { id = t.id, desc = t.desc, category = t.category, visible = t.visible });
@@ -327,6 +330,13 @@ public class ZXXToolBox : EditorWindow
             }).ToList()
         };
         EditorPrefs.SetString(PrefKey, JsonUtility.ToJson(s));
+
+        // 这两个开关会在实际执行批处理时读取；只在确认保存编辑时写入，取消编辑不会留下副作用。
+        foreach (var t in _tools)
+        {
+            if (IsSelectedAllTool(t.id))
+                EditorPrefs.SetBool(ConfirmKey(t.id), t.confirmOnAll);
+        }
     }
 
     [Serializable]
@@ -391,11 +401,7 @@ public class ZXXToolBox : EditorWindow
             if (newName != _displayName)
             {
                 _displayName = newName;
-                var config = LoadOrCreateConfig();
-                config.displayName = _displayName;
-                EditorUtility.SetDirty(config);
                 titleContent = new GUIContent(_displayName);
-                RefreshMenu(_displayName);
             }
             EditorGUILayout.EndHorizontal();
         }
@@ -417,7 +423,7 @@ public class ZXXToolBox : EditorWindow
 
         _scroll = EditorGUILayout.BeginScrollView(_scroll);
 
-        if (_selectedCat == 4)
+        if (_selectedCat == WorkflowTabIndex)
         {
             DrawWorkflowTab();
         }
@@ -451,11 +457,11 @@ public class ZXXToolBox : EditorWindow
 
                     EditorGUILayout.BeginHorizontal();
                     EditorGUILayout.LabelField("分类", GUILayout.Width(30));
-                    int catIdx = Array.IndexOf(_catNames, tool.category);
+                    int catIdx = Array.IndexOf(_toolCatNames, tool.category);
                     if (catIdx < 0) catIdx = 0;
-                    catIdx = EditorGUILayout.Popup(catIdx, _catNames, GUILayout.Width(100));
-                    if (catIdx >= 0 && catIdx < _catNames.Length && _catNames[catIdx] != tool.category)
-                        tool.category = _catNames[catIdx];
+                    catIdx = EditorGUILayout.Popup(catIdx, _toolCatNames, GUILayout.Width(100));
+                    if (catIdx >= 0 && catIdx < _toolCatNames.Length && _toolCatNames[catIdx] != tool.category)
+                        tool.category = _toolCatNames[catIdx];
                     EditorGUILayout.EndHorizontal();
 
                     // 选中/全局模式工具：弹窗确认开关
@@ -463,8 +469,6 @@ public class ZXXToolBox : EditorWindow
                     {
                         EditorGUILayout.BeginHorizontal();
                         tool.confirmOnAll = EditorGUILayout.ToggleLeft("无选中时弹窗确认", tool.confirmOnAll);
-                        // Sync to EditorPrefs so MakeSelectedOrAll reads the latest value
-                        EditorPrefs.SetBool(ConfirmKey(tool.id), tool.confirmOnAll);
                         EditorGUILayout.EndHorizontal();
                     }
                 }
@@ -508,7 +512,7 @@ public class ZXXToolBox : EditorWindow
 
         EditorGUILayout.EndScrollView();
 
-        if (_selectedCat != 4 && _editMode)
+        if (_selectedCat != WorkflowTabIndex && _editMode)
         {
             EditorGUILayout.Space(6);
             EditorGUILayout.BeginHorizontal();
@@ -538,6 +542,8 @@ public class ZXXToolBox : EditorWindow
         if (_editMode)
         {
             SaveSettings();
+            titleContent = new GUIContent(_displayName);
+            RefreshMenu(_displayName);
             EditorApplication.delayCall += () => AssetDatabase.SaveAssets();
         }
         _editMode = !_editMode;
@@ -547,6 +553,8 @@ public class ZXXToolBox : EditorWindow
     private void CancelEdit()
     {
         _displayName = LoadOrCreateConfig().displayName;
+        titleContent = new GUIContent(_displayName);
+        RefreshMenu(_displayName);
         LoadSettings();
         _editMode = false;
     }
@@ -561,6 +569,11 @@ public class ZXXToolBox : EditorWindow
     private void ResetToDefaults()
     {
         EditorPrefs.DeleteKey(PrefKey);
+        foreach (var (id, _, _, _) in _registry)
+        {
+            if (IsSelectedAllTool(id))
+                EditorPrefs.DeleteKey(ConfirmKey(id));
+        }
         var config = LoadOrCreateConfig();
         config.displayName = ConfigDefaultName;
         config.toolOverrides.Clear();

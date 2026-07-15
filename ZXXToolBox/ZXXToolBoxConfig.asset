@@ -16,20 +16,20 @@ MonoBehaviour:
   toolOverrides:
   - id: ProcGen
     desc: "\u5728\u6A21\u578B\u8868\u9762\u6309\u89C4\u5219\u6563\u5E03\u9884\u5236\u4F53"
-    category: "\u751F\u6210\u5DE5\u5177"
+    category: "\u573A\u666F\u642D\u5EFA"
     visible: 1
   - id: Wall Builder
     desc: "\u5899\u6BB5\u62FC\u63A5\uFF1A\u56DB\u9762\u56F4\u5408 / L \u578B / \u8D70\u5ECA
       / \u5355\u6392\u76F4\u7EBF"
-    category: "\u751F\u6210\u5DE5\u5177"
+    category: "\u573A\u666F\u642D\u5EFA"
     visible: 1
   - id: Box Collider Generator
     desc: "\u6279\u91CF\u4E3A\u9884\u5236\u4F53\u751F\u6210 BoxCollider"
-    category: "\u751F\u6210\u5DE5\u5177"
+    category: "\u8D44\u6E90\u5236\u4F5C"
     visible: 1
   - id: Shadow Baker
     desc: "\u5EFA\u7B51\u9876\u5149\u5F71\u5B50\u70D8\u57F9 + \u5730\u9762\u9762\u7247\u751F\u6210"
-    category: "\u751F\u6210\u5DE5\u5177"
+    category: "\u89C6\u89C9\u70D8\u7119"
     visible: 1
   - id: Batch Replacer
     desc: "\u5728 Hierarchy \u4E2D\u6279\u91CF\u66FF\u6362\u573A\u666F\u7269\u4F53"
@@ -41,25 +41,25 @@ MonoBehaviour:
     visible: 1
   - id: Convert Variant To Normal Prefab
     desc: "Prefab Variant \u8F6C\u6362\u4E3A\u666E\u901A Prefab"
-    category: "\u9884\u5236\u4F53\u5904\u7406"
+    category: "\u8D44\u6E90\u5236\u4F5C"
     visible: 1
   - id: Prefab Extractor
     desc: "\u4ECE\u573A\u666F\u63D0\u53D6\u5B50\u7269\u4F53\u4E3A\u72EC\u7ACB Prefab"
-    category: "\u9884\u5236\u4F53\u5904\u7406"
+    category: "\u8D44\u6E90\u5236\u4F5C"
     visible: 1
   - id: Transparent Screenshot
     desc: "\u622A\u53D6\u900F\u660E\u80CC\u666F\u7684 Game \u89C6\u56FE\u622A\u56FE 
       Ctrl+Shift+X"
-    category: "\u5176\u4ED6"
+    category: "\u68C0\u67E5\u4E0E\u8F93\u51FA"
     visible: 1
   - id: Label Tool
     desc: "\u573A\u666F\u9884\u5236\u4F53\u540D\u79F0\u6807\u7B7E\u663E\u793A\u5DE5\u5177"
-    category: "\u5176\u4ED6"
+    category: "\u68C0\u67E5\u4E0E\u8F93\u51FA"
     visible: 1
   - id: Measure Tool
     desc: "\u4E09\u7EF4\u6D4B\u91CF\uFF1A\u5305\u56F4\u76D2\u5C3A\u5BF8 / \u8DDD\u79BB
       / \u6807\u5C3A"
-    category: "\u5176\u4ED6"
+    category: "\u68C0\u67E5\u4E0E\u8F93\u51FA"
     visible: 1
   - id: Sync Names
     desc: "\u540C\u6B65\u7269\u4F53\u540D\u79F0\u5230 Prefab\uFF08\u6709\u9009\u4E2D\u2192\u4EC5\u9009\u4E2D
@@ -74,45 +74,45 @@ MonoBehaviour:
   - id: Normalize Prefab Root
     desc: "\u70D8\u7119 Prefab \u6839\u8282\u70B9 Scale/TRS \u5230\u5B50\u8282\u70B9 
       Ctrl+Shift+N \u5FEB\u901F\u70D8\u7119"
-    category: "\u9884\u5236\u4F53\u5904\u7406"
+    category: "\u8D44\u6E90\u5236\u4F5C"
     visible: 1
   - id: Git Path Navigator
     desc: "\u7C98\u8D34 Git \u8DEF\u5F84\u81EA\u52A8\u5B9A\u4F4D\u5230 Project \u7A97\u53E3 
       Ctrl+G"
-    category: "\u5176\u4ED6"
+    category: "\u68C0\u67E5\u4E0E\u8F93\u51FA"
     visible: 1
   - id: Self Shadow Baker
     desc: "\u5EFA\u7B51\u81EA\u6295\u5F71\u9634\u5F71\u70D8\u7119\uFF1Auv2 \u5C55\u5F00
       + PCF \u8F6F\u8FB9 + \u81EA\u52A8\u8D4B _BakedMap"
-    category: "\u751F\u6210\u5DE5\u5177"
+    category: "\u89C6\u89C9\u70D8\u7119"
     visible: 1
   - id: Outline
     desc: " \u5916\u63CF\u8FB9\uFF1A\u5E73\u6ED1\u6CD5\u7EBF\u70D8\u7119 + Outline
       Shader"
-    category: "\u751F\u6210\u5DE5\u5177"
+    category: "\u89C6\u89C9\u70D8\u7119"
     visible: 1
   - id: Shading Mode
     desc: "\u5207\u6362\u9009\u4E2D\u6A21\u578B\u7684\u8F6F\u786C\u8FB9\u6CD5\u7EBF\u663E\u793A\uFF08\u975E\u7834\u574F\u6027\u9884\u89C8\uFF09"
-    category: "\u5176\u4ED6"
+    category: "\u89C6\u89C9\u70D8\u7119"
     visible: 1
   - id: Light Cookie Scroller
     desc: "\u706F\u5149 Cookie \u7EB9\u7406\u6EDA\u52A8\u52A8\u753B"
-    category: "\u751F\u6210\u5DE5\u5177"
+    category: "\u89C6\u89C9\u70D8\u7119"
     visible: 1
   - id: Fog Of War Tool
     desc: "\u6218\u4E89\u8FF7\u96FE RGBA Mask\uFF1AR \u63A2\u7D22 / G \u9009\u4E2D
       / B \u6EB6\u89E3\u8FB9\u7F18"
-    category: "\u751F\u6210\u5DE5\u5177"
+    category: "\u573A\u666F\u642D\u5EFA"
     visible: 1
   - id: Day Change Transition
     desc: "SLG \u8DE8\u5929\u77ED\u591C\u665A\u8FC7\u6E21\uFF1A\u4E00\u952E\u521B\u5EFA
       Night Volume + \u4E3B\u5149\u8FC7\u6E21\u63A7\u5236"
-    category: "\u751F\u6210\u5DE5\u5177"
+    category: "\u573A\u666F\u642D\u5EFA"
     visible: 1
   - id: Building Card Prefab
     desc: "SLG \u5EFA\u7B51 PNG\uFF1A\u81EA\u52A8\u539F\u70B9\u3001\u9762\u7247\u548C\u70B9\u51FB
       BoxCollider"
-    category: "\u9884\u5236\u4F53\u5904\u7406"
+    category: "\u8D44\u6E90\u5236\u4F5C"
     visible: 1
   workflows:
   - name: "\u5EFA\u7B51\u9884\u5236\u4F53\u5236\u4F5C"
