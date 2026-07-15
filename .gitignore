@@ -43,3 +43,7 @@ UserSettings/
 
 # Unity - Package Manager（如果是 UPM 包则忽略 lockfile）
 Packages/
+
+# 工具运行时自动生成的配置文件
+**/ProcGenSettings.asset
+**/ProcGenSettings.asset.meta

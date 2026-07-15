@@ -471,6 +471,7 @@ public class ZXXToolBox : EditorWindow
                         tool.confirmOnAll = EditorGUILayout.ToggleLeft("无选中时弹窗确认", tool.confirmOnAll);
                         EditorGUILayout.EndHorizontal();
                     }
+
                 }
                 else
                 {
@@ -523,6 +524,10 @@ public class ZXXToolBox : EditorWindow
             if (GUILayout.Button(new GUIContent("恢复默认", "恢复所有工具到默认排序和描述"), GUILayout.Height(28)))
                 ResetToDefaults();
             EditorGUILayout.EndHorizontal();
+            EditorGUILayout.Space(4);
+            if (GUILayout.Button("生成说明书截图", GUILayout.Height(26)))
+                CaptureHelper.Run();
+            EditorGUILayout.Space(4);
             EditorGUILayout.HelpBox("编辑模式：拖动 ▲▼ 排序，修改描述，切换可见/隐藏，调整分类。\nEsc 取消修改。", MessageType.Info);
         }
 
