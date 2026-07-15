@@ -51,6 +51,8 @@ namespace PrefabTools
             win.minSize = new Vector2(620, 700);
         }
 
+        private static GUIContent Content(string label, string tooltip) => new GUIContent(label, tooltip);
+
         // ===================== GUI =====================
 
         private void OnGUI()
@@ -89,7 +91,7 @@ namespace PrefabTools
 
         private void DrawSourceList()
         {
-            EditorGUILayout.LabelField("① 要处理的大预制体", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(Content("1. Source Prefabs", "要处理的大预制体列表"), EditorStyles.boldLabel);
 
             _scrollPos = EditorGUILayout.BeginScrollView(_scrollPos, GUILayout.Height(140));
             int removeIdx = -1;
@@ -97,16 +99,16 @@ namespace PrefabTools
             {
                 EditorGUILayout.BeginHorizontal();
                 _sourcePrefabs[i] = (GameObject)EditorGUILayout.ObjectField(
-                    $"预制体 {i}", _sourcePrefabs[i], typeof(GameObject), false);
-                if (GUILayout.Button("移除", GUILayout.Width(60))) removeIdx = i;
+                    $"Prefab {i}", _sourcePrefabs[i], typeof(GameObject), false);
+                if (GUILayout.Button(Content("Remove", "从列表中移除该预制体"), GUILayout.Width(60))) removeIdx = i;
                 EditorGUILayout.EndHorizontal();
             }
             if (removeIdx >= 0) _sourcePrefabs.RemoveAt(removeIdx);
             EditorGUILayout.EndScrollView();
 
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("+ 添加一行")) _sourcePrefabs.Add(null);
-            if (GUILayout.Button("从 Project 选中导入"))
+            if (GUILayout.Button(Content("+ Add Row", "添加一行空位"))) _sourcePrefabs.Add(null);
+            if (GUILayout.Button(Content("Import From Selection", "从 Project 窗口中选中的预制体导入列表")))
             {
                 foreach (var obj in Selection.objects)
                 {
@@ -118,18 +120,18 @@ namespace PrefabTools
                     }
                 }
             }
-            if (GUILayout.Button("清空列表")) _sourcePrefabs.Clear();
+            if (GUILayout.Button(Content("Clear List", "清空所有预制体"))) _sourcePrefabs.Clear();
             EditorGUILayout.EndHorizontal();
         }
 
         private void DrawSettings()
         {
-            EditorGUILayout.LabelField("② 设置", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(Content("2. Settings", "提取参数设置"), EditorStyles.boldLabel);
 
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("子预制体输出根目录", GUILayout.Width(140));
+            EditorGUILayout.LabelField(Content("Output Root Folder", "子预制体输出根目录"), GUILayout.Width(140));
             _outputRootFolder = EditorGUILayout.TextField(_outputRootFolder);
-            if (GUILayout.Button("选择...", GUILayout.Width(60)))
+            if (GUILayout.Button(Content("Browse...", "选择输出目录"), GUILayout.Width(60)))
             {
                 string sel = EditorUtility.OpenFolderPanel("选择输出目录", Application.dataPath, "");
                 if (!string.IsNullOrEmpty(sel))
@@ -149,55 +151,58 @@ namespace PrefabTools
                 MessageType.None);
 
             _onlyExtractMeshObjects = EditorGUILayout.Toggle(
-                new GUIContent("只提取含 Mesh 的节点", "勾选后仅 MeshFilter / SkinnedMeshRenderer 的节点会被分析"),
+                Content("Mesh Nodes Only", "勾选后仅 MeshFilter / SkinnedMeshRenderer 的节点会被分析"),
                 _onlyExtractMeshObjects);
             _includeSkinnedMesh = EditorGUILayout.Toggle(
-                new GUIContent("包含 SkinnedMeshRenderer", "勾选则也提取蒙皮网格"),
+                Content("Include SkinnedMesh", "勾选则也提取蒙皮网格"),
                 _includeSkinnedMesh);
             _minGroupSize = EditorGUILayout.IntField(
-                new GUIContent("最小共享数量", "同一大预制体内,相同结构至少出现 N 次才提取;设为 1 则单个也提取"),
+                Content("Min Share Count", "同一大预制体内,相同结构至少出现 N 次才提取;设为 1 则单个也提取"),
                 _minGroupSize);
             _minGroupSize = Mathf.Max(1, _minGroupSize);
 
             _dryRun = EditorGUILayout.Toggle(
-                new GUIContent("试运行(不写入磁盘)", "强烈建议先试运行确认无误"),
+                Content("Dry Run (No Write)", "强烈建议先试运行确认无误"),
                 _dryRun);
             _autoBackup = EditorGUILayout.Toggle(
-                new GUIContent("执行前自动备份(用于撤销)", "勾选后会把所有大预制体复制一份到备份目录,可通过 撤销 按钮恢复"),
+                Content("Auto Backup Before Execute", "勾选后会把所有大预制体复制一份到备份目录,可通过 Undo 按钮恢复"),
                 _autoBackup);
             _checkRefsOnUndo = EditorGUILayout.Toggle(
-                new GUIContent("撤销时检查外部引用", "撤销前扫描项目,检测子预制体是否被外部引用。项目很大时可关闭以加快撤销速度"),
+                Content("Check External Refs On Undo", "撤销前扫描项目,检测子预制体是否被外部引用。项目很大时可关闭以加快撤销速度"),
                 _checkRefsOnUndo);
 
             EditorGUILayout.Space();
-            EditorGUILayout.LabelField("匹配规则", EditorStyles.miniBoldLabel);
+            EditorGUILayout.LabelField(Content("Match Rules", "匹配规则设置"), EditorStyles.miniBoldLabel);
             _looseMatching = EditorGUILayout.Toggle(
-                new GUIContent("宽松匹配(只看 Mesh 资产)",
+                Content("Loose Matching (Mesh Only)",
                     "默认严格匹配会区分 fbx 内不同的 Mesh 子对象(GUID+FileID);\n" +
                     "宽松模式只看 Mesh 资产路径,fbx 重新导入产生的不同 Mesh 也会归为同一组"),
                 _looseMatching);
             _debugMode = EditorGUILayout.Toggle(
-                new GUIContent("调试模式(打印签名)",
+                Content("Debug Mode (Print Signatures)",
                     "分析时把每个节点的签名摘要打到日志,排查为什么本应一致的节点被分到不同组"),
                 _debugMode);
         }
 
         private void DrawButtons()
         {
-            EditorGUILayout.LabelField("③ 操作", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(Content("3. Actions", "操作按钮"), EditorStyles.boldLabel);
             EditorGUILayout.BeginHorizontal();
             GUI.backgroundColor = new Color(0.6f, 0.9f, 1f);
-            if (GUILayout.Button("分析", GUILayout.Height(30))) Analyze();
+            if (GUILayout.Button(Content("Analyze", "分析所有大预制体,找出可提取的共享组"), GUILayout.Height(30))) Analyze();
 
             GUI.backgroundColor = _dryRun ? new Color(1f, 0.9f, 0.6f) : new Color(1f, 0.6f, 0.6f);
-            if (GUILayout.Button(_dryRun ? "执行提取(试运行)" : "执行提取(写入磁盘)", GUILayout.Height(30)))
+            var execLabel = _dryRun
+                ? Content("Execute (Dry Run)", "试运行模式,不写入磁盘,仅预览结果")
+                : Content("Execute (Write To Disk)", "执行提取并写入磁盘");
+            if (GUILayout.Button(execLabel, GUILayout.Height(30)))
                 Execute();
 
             // 撤销按钮:只有存在撤销记录时可用
             var record = LoadUndoRecord();
             GUI.enabled = record != null;
             GUI.backgroundColor = new Color(1f, 0.8f, 0.5f);
-            if (GUILayout.Button("撤销上次执行", GUILayout.Height(30)))
+            if (GUILayout.Button(Content("Undo Last Execute", "撤销上一次执行操作,恢复备份"), GUILayout.Height(30)))
                 UndoLastExecute();
             GUI.enabled = true;
 
@@ -218,7 +223,7 @@ namespace PrefabTools
         {
             if (_analyzeResult == null || _analyzeResult.Groups.Count == 0) return;
 
-            EditorGUILayout.LabelField("④ 分析结果预览(全局合并)", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(Content("4. Analysis Preview (Global Merge)", "全局合并的分析结果预览"), EditorStyles.boldLabel);
             EditorGUILayout.LabelField(
                 $"总候选节点: {_analyzeResult.TotalCandidateCount},可提取共享组: {_analyzeResult.Groups.Count}");
 
@@ -234,11 +239,11 @@ namespace PrefabTools
 
         private void DrawLog()
         {
-            EditorGUILayout.LabelField("⑤ 日志", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(Content("5. Log", "操作日志"), EditorStyles.boldLabel);
             _logScrollPos = EditorGUILayout.BeginScrollView(_logScrollPos, GUILayout.Height(200));
             EditorGUILayout.TextArea(_log.ToString(), GUILayout.ExpandHeight(true));
             EditorGUILayout.EndScrollView();
-            if (GUILayout.Button("清空日志")) _log.Clear();
+            if (GUILayout.Button(Content("Clear Log", "清空日志"))) _log.Clear();
         }
 
         // ===================== 分析 =====================

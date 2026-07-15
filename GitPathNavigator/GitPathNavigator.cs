@@ -52,23 +52,25 @@ public class GitPathNavigator : EditorWindow
         _cacheDirty = true;
         if (string.IsNullOrEmpty(_statusMsg))
         {
-            _statusMsg  = "请粘贴 Git 路径（例如 git diff 中复制的路径），点击「定位」跳转到对应资源";
+            _statusMsg  = "Paste a Git path (e.g., from git diff) and click Locate to find the asset in the Project window";
             _statusType = MessageType.Info;
         }
     }
+
+    private static GUIContent Content(string label, string tooltip) => new GUIContent(label, tooltip);
 
     // ════════════════ GUI ════════════════
 
     private void OnGUI()
     {
-        EditorGUILayout.LabelField("粘贴 Git 路径，自动定位到 Project 窗口", EditorStyles.wordWrappedMiniLabel);
+        EditorGUILayout.LabelField("Paste a Git path to locate it in the Project window", EditorStyles.wordWrappedMiniLabel);
         EditorGUILayout.Space(4);
 
         // ── 输入行 ──
         EditorGUILayout.BeginHorizontal();
         GUI.SetNextControlName(ControlName);
         _inputPath = EditorGUILayout.TextField(_inputPath, GUILayout.Height(22));
-        if (GUILayout.Button("清空", GUILayout.Width(50), GUILayout.Height(22)))
+        if (GUILayout.Button(Content("Clear", "清空输入框和状态"), GUILayout.Width(50), GUILayout.Height(22)))
         {
             _inputPath     = "";
             _statusMsg     = "";
@@ -114,7 +116,7 @@ public class GitPathNavigator : EditorWindow
                        && GUI.GetNameOfFocusedControl() == ControlName;
 
         EditorGUILayout.BeginHorizontal();
-        if (GUILayout.Button("定位", GUILayout.Height(24)) || pressEnter)
+        if (GUILayout.Button(Content("Locate", "解析路径并在 Project 窗口中定位到对应资源"), GUILayout.Height(24)) || pressEnter)
         {
             if (!Navigate(_inputPath) && _suggestions.Count > 0)
             {
@@ -125,14 +127,14 @@ public class GitPathNavigator : EditorWindow
         }
         using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(_lastAssetPath)))
         {
-            if (GUILayout.Button("在资源管理器中打开", GUILayout.Height(24)))
+            if (GUILayout.Button(Content("Reveal in Explorer", "在系统资源管理器中打开该文件所在目录"), GUILayout.Height(24)))
                 EditorUtility.RevealInFinder(_lastAssetPath);
         }
         EditorGUILayout.EndHorizontal();
 
         // ── 历史记录 ──
         EditorGUILayout.Space(4);
-        _showHistory = EditorGUILayout.Foldout(_showHistory, $"历史记录 ({_history.Count})");
+        _showHistory = EditorGUILayout.Foldout(_showHistory, $"History ({_history.Count})");
 
         if (_showHistory)
         {
@@ -149,8 +151,8 @@ public class GitPathNavigator : EditorWindow
                 _searchFilter = EditorGUILayout.TextField(_searchFilter, searchStyle);
                 GUILayout.FlexibleSpace();
                 bool hasFilter = IsFilterActive();
-                string clearLabel = hasFilter ? "清除筛选结果" : "清除全部";
-                if (GUILayout.Button(clearLabel, EditorStyles.miniButton, GUILayout.Width(80), GUILayout.Height(22)))
+                string clearLabel = hasFilter ? "Clear Filtered" : "Clear All";
+                if (GUILayout.Button(Content(clearLabel, hasFilter ? "清除当前筛选条件下的记录" : "清除全部历史记录"), EditorStyles.miniButton, GUILayout.Width(80), GUILayout.Height(22)))
                 {
                     if (hasFilter)
                         DeleteFilteredEntries();
@@ -227,7 +229,7 @@ public class GitPathNavigator : EditorWindow
 
         if (string.IsNullOrWhiteSpace(rawPath))
         {
-            SetStatus("请先粘贴路径", MessageType.Warning);
+            SetStatus("Please paste a path first", MessageType.Warning);
             return false;
         }
 
@@ -236,7 +238,7 @@ public class GitPathNavigator : EditorWindow
         string assetPath = ExtractPath(normalized, "Assets") ?? ExtractPath(normalized, "Packages");
         if (assetPath == null)
         {
-            SetStatus($"路径中未找到 'Assets' 或 'Packages' 节点：\n{rawPath}", MessageType.Error);
+            SetStatus($"Cannot find 'Assets' or 'Packages' in path:\n{rawPath}", MessageType.Error);
             return false;
         }
 
@@ -244,7 +246,7 @@ public class GitPathNavigator : EditorWindow
 
         if (obj == null)
         {
-            SetStatus($"Project 中不存在该路径：\n{assetPath}", MessageType.Error);
+            SetStatus($"Asset not found in Project:\n{assetPath}", MessageType.Error);
             return false;
         }
 
@@ -253,7 +255,7 @@ public class GitPathNavigator : EditorWindow
         EditorGUIUtility.PingObject(obj);
         _lastAssetPath = assetPath;
         AddToHistory(rawPath);
-        SetStatus($"已定位：{assetPath}", MessageType.Info);
+        SetStatus($"Located: {assetPath}", MessageType.Info);
         return true;
     }
 

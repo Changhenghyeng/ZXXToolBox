@@ -47,6 +47,8 @@ public class WallBuilderTool : EditorWindow
 
     private void OnEnable() { RecalcWallSegments(); }
 
+    private static GUIContent Content(string label, string tooltip) => new GUIContent(label, tooltip);
+
     // ════════════════ GUI ════════════════
 
     private void OnGUI()
@@ -55,7 +57,7 @@ public class WallBuilderTool : EditorWindow
 
         bool isLine = buildMode == BuildMode.Line;
 
-        buildMode = (BuildMode)EditorGUILayout.EnumPopup("生成模式", buildMode);
+        buildMode = (BuildMode)EditorGUILayout.EnumPopup(Content("Build Mode", "生成模式"), buildMode);
         EditorGUILayout.Space(4);
 
         DrawPrefabSection(isLine);
@@ -87,30 +89,30 @@ public class WallBuilderTool : EditorWindow
 
     private void DrawPrefabSection(bool isLine)
     {
-        EditorGUILayout.LabelField(isLine ? "物体" : "墙段", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(isLine ? Content("Object", "物体") : Content("Wall Segments", "墙段"), EditorStyles.boldLabel);
         using (new EditorGUILayout.VerticalScope("box"))
         {
             if (isLine)
             {
-                useDifferentFirst = EditorGUILayout.Toggle("首项使用不同 Prefab", useDifferentFirst);
+                useDifferentFirst = EditorGUILayout.Toggle(Content("Use Different First Prefab", "首项使用不同 Prefab"), useDifferentFirst);
                 if (useDifferentFirst)
                 {
-                    firstPrefab = (GameObject)EditorGUILayout.ObjectField("首个 Prefab", firstPrefab, typeof(GameObject), true);
-                    wallPrefab = (GameObject)EditorGUILayout.ObjectField("其余 Prefab", wallPrefab, typeof(GameObject), true);
+                    firstPrefab = (GameObject)EditorGUILayout.ObjectField(Content("First Prefab", "首个 Prefab"), firstPrefab, typeof(GameObject), true);
+                    wallPrefab = (GameObject)EditorGUILayout.ObjectField(Content("Rest Prefab", "其余 Prefab"), wallPrefab, typeof(GameObject), true);
                 }
                 else
                 {
-                    wallPrefab = (GameObject)EditorGUILayout.ObjectField("物体 Prefab", wallPrefab, typeof(GameObject), true);
+                    wallPrefab = (GameObject)EditorGUILayout.ObjectField(Content("Object Prefab", "物体 Prefab"), wallPrefab, typeof(GameObject), true);
                 }
             }
             else
             {
                 EditorGUI.BeginChangeCheck();
-                wallPrefab = (GameObject)EditorGUILayout.ObjectField("墙段 Prefab", wallPrefab, typeof(GameObject), true);
+                wallPrefab = (GameObject)EditorGUILayout.ObjectField(Content("Wall Segment Prefab", "墙段 Prefab"), wallPrefab, typeof(GameObject), true);
                 if (EditorGUI.EndChangeCheck()) RecalcWallSegments();
 
                 if (buildMode == BuildMode.Enclosure)
-                    cornerPrefab = (GameObject)EditorGUILayout.ObjectField("转角 Prefab（可选）", cornerPrefab, typeof(GameObject), true);
+                    cornerPrefab = (GameObject)EditorGUILayout.ObjectField(Content("Corner Prefab (Optional)", "转角 Prefab（可选）"), cornerPrefab, typeof(GameObject), true);
             }
         }
     }
@@ -119,33 +121,33 @@ public class WallBuilderTool : EditorWindow
 
     private void DrawLineSettings()
     {
-        EditorGUILayout.LabelField("队列设置", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(Content("Queue Settings", "队列设置"), EditorStyles.boldLabel);
         using (new EditorGUILayout.VerticalScope("box"))
         {
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("数量", GUILayout.Width(70));
+            EditorGUILayout.LabelField(Content("Count", "数量"), GUILayout.Width(70));
             lineCount = EditorGUILayout.IntField(lineCount);
             if (lineCount < 1) lineCount = 1;
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("间距", GUILayout.Width(70));
+            EditorGUILayout.LabelField(Content("Spacing", "间距"), GUILayout.Width(70));
             lineSpacing = EditorGUILayout.FloatField(lineSpacing);
             if (lineSpacing < 0.01f) lineSpacing = 0.01f;
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("轴向", GUILayout.Width(70));
+            EditorGUILayout.LabelField(Content("Axis", "轴向"), GUILayout.Width(70));
             if (GUILayout.Toggle(lineAxis == 0, "X", "Button", GUILayout.Width(30))) lineAxis = 0;
             if (GUILayout.Toggle(lineAxis == 1, "Y", "Button", GUILayout.Width(30))) lineAxis = 1;
             if (GUILayout.Toggle(lineAxis == 2, "Z", "Button", GUILayout.Width(30))) lineAxis = 2;
             GUILayout.Space(10);
-            EditorGUILayout.LabelField("朝向", GUILayout.Width(30));
+            EditorGUILayout.LabelField(Content("Dir", "朝向"), GUILayout.Width(30));
             linePositive = EditorGUILayout.Toggle(linePositive, GUILayout.Width(20));
             EditorGUILayout.LabelField(linePositive ? "+" : "−", GUILayout.Width(15));
             EditorGUILayout.EndHorizontal();
 
-            EditorGUILayout.LabelField($"队列总长: {lineSpacing * (lineCount - 1):F2}m", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField($"Total Length: {lineSpacing * (lineCount - 1):F2}m", EditorStyles.miniLabel);
         }
     }
 
@@ -157,19 +159,19 @@ public class WallBuilderTool : EditorWindow
         bool isCorridor  = buildMode == BuildMode.Corridor;
 
         // Size
-        EditorGUILayout.LabelField("围墙尺寸", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(Content("Wall Size", "围墙尺寸"), EditorStyles.boldLabel);
         using (new EditorGUILayout.VerticalScope("box"))
         {
             EditorGUI.BeginChangeCheck();
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("长边 (X)", GUILayout.Width(70));
+            EditorGUILayout.LabelField(Content("Length (X)", "长边 (X)"), GUILayout.Width(70));
             wallLength = EditorGUILayout.FloatField(wallLength);
             EditorGUILayout.EndHorizontal();
 
             if (!isCorridor)
             {
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField("宽边 (Z)", GUILayout.Width(70));
+                EditorGUILayout.LabelField(Content("Depth (Z)", "宽边 (Z)"), GUILayout.Width(70));
                 wallDepth = EditorGUILayout.FloatField(wallDepth);
                 EditorGUILayout.EndHorizontal();
             }
@@ -182,41 +184,41 @@ public class WallBuilderTool : EditorWindow
         EditorGUILayout.Space(4);
 
         // Segments
-        EditorGUILayout.LabelField("墙段设置", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(Content("Segment Settings", "墙段设置"), EditorStyles.boldLabel);
         using (new EditorGUILayout.VerticalScope("box"))
         {
             EditorGUI.BeginChangeCheck();
-            autoSegment = EditorGUILayout.Toggle("自动计算段数", autoSegment);
+            autoSegment = EditorGUILayout.Toggle(Content("Auto Calculate Segments", "自动计算段数"), autoSegment);
 
             if (autoSegment)
             {
                 EditorGUI.indentLevel++;
-                segLength = EditorGUILayout.FloatField("每段墙长度", segLength);
+                segLength = EditorGUILayout.FloatField(Content("Segment Length", "每段墙长度"), segLength);
                 if (segLength < 0.01f) segLength = 0.01f;
                 if (EditorGUI.EndChangeCheck()) RecalcWallSegments();
                 EditorGUI.indentLevel--;
 
                 string info = buildMode switch
                 {
-                    BuildMode.Enclosure => $"长边: {segsLong}×2    宽边: {segsShort}×2",
-                    BuildMode.LShape    => $"长边: {segsLong}    宽边: {segsShort}",
-                    _                   => $"长边: {segsLong}×2",
+                    BuildMode.Enclosure => $"Long: {segsLong}x2    Short: {segsShort}x2",
+                    BuildMode.LShape    => $"Long: {segsLong}    Short: {segsShort}",
+                    _                   => $"Long: {segsLong}x2",
                 };
                 EditorGUILayout.BeginHorizontal("box");
                 EditorGUILayout.LabelField(info, EditorStyles.miniLabel);
                 EditorGUILayout.EndHorizontal();
 
                 string sp = isCorridor
-                    ? $"实际间距 — 长边: {wallLength / segsLong:F2}m"
-                    : $"实际间距 — 长边: {wallLength / segsLong:F2}m    宽边: {wallDepth / segsShort:F2}m";
+                    ? $"Actual Spacing - Long: {wallLength / segsLong:F2}m"
+                    : $"Actual Spacing - Long: {wallLength / segsLong:F2}m    Short: {wallDepth / segsShort:F2}m";
                 EditorGUILayout.LabelField(sp, EditorStyles.miniLabel);
             }
             else
             {
                 EditorGUI.indentLevel++;
-                segsLong = EditorGUILayout.IntField("长边段数", segsLong);
+                segsLong = EditorGUILayout.IntField(Content("Long Side Segments", "长边段数"), segsLong);
                 if (!isCorridor)
-                    segsShort = EditorGUILayout.IntField("宽边段数", segsShort);
+                    segsShort = EditorGUILayout.IntField(Content("Short Side Segments", "宽边段数"), segsShort);
                 if (segsLong  < 1) segsLong  = 1;
                 if (segsShort < 1) segsShort = 1;
                 EditorGUI.indentLevel--;
@@ -228,26 +230,26 @@ public class WallBuilderTool : EditorWindow
 
     private void DrawCommonOptions(bool isLine)
     {
-        EditorGUILayout.LabelField("选项", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(Content("Options", "选项"), EditorStyles.boldLabel);
         using (new EditorGUILayout.VerticalScope("box"))
         {
-            objectScale = EditorGUILayout.Vector3Field("缩放", objectScale);
+            objectScale = EditorGUILayout.Vector3Field(Content("Scale", "缩放"), objectScale);
 
             if (isLine)
             {
-                lineRotation = EditorGUILayout.Vector3Field("旋转", lineRotation);
+                lineRotation = EditorGUILayout.Vector3Field(Content("Rotation", "旋转"), lineRotation);
             }
             else
             {
                 EditorGUILayout.BeginHorizontal();
-                faceInward = EditorGUILayout.Toggle("墙面朝内", faceInward);
+                faceInward = EditorGUILayout.Toggle(Content("Face Inward", "墙面朝内"), faceInward);
                 if (buildMode == BuildMode.Enclosure)
-                    useCorners = EditorGUILayout.Toggle("使用转角", useCorners);
+                    useCorners = EditorGUILayout.Toggle(Content("Use Corners", "使用转角"), useCorners);
                 EditorGUILayout.EndHorizontal();
             }
 
-            centerPos = EditorGUILayout.Vector3Field("中心点", centerPos);
-            rootName  = EditorGUILayout.TextField("根节点名", rootName);
+            centerPos = EditorGUILayout.Vector3Field(Content("Center", "中心点"), centerPos);
+            rootName  = EditorGUILayout.TextField(Content("Root Name", "根节点名"), rootName);
         }
     }
 
@@ -266,7 +268,7 @@ public class WallBuilderTool : EditorWindow
         using (new EditorGUI.DisabledScope(!canBuild))
         {
             GUI.backgroundColor = new Color(0.5f, 0.85f, 0.5f);
-            if (GUILayout.Button(isLine ? "生成队列" : "生成围墙", GUILayout.Height(42)))
+            if (GUILayout.Button(isLine ? Content("Build Queue", "生成队列") : Content("Build Walls", "生成围墙"), GUILayout.Height(42)))
                 Build();
             GUI.backgroundColor = Color.white;
         }
@@ -276,7 +278,7 @@ public class WallBuilderTool : EditorWindow
         EditorGUILayout.Space(2);
         int total = isLine ? lineCount : TotalWallObjects();
         string detail = isLine
-            ? $"{lineCount} 个" + (useDifferentFirst ? " (首项不同)" : "")
+            ? $"{lineCount} objects" + (useDifferentFirst ? " (first different)" : "")
             : buildMode switch
             {
                 BuildMode.Enclosure => $"{segsLong}×2 + {segsShort}×2",
@@ -284,8 +286,8 @@ public class WallBuilderTool : EditorWindow
                 BuildMode.Corridor  => $"{segsLong}×2",
                 _ => ""
             };
-        string extra = (!isLine && useCorners && cornerPrefab && buildMode == BuildMode.Enclosure) ? " + 4 转角" : "";
-        EditorGUILayout.LabelField($"合计: {total} 个物体  ({detail}{extra})", EditorStyles.centeredGreyMiniLabel);
+        string extra = (!isLine && useCorners && cornerPrefab && buildMode == BuildMode.Enclosure) ? " + 4 corners" : "";
+        EditorGUILayout.LabelField($"Total: {total} objects  ({detail}{extra})", EditorStyles.centeredGreyMiniLabel);
     }
 
     // ════════════════ Wall Calc ════════════════

@@ -23,11 +23,13 @@ public class ShadingModeToggleWindow : EditorWindow
     private static readonly List<MeshRecord> _records = new List<MeshRecord>();
     private Vector2 _scrollPos;
 
+    private static GUIContent Content(string label, string tooltip) => new GUIContent(label, tooltip);
+
     // ── 入口 ──
 
     public static void Open()
     {
-        var w = GetWindow<ShadingModeToggleWindow>("软硬边切换");
+        var w = GetWindow<ShadingModeToggleWindow>("Shading Mode Toggle");
         w.minSize = new Vector2(400, 300);
         w.Show();
     }
@@ -44,7 +46,7 @@ public class ShadingModeToggleWindow : EditorWindow
         CleanupDestroyedRecords();
 
         // ── 标题 ──
-        EditorGUILayout.LabelField("软硬边显示切换", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(Content("Shading Mode Toggle", "模型软硬边显示切换工具"), EditorStyles.boldLabel);
         EditorGUILayout.Space(2);
 
         EditorGUILayout.HelpBox(
@@ -66,9 +68,9 @@ public class ShadingModeToggleWindow : EditorWindow
         using (new EditorGUI.DisabledScope(!hasNewSelection))
         {
             string btnText = _records.Count == 0
-                ? "📥  捕获选中模型"
-                : $"📥  捕获选中模型（+{newCount} 个）";
-            if (GUILayout.Button(btnText, GUILayout.Height(30)))
+                ? "Capture Selected Meshes"
+                : $"Capture Selected Meshes (+{newCount})";
+            if (GUILayout.Button(Content(btnText, "捕获选中物体的 Mesh，开始非破坏性法线预览。"), GUILayout.Height(30)))
                 CaptureSelection(selected);
         }
 
@@ -77,22 +79,22 @@ public class ShadingModeToggleWindow : EditorWindow
         // ── 统一调节 ──
         if (_records.Count > 0)
         {
-            EditorGUILayout.LabelField("统一调节", EditorStyles.miniBoldLabel);
+            EditorGUILayout.LabelField(Content("Global Smoothness", "统一调节所有已捕获模型的平滑度"), EditorStyles.miniBoldLabel);
 
             EditorGUILayout.BeginHorizontal();
             {
-                if (GUILayout.Button("硬", GUILayout.Width(28), GUILayout.Height(20)))
+                if (GUILayout.Button(Content("Hard", "设为硬边（平滑度 0%）"), GUILayout.Width(32), GUILayout.Height(20)))
                     SetAllSmoothness(0f);
-                if (GUILayout.Button("25%", GUILayout.Width(32), GUILayout.Height(20)))
+                if (GUILayout.Button(Content("25%", "平滑度 25%"), GUILayout.Width(32), GUILayout.Height(20)))
                     SetAllSmoothness(0.25f);
-                if (GUILayout.Button("50%", GUILayout.Width(32), GUILayout.Height(20)))
+                if (GUILayout.Button(Content("50%", "平滑度 50%"), GUILayout.Width(32), GUILayout.Height(20)))
                     SetAllSmoothness(0.5f);
-                if (GUILayout.Button("75%", GUILayout.Width(32), GUILayout.Height(20)))
+                if (GUILayout.Button(Content("75%", "平滑度 75%"), GUILayout.Width(32), GUILayout.Height(20)))
                     SetAllSmoothness(0.75f);
-                if (GUILayout.Button("软", GUILayout.Width(28), GUILayout.Height(20)))
+                if (GUILayout.Button(Content("Soft", "设为软边（平滑度 100%）"), GUILayout.Width(32), GUILayout.Height(20)))
                     SetAllSmoothness(1f);
                 GUILayout.FlexibleSpace();
-                if (GUILayout.Button("⟳  恢复全部", GUILayout.Height(20)))
+                if (GUILayout.Button(Content("Restore All", "恢复全部模型为原始 Mesh，清除所有预览"), GUILayout.Height(20)))
                     RestoreAll();
             }
             EditorGUILayout.EndHorizontal();
@@ -100,7 +102,7 @@ public class ShadingModeToggleWindow : EditorWindow
             EditorGUILayout.Space(6);
 
             // ── 逐模型列表 ──
-            EditorGUILayout.LabelField($"模型列表（{_records.Count} 个） — 各自拖动调节", EditorStyles.miniBoldLabel);
+            EditorGUILayout.LabelField(Content($"Model List ({_records.Count})", "每个模型各自拖动平滑度滑块调节"), EditorStyles.miniBoldLabel);
             _scrollPos = EditorGUILayout.BeginScrollView(_scrollPos, GUILayout.ExpandHeight(true));
 
             for (int i = _records.Count - 1; i >= 0; i--)
@@ -132,19 +134,19 @@ public class ShadingModeToggleWindow : EditorWindow
             if (_records.Count > 0)
             {
                 float avg = _records.Average(r => r.smoothness);
-                EditorGUILayout.LabelField($"预览中: {_records.Count} 个模型  |  平均平滑度: {avg:P0}");
+                EditorGUILayout.LabelField($"Previewing: {_records.Count} models  |  Avg Smoothness: {avg:P0}");
             }
             else
             {
-                EditorGUILayout.LabelField("暂未捕获任何模型");
+                EditorGUILayout.LabelField("No models captured yet");
             }
 
             var selected = GetSelectedMeshComponents();
             int captured = selected.Count(IsCaptured);
             if (selected.Count > 0)
-                EditorGUILayout.LabelField($"选中物体中的 Mesh: {selected.Count} 个（{captured} 个已捕获）");
+                EditorGUILayout.LabelField($"Selected Meshes: {selected.Count} ({captured} captured)");
             else
-                EditorGUILayout.LabelField("未选中任何带 Mesh 的物体 — 请在 Hierarchy 中选中模型");
+                EditorGUILayout.LabelField("No mesh-bearing object selected — select a model in Hierarchy");
         }
         EditorGUILayout.EndVertical();
     }
@@ -172,19 +174,19 @@ public class ShadingModeToggleWindow : EditorWindow
         EditorGUILayout.LabelField($"{rec.smoothness:F2}", GUILayout.Width(32));
 
         // 快设微调按钮
-        if (GUILayout.Button("硬", GUILayout.Width(22), GUILayout.Height(16)))
+        if (GUILayout.Button(Content("H", "设为硬边（Hard）"), GUILayout.Width(22), GUILayout.Height(16)))
         {
             rec.smoothness = 0f;
             ApplySmoothnessToRecord(rec);
         }
-        if (GUILayout.Button("软", GUILayout.Width(22), GUILayout.Height(16)))
+        if (GUILayout.Button(Content("S", "设为软边（Soft）"), GUILayout.Width(22), GUILayout.Height(16)))
         {
             rec.smoothness = 1f;
             ApplySmoothnessToRecord(rec);
         }
 
         // 恢复
-        if (GUILayout.Button("✕", GUILayout.Width(24), GUILayout.Height(18)))
+        if (GUILayout.Button(Content("✕", "恢复此模型为原始 Mesh"), GUILayout.Width(24), GUILayout.Height(18)))
             RestoreRecord(rec);
 
         EditorGUILayout.EndHorizontal();

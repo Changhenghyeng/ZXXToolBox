@@ -84,7 +84,7 @@ namespace ProcGen
 
             slotList.drawHeaderCallback = rect =>
             {
-                EditorGUI.LabelField(rect, "预制体插槽 (按优先级降序生成，高优先级覆盖低优先级)");
+                EditorGUI.LabelField(rect, "Prefab Slots (generated in descending priority; higher priority overwrites lower)");
             };
 
             // 单行高度（含间距）
@@ -108,8 +108,8 @@ namespace ProcGen
                 slot.enabled = EditorGUI.Toggle(toggleRect, slot.enabled);
 
                 var headerRect = new Rect(rect.x + 20, y, rect.width - 20, EditorGUIUtility.singleLineHeight);
-                string prefix = slot.enabled ? "" : "[禁用] ";
-                string prefabInfo = "  (未指定)";
+                string prefix = slot.enabled ? "" : "[Disabled] ";
+                string prefabInfo = "  (none)";
                 int validCount = 0;
                 GameObject firstPrefab = null;
 
@@ -145,7 +145,7 @@ namespace ProcGen
                     return r;
                 }
 
-                slot.name = EditorGUI.TextField(Row(), "名称", slot.name);
+                slot.name = EditorGUI.TextField(Row(), Content("Name", "插槽名称").text, slot.name);
 
                 // Prefab 列表 (object | weight | -)
                 EditorGUI.LabelField(Row(), $"Prefabs ({slot.prefabEntries.Count})");
@@ -175,29 +175,29 @@ namespace ProcGen
 
                 var addRow = Row();
                 var addBtnRect = new Rect(addRow.x + 14, addRow.y, addRow.width - 14, addRow.height);
-                if (GUI.Button(addBtnRect, "+ 添加预制体"))
+                if (GUI.Button(addBtnRect, "+ Add Prefab"))
                 {
                     slot.prefabEntries.Add(new PrefabEntry());
                 }
 
-                slot.count = Mathf.Max(0, EditorGUI.IntField(Row(), "数量", slot.count));
-                slot.scaleMin = EditorGUI.FloatField(Row(), "缩放最小", slot.scaleMin);
-                slot.scaleMax = EditorGUI.FloatField(Row(), "缩放最大", slot.scaleMax);
-                slot.minDistance = Mathf.Max(0f, EditorGUI.FloatField(Row(), "最小间距 (m)", slot.minDistance));
-                slot.priority = EditorGUI.IntField(Row(), "优先级", slot.priority);
-                slot.canBeDestroyed = EditorGUI.Toggle(Row(), "允许被销毁", slot.canBeDestroyed);
-                slot.yRotation = EditorGUI.FloatField(Row(), "Y 旋转 (°)", slot.yRotation);
-                slot.positionOffset.x = EditorGUI.FloatField(Row(), "位置偏移 X", slot.positionOffset.x);
-                slot.positionOffset.y = EditorGUI.FloatField(Row(), "位置偏移 Y", slot.positionOffset.y);
-                slot.positionOffset.z = EditorGUI.FloatField(Row(), "位置偏移 Z", slot.positionOffset.z);
-                slot.overrideMaterial = (Material)EditorGUI.ObjectField(Row(), "覆盖材质", slot.overrideMaterial, typeof(Material), false);
-                slot.boundsMode = (BoundsMode)EditorGUI.EnumPopup(Row(), "碰撞盒模式", slot.boundsMode);
+                slot.count = Mathf.Max(0, EditorGUI.IntField(Row(), Content("Count", "生成数量").text, slot.count));
+                slot.scaleMin = EditorGUI.FloatField(Row(), Content("Scale Min", "缩放最小值").text, slot.scaleMin);
+                slot.scaleMax = EditorGUI.FloatField(Row(), Content("Scale Max", "缩放最大值").text, slot.scaleMax);
+                slot.minDistance = Mathf.Max(0f, EditorGUI.FloatField(Row(), Content("Min Distance (m)", "实例之间的最小间距").text, slot.minDistance));
+                slot.priority = EditorGUI.IntField(Row(), Content("Priority", "优先级，数值越大越优先").text, slot.priority);
+                slot.canBeDestroyed = EditorGUI.Toggle(Row(), Content("Can Be Destroyed", "允许被更高优先级的物体覆盖销毁"), slot.canBeDestroyed);
+                slot.yRotation = EditorGUI.FloatField(Row(), Content("Y Rotation (°)", "绕 Y 轴旋转角度"), slot.yRotation);
+                slot.positionOffset.x = EditorGUI.FloatField(Row(), Content("Offset X", "位置偏移 X"), slot.positionOffset.x);
+                slot.positionOffset.y = EditorGUI.FloatField(Row(), Content("Offset Y", "位置偏移 Y"), slot.positionOffset.y);
+                slot.positionOffset.z = EditorGUI.FloatField(Row(), Content("Offset Z", "位置偏移 Z"), slot.positionOffset.z);
+                slot.overrideMaterial = (Material)EditorGUI.ObjectField(Row(), Content("Override Material", "覆盖材质，留空则使用 Prefab 自带材质"), slot.overrideMaterial, typeof(Material), false);
+                slot.boundsMode = (BoundsMode)EditorGUI.EnumPopup(Row(), Content("Bounds Mode", "碰撞盒模式：Auto 自动 / Custom 自定义 / SelectRenderers 按子 Renderer"), slot.boundsMode);
 
                 if (slot.boundsMode == BoundsMode.Custom)
                 {
-                    slot.customHalfExtents.x = EditorGUI.FloatField(Row(), "  Box 半宽 X", slot.customHalfExtents.x);
-                    slot.customHalfExtents.y = EditorGUI.FloatField(Row(), "  Box 半高 Y", slot.customHalfExtents.y);
-                    slot.customHalfExtents.z = EditorGUI.FloatField(Row(), "  Box 半深 Z", slot.customHalfExtents.z);
+                    slot.customHalfExtents.x = EditorGUI.FloatField(Row(), Content("  Box Half X", "自定义碰撞盒半宽 X"), slot.customHalfExtents.x);
+                    slot.customHalfExtents.y = EditorGUI.FloatField(Row(), Content("  Box Half Y", "自定义碰撞盒半高 Y"), slot.customHalfExtents.y);
+                    slot.customHalfExtents.z = EditorGUI.FloatField(Row(), Content("  Box Half Z", "自定义碰撞盒半深 Z"), slot.customHalfExtents.z);
                 }
                 else if (slot.boundsMode == BoundsMode.SelectRenderers)
                 {
@@ -216,11 +216,11 @@ namespace ProcGen
 
                     if (prefabCount == 0)
                     {
-                        EditorGUI.LabelField(Row(), "  请先添加一个 Prefab");
+                        EditorGUI.LabelField(Row(), "  Add a Prefab first");
                     }
                     else if (prefabCount > 1)
                     {
-                        EditorGUI.LabelField(Row(), "  多 Prefab 时此模式退化为 Auto");
+                        EditorGUI.LabelField(Row(), "  Falls back to Auto with multiple Prefabs");
                     }
                     else
                     {
@@ -228,19 +228,19 @@ namespace ProcGen
                         var headerRow = Row();
                         var foldoutRect = new Rect(headerRow.x, headerRow.y, headerRow.width - 130, headerRow.height);
                         slot.rendererListFoldout = EditorGUI.Foldout(foldoutRect, slot.rendererListFoldout,
-                            $"  子 Renderer ({slot.selectedRendererPaths.Count} 已选)", true);
+                            $"  Child Renderers ({slot.selectedRendererPaths.Count} selected)", true);
 
                         var btnAllRect = new Rect(headerRow.xMax - 125, headerRow.y, 60, headerRow.height);
                         var btnNoneRect = new Rect(headerRow.xMax - 60, headerRow.y, 60, headerRow.height);
 
-                        if (GUI.Button(btnAllRect, "全选"))
+                        if (GUI.Button(btnAllRect, "All"))
                         {
                             slot.selectedRendererPaths.Clear();
                             foreach (var path in EnumerateRendererPaths(solePrefab))
                                 slot.selectedRendererPaths.Add(path);
                         }
 
-                        if (GUI.Button(btnNoneRect, "全不选"))
+                        if (GUI.Button(btnNoneRect, "None"))
                         {
                             slot.selectedRendererPaths.Clear();
                         }
@@ -350,80 +350,83 @@ namespace ProcGen
             }
         }
 
+        private static GUIContent Content(string label, string tooltip) => new GUIContent(label, tooltip);
+
         private void OnGUI()
         {
             scroll = EditorGUILayout.BeginScrollView(scroll);
 
-            EditorGUILayout.LabelField("目标", EditorStyles.boldLabel);
-            settings.target = (GameObject)EditorGUILayout.ObjectField("目标 Mesh/Prefab", settings.target, typeof(GameObject), true);
+            EditorGUILayout.LabelField(Content("Target", "生成目标"), EditorStyles.boldLabel);
+            settings.target = (GameObject)EditorGUILayout.ObjectField(
+                Content("Target Mesh/Prefab", "目标 Mesh 或 Prefab，在其表面生成预制体"), settings.target, typeof(GameObject), true);
 
             EditorGUILayout.Space();
-            EditorGUILayout.LabelField("全局设置", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(Content("Global Settings", "全局设置"), EditorStyles.boldLabel);
 
-            settings.cellSize = EditorGUILayout.FloatField(new GUIContent("网格单元 (m)", "1 单位 = 1.5 米"), settings.cellSize);
-            settings.jitter = EditorGUILayout.Slider(new GUIContent("位置随机度", "候选点偏离网格中心的程度。0 = 严格网格中心，1 = 格子内任意位置"), settings.jitter, 0f, 1f);
-            settings.spreadBias = EditorGUILayout.Slider(new GUIContent("散布偏好", "已放置点对新点位置的影响。0 = 均匀散开，0.5 = 纯随机，1 = 抱团聚集"), settings.spreadBias, 0f, 1f);
-            settings.upNormalThreshold = EditorGUILayout.Slider("朝上阈值", settings.upNormalThreshold, 0.5f, 1f);
-            settings.boundaryInset = EditorGUILayout.FloatField(new GUIContent("边界内缩 (m)", "距 mesh 边缘多近内不生成。建议填建筑半径"), settings.boundaryInset);
+            settings.cellSize = EditorGUILayout.FloatField(new GUIContent("Grid Cell (m)", "网格单元大小（1 单位 = 1.5 米）"), settings.cellSize);
+            settings.jitter = EditorGUILayout.Slider(new GUIContent("Position Jitter", "候选点偏离网格中心的程度。0 = 严格网格中心，1 = 格子内任意位置"), settings.jitter, 0f, 1f);
+            settings.spreadBias = EditorGUILayout.Slider(new GUIContent("Spread Bias", "已放置点对新点位置的影响。0 = 均匀散开，0.5 = 纯随机，1 = 抱团聚集"), settings.spreadBias, 0f, 1f);
+            settings.upNormalThreshold = EditorGUILayout.Slider(Content("Up Threshold", "面法线朝上程度的阈值，低于此值的面不会生成"), settings.upNormalThreshold, 0.5f, 1f);
+            settings.boundaryInset = EditorGUILayout.FloatField(new GUIContent("Boundary Inset (m)", "距 mesh 边缘多近内不生成。建议填建筑半径"), settings.boundaryInset);
 
             EditorGUILayout.BeginHorizontal();
-            settings.seed = EditorGUILayout.IntField("随机种子", settings.seed);
-            if (GUILayout.Button("随机", GUILayout.Width(60)))
+            settings.seed = EditorGUILayout.IntField(Content("Random Seed", "随机种子，相同种子产生相同结果"), settings.seed);
+            if (GUILayout.Button(Content("Random", "生成随机种子"), GUILayout.Width(60)))
             {
                 settings.seed = Random.Range(int.MinValue, int.MaxValue);
             }
             EditorGUILayout.EndHorizontal();
 
-            settings.maxRetriesPerPoint = EditorGUILayout.IntField("每点最大重试", settings.maxRetriesPerPoint);
+            settings.maxRetriesPerPoint = EditorGUILayout.IntField(Content("Max Retries Per Point", "每个候选点放置失败后的最大重试次数"), settings.maxRetriesPerPoint);
 
             // ========== 调试设置面板 ==========
             EditorGUILayout.Space();
-            debugFoldout = EditorGUILayout.Foldout(debugFoldout, "🔍 调试可视化设置", true, EditorStyles.boldLabel);
+            debugFoldout = EditorGUILayout.Foldout(debugFoldout, Content("Debug Visualization", "调试可视化设置"), true, EditorStyles.boldLabel);
             if (debugFoldout)
             {
                 EditorGUI.indentLevel++;
-                settings.showDebugGizmos = EditorGUILayout.Toggle("启用调试模式", settings.showDebugGizmos);
-                
+                settings.showDebugGizmos = EditorGUILayout.Toggle(Content("Enable Debug Mode", "启用调试模式，在 Scene 视图中显示 Gizmos"), settings.showDebugGizmos);
+
                 using (new EditorGUI.DisabledScope(!settings.showDebugGizmos))
                 {
-                    settings.showCandidatePoints = EditorGUILayout.Toggle("显示候选点", settings.showCandidatePoints);
-                    settings.showCollisionBoxes = EditorGUILayout.Toggle("显示碰撞盒", settings.showCollisionBoxes);
-                    settings.showAvoidanceBounds = EditorGUILayout.Toggle("显示避让范围", settings.showAvoidanceBounds);
-                    settings.showDestroyedObjects = EditorGUILayout.Toggle("显示被销毁物体", settings.showDestroyedObjects);
-                    
+                    settings.showCandidatePoints = EditorGUILayout.Toggle(Content("Show Candidate Points", "显示候选生成点"), settings.showCandidatePoints);
+                    settings.showCollisionBoxes = EditorGUILayout.Toggle(Content("Show Collision Boxes", "显示碰撞盒"), settings.showCollisionBoxes);
+                    settings.showAvoidanceBounds = EditorGUILayout.Toggle(Content("Show Avoidance Bounds", "显示避让范围"), settings.showAvoidanceBounds);
+                    settings.showDestroyedObjects = EditorGUILayout.Toggle(Content("Show Destroyed Objects", "显示被销毁的物体"), settings.showDestroyedObjects);
+
                     EditorGUILayout.Space();
-                    settings.candidatePointColor = EditorGUILayout.ColorField("候选点颜色", settings.candidatePointColor);
-                    settings.collisionBoxColor = EditorGUILayout.ColorField("碰撞盒颜色", settings.collisionBoxColor);
-                    settings.avoidanceColor = EditorGUILayout.ColorField("避让范围颜色", settings.avoidanceColor);
-                    settings.destroyedColor = EditorGUILayout.ColorField("被销毁物体颜色", settings.destroyedColor);
-                    
+                    settings.candidatePointColor = EditorGUILayout.ColorField(Content("Candidate Point Color", "候选点 Gizmo 颜色"), settings.candidatePointColor);
+                    settings.collisionBoxColor = EditorGUILayout.ColorField(Content("Collision Box Color", "碰撞盒 Gizmo 颜色"), settings.collisionBoxColor);
+                    settings.avoidanceColor = EditorGUILayout.ColorField(Content("Avoidance Color", "避让范围 Gizmo 颜色"), settings.avoidanceColor);
+                    settings.destroyedColor = EditorGUILayout.ColorField(Content("Destroyed Color", "被销毁物体 Gizmo 颜色"), settings.destroyedColor);
+
                     EditorGUILayout.Space();
                     EditorGUILayout.BeginHorizontal();
-                    
+
                     GUI.backgroundColor = new Color(0.6f, 1f, 0.6f);
-                    if (GUILayout.Button("📊 显示所有调试信息", GUILayout.Height(25)))
+                    if (GUILayout.Button(Content("Show All Debug Info", "重新生成并显示所有调试信息"), GUILayout.Height(25)))
                     {
                         if (settings.target != null)
                         {
                             SaveSettings();
                             ProcGenerator.Generate(settings);
-                            Debug.Log("[ProcGen] 已重新生成并显示所有调试信息");
+                            Debug.Log("[ProcGen] Regenerated with all debug info");
                         }
                         else
                         {
                             EditorUtility.DisplayDialog("提示", "请先指定生成目标", "确定");
                         }
                     }
-                    
+
                     GUI.backgroundColor = new Color(1f, 0.7f, 0.7f);
-                    if (GUILayout.Button("🗑️ 清除所有调试信息", GUILayout.Height(25)))
+                    if (GUILayout.Button(Content("Clear All Debug Info", "清除所有调试信息"), GUILayout.Height(25)))
                     {
 #if UNITY_EDITOR
                         ProcGenDebugManager.Instance.ClearAll();
-                        Debug.Log("[ProcGen] 已清除所有调试信息");
+                        Debug.Log("[ProcGen] Cleared all debug info");
 #endif
                     }
-                    
+
                     GUI.backgroundColor = Color.white;
                     EditorGUILayout.EndHorizontal();
                 }
@@ -435,7 +438,7 @@ namespace ProcGen
             EditorGUILayout.BeginHorizontal();
 
             GUI.backgroundColor = new Color(0.6f, 1f, 0.6f);
-            if (GUILayout.Button("生成", GUILayout.Height(30)))
+            if (GUILayout.Button(Content("Generate", "执行程序化生成"), GUILayout.Height(30)))
             {
                 SaveSettings();
                 ProcGenerator.Generate(settings);

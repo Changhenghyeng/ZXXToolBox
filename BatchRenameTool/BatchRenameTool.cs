@@ -18,6 +18,8 @@ using UnityEngine;
 
 public class BatchRenameTool : EditorWindow
 {
+    private static GUIContent Content(string label, string tooltip) => new GUIContent(label, tooltip);
+
     private static string DefaultConfigPath
     {
         get
@@ -271,12 +273,12 @@ public class BatchRenameTool : EditorWindow
 
     private void DrawTopHelp()
     {
-        EditorGUILayout.LabelField("选择目标 → 设置规则 → 分析预览 → 执行重命名（执行前请提交Git/SVN）", EditorStyles.miniLabel);
+        EditorGUILayout.LabelField(Content("Select Target -> Set Rules -> Analyze Preview -> Execute Rename (Commit to Git/SVN first)", "选择目标 → 设置规则 → 分析预览 → 执行重命名（执行前请提交Git/SVN）"), EditorStyles.miniLabel);
     }
 
     private void DrawConfigIOSection()
     {
-        foldoutConfigIO = EditorGUILayout.Foldout(foldoutConfigIO, "配置导入 / 导出", true, EditorStyles.foldoutHeader);
+        foldoutConfigIO = EditorGUILayout.Foldout(foldoutConfigIO, Content("Config Import / Export", "配置导入 / 导出"), true, EditorStyles.foldoutHeader);
         if (!foldoutConfigIO) return;
 
         using (new EditorGUILayout.VerticalScope("box"))
@@ -284,9 +286,9 @@ public class BatchRenameTool : EditorWindow
             EditorGUILayout.HelpBox($"把当前所有规则保存为 JSON。\n启动时会自动加载 {DefaultConfigPath}", MessageType.None);
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("保存配置...")) SaveConfigDialog();
-                if (GUILayout.Button("加载配置...")) LoadConfigDialog();
-                if (GUILayout.Button("重置为默认", GUILayout.Width(120)))
+                if (GUILayout.Button(Content("Save Config...", "保存配置..."))) SaveConfigDialog();
+                if (GUILayout.Button(Content("Load Config...", "加载配置..."))) LoadConfigDialog();
+                if (GUILayout.Button(Content("Reset To Defaults", "重置为默认"), GUILayout.Width(120)))
                 {
                     if (EditorUtility.DisplayDialog("重置为默认", "将清空所有规则并恢复默认。继续？", "确认", "取消"))
                     {
@@ -301,18 +303,18 @@ public class BatchRenameTool : EditorWindow
     // ---  目标选择 ---
     private void DrawTargetSection()
     {
-        EditorGUILayout.LabelField("目标选择", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(Content("Target Selection", "目标选择"), EditorStyles.boldLabel);
         using (new EditorGUILayout.VerticalScope("box"))
         {
             EditorGUI.BeginChangeCheck();
-            targetSource = (TargetSource)EditorGUILayout.EnumPopup(new GUIContent("目标来源"), targetSource);
+            targetSource = (TargetSource)EditorGUILayout.EnumPopup(Content("Target Source", "目标来源"), targetSource);
             if (EditorGUI.EndChangeCheck()) previewList.Clear();
 
             if (targetSource == TargetSource.ProjectFolder)
             {
-                targetFolder = (DefaultAsset)EditorGUILayout.ObjectField("目标文件夹", targetFolder, typeof(DefaultAsset), false);
-                includeSubFolders = EditorGUILayout.Toggle("包含子文件夹", includeSubFolders);
-                fileExtensionFilter = EditorGUILayout.TextField("文件后缀过滤", fileExtensionFilter);
+                targetFolder = (DefaultAsset)EditorGUILayout.ObjectField(Content("Target Folder", "目标文件夹"), targetFolder, typeof(DefaultAsset), false);
+                includeSubFolders = EditorGUILayout.Toggle(Content("Include Subfolders", "包含子文件夹"), includeSubFolders);
+                fileExtensionFilter = EditorGUILayout.TextField(Content("File Extension Filter", "文件后缀过滤"), fileExtensionFilter);
             }
             else if (targetSource == TargetSource.ProjectSelection)
             {
@@ -333,16 +335,16 @@ public class BatchRenameTool : EditorWindow
     private void DrawNamingRulesGroup()
     {
         string summary = BuildNamingRulesSummary();
-        foldoutNamingRules = DrawGroupFoldout(foldoutNamingRules, "命名规则", summary);
+        foldoutNamingRules = DrawGroupFoldout(foldoutNamingRules, Content("Naming Rules", "命名规则"), summary);
         if (!foldoutNamingRules) return;
 
         using (new EditorGUILayout.VerticalScope("box"))
         {
-            foldoutTypePrefix = EditorGUILayout.Foldout(foldoutTypePrefix, "类型前缀", true);
+            foldoutTypePrefix = EditorGUILayout.Foldout(foldoutTypePrefix, Content("Type Prefix", "类型前缀"), true);
             if (foldoutTypePrefix) DrawDependencyInner();
 
             EditorGUILayout.Space(4);
-            foldoutTextureSlotInner = EditorGUILayout.Foldout(foldoutTextureSlotInner, "贴图槽位 → 后缀 映射", true);
+            foldoutTextureSlotInner = EditorGUILayout.Foldout(foldoutTextureSlotInner, Content("Texture Slot -> Suffix Mapping", "贴图槽位 → 后缀 映射"), true);
             if (foldoutTextureSlotInner) DrawTextureSlotRulesInner();
         }
     }
@@ -351,37 +353,37 @@ public class BatchRenameTool : EditorWindow
     private void DrawTweaksGroup()
     {
         string summary = BuildTweaksSummary();
-        foldoutTweaks = DrawGroupFoldout(foldoutTweaks, "微调", summary);
+        foldoutTweaks = DrawGroupFoldout(foldoutTweaks, Content("Tweaks", "微调"), summary);
         if (!foldoutTweaks) return;
 
         using (new EditorGUILayout.VerticalScope("box"))
         {
-            foldoutReplace = EditorGUILayout.Foldout(foldoutReplace, $"字符串替换{CountLabel(replaceRules.Count(r => r.enabled && !string.IsNullOrEmpty(r.from)))}", true);
+            foldoutReplace = EditorGUILayout.Foldout(foldoutReplace, Content($"String Replace{CountLabel(replaceRules.Count(r => r.enabled && !string.IsNullOrEmpty(r.from)))}", "字符串替换"), true);
             if (foldoutReplace) DrawReplaceInner();
 
             EditorGUILayout.Space(4);
-            foldoutAffix = EditorGUILayout.Foldout(foldoutAffix, $"通用前后缀{CountLabel(prefixRules.Count(r => r.enabled && !string.IsNullOrEmpty(r.text)) + suffixRules.Count(r => r.enabled && !string.IsNullOrEmpty(r.text)))}", true);
+            foldoutAffix = EditorGUILayout.Foldout(foldoutAffix, Content($"Global Affix{CountLabel(prefixRules.Count(r => r.enabled && !string.IsNullOrEmpty(r.text)) + suffixRules.Count(r => r.enabled && !string.IsNullOrEmpty(r.text)))}", "通用前后缀"), true);
             if (foldoutAffix) DrawAffixInner();
 
             EditorGUILayout.Space(4);
-            foldoutRemove = EditorGUILayout.Foldout(foldoutRemove, $"删除字符{(removePrefixEnabled || removeSuffixEnabled ? " (已启用)" : "")}", true);
+            foldoutRemove = EditorGUILayout.Foldout(foldoutRemove, Content($"Remove Chars{(removePrefixEnabled || removeSuffixEnabled ? " (Enabled)" : "")}", "删除字符"), true);
             if (foldoutRemove) DrawRemoveInner();
 
             EditorGUILayout.Space(4);
-            foldoutNumbering = EditorGUILayout.Foldout(foldoutNumbering, $"自动编号{(numberingEnabled ? " (已启用)" : "")}", true);
+            foldoutNumbering = EditorGUILayout.Foldout(foldoutNumbering, Content($"Auto Numbering{(numberingEnabled ? " (Enabled)" : "")}", "自动编号"), true);
             if (foldoutNumbering) DrawNumberingInner();
 
             EditorGUILayout.Space(4);
-            foldoutExclude = EditorGUILayout.Foldout(foldoutExclude, $"排除规则{CountLabel(excludeRules.Count(r => r.enabled && !string.IsNullOrEmpty(r.matchText)))}", true);
+            foldoutExclude = EditorGUILayout.Foldout(foldoutExclude, Content($"Exclude Rules{CountLabel(excludeRules.Count(r => r.enabled && !string.IsNullOrEmpty(r.matchText)))}", "排除规则"), true);
             if (foldoutExclude) DrawExcludeInner();
 
             EditorGUILayout.Space(4);
-            foldoutMisc = EditorGUILayout.Foldout(foldoutMisc, "其他", true);
+            foldoutMisc = EditorGUILayout.Foldout(foldoutMisc, Content("Other", "其他"), true);
             if (foldoutMisc) DrawMiscInner();
         }
     }
 
-    private bool DrawGroupFoldout(bool current, string title, string summary)
+    private bool DrawGroupFoldout(bool current, GUIContent title, string summary)
     {
         using (new EditorGUILayout.HorizontalScope())
         {
@@ -409,7 +411,7 @@ public class BatchRenameTool : EditorWindow
         if (types.Count > 0) parts.Add(string.Join(" ", types));
 
         int slotCount = textureSlotRules.Count(r => r.enabled && !string.IsNullOrEmpty(r.suffix));
-        if (slotCount > 0) parts.Add($"{slotCount}条贴图规则");
+        if (slotCount > 0) parts.Add($"{slotCount} slot rule(s)");
 
         return parts.Count > 0 ? "▶ " + string.Join(" • ", parts) : "";
     }
@@ -418,20 +420,20 @@ public class BatchRenameTool : EditorWindow
     {
         var parts = new List<string>();
         int rep = replaceRules.Count(r => r.enabled && !string.IsNullOrEmpty(r.from));
-        if (rep > 0) parts.Add($"替换×{rep}");
+        if (rep > 0) parts.Add($"Rpl x{rep}");
 
         int pre = prefixRules.Count(r => r.enabled && !string.IsNullOrEmpty(r.text));
         int suf = suffixRules.Count(r => r.enabled && !string.IsNullOrEmpty(r.text));
-        if (pre > 0) parts.Add($"前缀×{pre}");
-        if (suf > 0) parts.Add($"后缀×{suf}");
+        if (pre > 0) parts.Add($"Pre x{pre}");
+        if (suf > 0) parts.Add($"Suf x{suf}");
 
-        if (removePrefixEnabled && removePrefixCount > 0) parts.Add($"删前{removePrefixCount}");
-        if (removeSuffixEnabled && removeSuffixCount > 0) parts.Add($"删后{removeSuffixCount}");
+        if (removePrefixEnabled && removePrefixCount > 0) parts.Add($"DelFront{removePrefixCount}");
+        if (removeSuffixEnabled && removeSuffixCount > 0) parts.Add($"DelBack{removeSuffixCount}");
 
-        if (numberingEnabled) parts.Add("编号:开");
-        if (excludeRules.Count(r => r.enabled) > 0) parts.Add($"排除×{excludeRules.Count(r => r.enabled)}");
+        if (numberingEnabled) parts.Add("Num:ON");
+        if (excludeRules.Count(r => r.enabled) > 0) parts.Add($"Excl x{excludeRules.Count(r => r.enabled)}");
 
-        return parts.Count > 0 ? "▶ " + string.Join(" • ", parts) : "▶ 无";
+        return parts.Count > 0 ? "▶ " + string.Join(" • ", parts) : "▶ None";
     }
 
     // =====================================================
@@ -442,27 +444,27 @@ public class BatchRenameTool : EditorWindow
         using (new EditorGUILayout.VerticalScope("helpbox"))
         {
             EditorGUI.BeginChangeCheck();
-            EditorGUILayout.LabelField("处理的资源类型：");
+            EditorGUILayout.LabelField(Content("Resource Types:", "处理的资源类型："));
             using (new EditorGUILayout.HorizontalScope())
             {
-                depIncludeModels = GUILayout.Toggle(depIncludeModels, " 模型", GUILayout.Width(80));
-                depIncludeTextures = GUILayout.Toggle(depIncludeTextures, " 贴图", GUILayout.Width(80));
-                depIncludeMaterials = GUILayout.Toggle(depIncludeMaterials, " 材质", GUILayout.Width(80));
-                depIncludeOthers = GUILayout.Toggle(depIncludeOthers, " 其他", GUILayout.Width(80));
+                depIncludeModels = GUILayout.Toggle(depIncludeModels, Content("Model", "模型"), GUILayout.Width(80));
+                depIncludeTextures = GUILayout.Toggle(depIncludeTextures, Content("Texture", "贴图"), GUILayout.Width(80));
+                depIncludeMaterials = GUILayout.Toggle(depIncludeMaterials, Content("Material", "材质"), GUILayout.Width(80));
+                depIncludeOthers = GUILayout.Toggle(depIncludeOthers, Content("Other", "其他"), GUILayout.Width(80));
             }
 
             EditorGUILayout.Space(4);
-            depUsePrefabNameAsBase = EditorGUILayout.Toggle("用Prefab名作为基础", depUsePrefabNameAsBase);
+            depUsePrefabNameAsBase = EditorGUILayout.Toggle(Content("Use Prefab Name As Base", "用Prefab名作为基础"), depUsePrefabNameAsBase);
             if (depUsePrefabNameAsBase)
             {
-                prefixForModel = EditorGUILayout.TextField("模型前缀", prefixForModel);
-                prefixForTexture = EditorGUILayout.TextField("贴图前缀", prefixForTexture);
-                prefixForMaterial = EditorGUILayout.TextField("材质前缀", prefixForMaterial);
-                prefixForOther = EditorGUILayout.TextField("其他前缀", prefixForOther);
+                prefixForModel = EditorGUILayout.TextField(Content("Model Prefix", "模型前缀"), prefixForModel);
+                prefixForTexture = EditorGUILayout.TextField(Content("Texture Prefix", "贴图前缀"), prefixForTexture);
+                prefixForMaterial = EditorGUILayout.TextField(Content("Material Prefix", "材质前缀"), prefixForMaterial);
+                prefixForOther = EditorGUILayout.TextField(Content("Other Prefix", "其他前缀"), prefixForOther);
             }
 
             EditorGUILayout.Space(4);
-            sharedAssetPolicy = (SharedAssetPolicy)EditorGUILayout.EnumPopup("共享资源全局策略", sharedAssetPolicy);
+            sharedAssetPolicy = (SharedAssetPolicy)EditorGUILayout.EnumPopup(Content("Shared Asset Policy", "共享资源全局策略"), sharedAssetPolicy);
             if (EditorGUI.EndChangeCheck()) needRebuildPreview = true;
         }
     }
@@ -475,8 +477,8 @@ public class BatchRenameTool : EditorWindow
             using (new EditorGUILayout.HorizontalScope())
             {
                 GUILayout.Space(20);
-                EditorGUILayout.LabelField("Shader 属性名（逗号分隔）", EditorStyles.miniBoldLabel);
-                EditorGUILayout.LabelField("后缀", EditorStyles.miniBoldLabel, GUILayout.Width(100));
+                EditorGUILayout.LabelField(Content("Shader Property Names (comma-separated)", "Shader 属性名（逗号分隔）"), EditorStyles.miniBoldLabel);
+                EditorGUILayout.LabelField(Content("Suffix", "后缀"), EditorStyles.miniBoldLabel, GUILayout.Width(100));
                 GUILayout.Space(58);
             }
 
@@ -489,7 +491,7 @@ public class BatchRenameTool : EditorWindow
                     rule.enabled = EditorGUILayout.Toggle(rule.enabled, GUILayout.Width(16));
                     rule.propertyNames = EditorGUILayout.TextField(rule.propertyNames);
                     rule.suffix = EditorGUILayout.TextField(rule.suffix, GUILayout.Width(100));
-                    if (GUILayout.Button("删除", GUILayout.Width(50))) removeIndex = i;
+                    if (GUILayout.Button(Content("Delete", "删除"), GUILayout.Width(50))) removeIndex = i;
                 }
             }
 
@@ -498,9 +500,9 @@ public class BatchRenameTool : EditorWindow
 
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("+ 添加规则")) { textureSlotRules.Add(new TextureSlotRule()); needRebuildPreview = true; }
-                if (GUILayout.Button("清空", GUILayout.Width(80))) { textureSlotRules.Clear(); needRebuildPreview = true; }
-                if (GUILayout.Button("加载默认", GUILayout.Width(100))) { AddDefaultTextureSlotRules(); needRebuildPreview = true; }
+                if (GUILayout.Button(Content("+ Add Rule", "添加规则"))) { textureSlotRules.Add(new TextureSlotRule()); needRebuildPreview = true; }
+                if (GUILayout.Button(Content("Clear", "清空"), GUILayout.Width(80))) { textureSlotRules.Clear(); needRebuildPreview = true; }
+                if (GUILayout.Button(Content("Load Defaults", "加载默认"), GUILayout.Width(100))) { AddDefaultTextureSlotRules(); needRebuildPreview = true; }
             }
         }
     }
@@ -520,14 +522,14 @@ public class BatchRenameTool : EditorWindow
                     rule.from = EditorGUILayout.TextField(rule.from);
                     GUILayout.Label("→", GUILayout.Width(20));
                     rule.to = EditorGUILayout.TextField(rule.to);
-                    rule.caseSensitive = GUILayout.Toggle(rule.caseSensitive, new GUIContent("Aa", "区分大小写"), "Button", GUILayout.Width(32));
-                    if (GUILayout.Button("删除", GUILayout.Width(50))) removeIndex = i;
+                    rule.caseSensitive = GUILayout.Toggle(rule.caseSensitive, Content("Aa", "Case Sensitive"), "Button", GUILayout.Width(32));
+                    if (GUILayout.Button(Content("Delete", "删除"), GUILayout.Width(50))) removeIndex = i;
                 }
             }
 
             if (EditorGUI.EndChangeCheck()) needRebuildPreview = true;
             if (removeIndex >= 0) { replaceRules.RemoveAt(removeIndex); needRebuildPreview = true; }
-            if (GUILayout.Button("+ 添加替换规则")) { replaceRules.Add(new ReplaceRule()); needRebuildPreview = true; }
+            if (GUILayout.Button(Content("+ Add Replace Rule", "添加替换规则"))) { replaceRules.Add(new ReplaceRule()); needRebuildPreview = true; }
         }
     }
 
@@ -535,10 +537,10 @@ public class BatchRenameTool : EditorWindow
     {
         using (new EditorGUILayout.VerticalScope("helpbox"))
         {
-            EditorGUILayout.LabelField("前缀（按顺序叠加）");
+            EditorGUILayout.LabelField(Content("Prefixes (stacked in order)", "前缀（按顺序叠加）"));
             DrawAffixList(prefixRules, true);
             EditorGUILayout.Space(6);
-            EditorGUILayout.LabelField("后缀（按顺序叠加）");
+            EditorGUILayout.LabelField(Content("Suffixes (stacked in order)", "后缀（按顺序叠加）"));
             DrawAffixList(suffixRules, false);
         }
     }
@@ -564,13 +566,13 @@ public class BatchRenameTool : EditorWindow
                     (list[i], list[i + 1]) = (list[i + 1], list[i]);
                     needRebuildPreview = true;
                 }
-                if (GUILayout.Button("删除", GUILayout.Width(50))) removeIndex = i;
+                if (GUILayout.Button(Content("Delete", "删除"), GUILayout.Width(50))) removeIndex = i;
             }
         }
 
         if (EditorGUI.EndChangeCheck()) needRebuildPreview = true;
         if (removeIndex >= 0) { list.RemoveAt(removeIndex); needRebuildPreview = true; }
-        if (GUILayout.Button(isPrefix ? "+ 添加前缀" : "+ 添加后缀")) { list.Add(new AffixRule()); needRebuildPreview = true; }
+        if (GUILayout.Button(isPrefix ? Content("+ Add Prefix", "添加前缀") : Content("+ Add Suffix", "添加后缀"))) { list.Add(new AffixRule()); needRebuildPreview = true; }
     }
 
     private void DrawRemoveInner()
@@ -581,7 +583,7 @@ public class BatchRenameTool : EditorWindow
             using (new EditorGUILayout.HorizontalScope())
             {
                 removePrefixEnabled = EditorGUILayout.Toggle(removePrefixEnabled, GUILayout.Width(16));
-                EditorGUILayout.LabelField("删除前N个字符", GUILayout.Width(160));
+                EditorGUILayout.LabelField(Content("Remove First N Chars", "删除前N个字符"), GUILayout.Width(160));
                 removePrefixCount = EditorGUILayout.IntField(removePrefixCount);
                 if (removePrefixCount < 0) removePrefixCount = 0;
             }
@@ -589,7 +591,7 @@ public class BatchRenameTool : EditorWindow
             using (new EditorGUILayout.HorizontalScope())
             {
                 removeSuffixEnabled = EditorGUILayout.Toggle(removeSuffixEnabled, GUILayout.Width(16));
-                EditorGUILayout.LabelField("删除后N个字符", GUILayout.Width(160));
+                EditorGUILayout.LabelField(Content("Remove Last N Chars", "删除后N个字符"), GUILayout.Width(160));
                 removeSuffixCount = EditorGUILayout.IntField(removeSuffixCount);
                 if (removeSuffixCount < 0) removeSuffixCount = 0;
             }
@@ -603,15 +605,15 @@ public class BatchRenameTool : EditorWindow
         using (new EditorGUILayout.VerticalScope("helpbox"))
         {
             EditorGUI.BeginChangeCheck();
-            numberingEnabled = EditorGUILayout.Toggle("启用自动编号", numberingEnabled);
+            numberingEnabled = EditorGUILayout.Toggle(Content("Enable Auto Numbering", "启用自动编号"), numberingEnabled);
             using (new EditorGUI.DisabledScope(!numberingEnabled))
             {
-                numberPosition = (NumberPosition)EditorGUILayout.EnumPopup("编号位置", numberPosition);
-                numberStart = EditorGUILayout.IntField("起始编号", numberStart);
-                numberStep = EditorGUILayout.IntField("递增步长", numberStep);
-                numberPadding = EditorGUILayout.IntField("编号位数", numberPadding);
+                numberPosition = (NumberPosition)EditorGUILayout.EnumPopup(Content("Number Position", "编号位置"), numberPosition);
+                numberStart = EditorGUILayout.IntField(Content("Start Number", "起始编号"), numberStart);
+                numberStep = EditorGUILayout.IntField(Content("Increment Step", "递增步长"), numberStep);
+                numberPadding = EditorGUILayout.IntField(Content("Padding Digits", "编号位数"), numberPadding);
                 if (numberPadding < 0) numberPadding = 0;
-                numberSeparator = EditorGUILayout.TextField("编号分隔符", numberSeparator);
+                numberSeparator = EditorGUILayout.TextField(Content("Number Separator", "编号分隔符"), numberSeparator);
             }
 
             if (EditorGUI.EndChangeCheck()) needRebuildPreview = true;
@@ -637,20 +639,20 @@ public class BatchRenameTool : EditorWindow
                     if (rule.excludeType != ExcludeType.IsNestedPrefab)
                     {
                         rule.matchText = EditorGUILayout.TextField(rule.matchText);
-                        rule.caseSensitive = GUILayout.Toggle(rule.caseSensitive, new GUIContent("Aa", "区分大小写"), "Button", GUILayout.Width(32));
+                        rule.caseSensitive = GUILayout.Toggle(rule.caseSensitive, Content("Aa", "Case Sensitive"), "Button", GUILayout.Width(32));
                     }
                     else
                     {
-                        EditorGUILayout.LabelField("（自动过滤嵌套子预制体的依赖）", EditorStyles.miniLabel);
+                        EditorGUILayout.LabelField(Content("(Auto-filter nested prefab dependencies)", "（自动过滤嵌套子预制体的依赖）"), EditorStyles.miniLabel);
                     }
 
-                    if (GUILayout.Button("删除", GUILayout.Width(50))) removeIndex = i;
+                    if (GUILayout.Button(Content("Delete", "删除"), GUILayout.Width(50))) removeIndex = i;
                 }
             }
 
             if (EditorGUI.EndChangeCheck()) needRebuildPreview = true;
             if (removeIndex >= 0) { excludeRules.RemoveAt(removeIndex); needRebuildPreview = true; }
-            if (GUILayout.Button("+ 添加排除规则")) { excludeRules.Add(new ExcludeRule()); needRebuildPreview = true; }
+            if (GUILayout.Button(Content("+ Add Exclude Rule", "添加排除规则"))) { excludeRules.Add(new ExcludeRule()); needRebuildPreview = true; }
 
             EditorGUILayout.Space(4);
             EditorGUILayout.HelpBox("提示：IsNestedPrefab类型会自动忽略所有嵌套子预制体的依赖资源，只处理根预制体的直接依赖", MessageType.Info);
@@ -662,8 +664,8 @@ public class BatchRenameTool : EditorWindow
         using (new EditorGUILayout.VerticalScope("helpbox"))
         {
             EditorGUI.BeginChangeCheck();
-            trimSpaces = EditorGUILayout.Toggle("自动去除前后空格", trimSpaces);
-            debugMode = EditorGUILayout.Toggle("调试模式", debugMode);
+            trimSpaces = EditorGUILayout.Toggle(Content("Trim Spaces", "自动去除前后空格"), trimSpaces);
+            debugMode = EditorGUILayout.Toggle(Content("Debug Mode", "调试模式"), debugMode);
             if (EditorGUI.EndChangeCheck()) needRebuildPreview = true;
         }
     }
@@ -672,9 +674,9 @@ public class BatchRenameTool : EditorWindow
     {
         using (new EditorGUILayout.HorizontalScope())
         {
-            if (GUILayout.Button("分析预览", GUILayout.Height(32))) BuildPreview();
+            if (GUILayout.Button(Content("Analyze Preview", "分析预览"), GUILayout.Height(32))) BuildPreview();
             GUI.backgroundColor = new Color(0.6f, 1f, 0.6f);
-            if (GUILayout.Button("执行重命名", GUILayout.Height(32))) ApplyRename();
+            if (GUILayout.Button(Content("Execute Rename", "执行重命名"), GUILayout.Height(32))) ApplyRename();
             GUI.backgroundColor = Color.white;
         }
     }
@@ -682,13 +684,13 @@ public class BatchRenameTool : EditorWindow
     // ✅ 预览面板：占满右侧全部空间，支持自由缩放
     private void DrawPreview()
     {
-        EditorGUILayout.LabelField($"重命名预览（{previewList.Count}）", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(Content($"Rename Preview ({previewList.Count})", $"重命名预览（{previewList.Count}）"), EditorStyles.boldLabel);
         using (new EditorGUILayout.VerticalScope("box", GUILayout.ExpandHeight(true)))
         {
             // 启用水平+垂直滚动，完全自适应右侧区域大小
             previewScroll = EditorGUILayout.BeginScrollView(previewScroll, true, true);
             if (previewList.Count == 0)
-                EditorGUILayout.LabelField("点击左侧【分析预览】按钮查看结果。", EditorStyles.centeredGreyMiniLabel);
+                EditorGUILayout.LabelField(Content("Click [Analyze Preview] button to see results.", "点击左侧【分析预览】按钮查看结果。"), EditorStyles.centeredGreyMiniLabel);
             else
             {
                 bool isDepMode = targetSource == TargetSource.PrefabDependencies;
@@ -741,7 +743,7 @@ public class BatchRenameTool : EditorWindow
             if (!string.IsNullOrEmpty(p.assetPath))
             {
                 // 跳转：只 Ping 高亮，不替换 Selection，预览列表不会丢失
-                var jumpContent = new GUIContent("跳转", $"单击定位到 Project 窗口\n路径: {p.assetPath}");
+                var jumpContent = Content("Jump", $"Click to locate in Project window | 单击定位到 Project 窗口\n路径: {p.assetPath}");
                 if (GUILayout.Button(jumpContent, GUILayout.Width(45)))
                 {
                     var o = AssetDatabase.LoadAssetAtPath<Object>(p.assetPath);
@@ -761,7 +763,7 @@ public class BatchRenameTool : EditorWindow
 
             // 手动跳过开关
             bool oldSkip = p.manualSkip;
-            p.manualSkip = GUILayout.Toggle(p.manualSkip, new GUIContent("跳过", "勾选后该资源不会被重命名"), GUILayout.Width(55));
+            p.manualSkip = GUILayout.Toggle(p.manualSkip, Content("Skip", "Check to skip renaming this resource | 勾选后该资源不会被重命名"), GUILayout.Width(55));
             if (p.manualSkip != oldSkip) needRebuildPreview = true;
         }
 
@@ -795,36 +797,36 @@ public class BatchRenameTool : EditorWindow
     {
         using (new EditorGUILayout.VerticalScope("helpbox"))
         {
-            EditorGUILayout.LabelField("单项前缀设置", EditorStyles.miniBoldLabel);
+            EditorGUILayout.LabelField(Content("Per-Item Prefix", "单项前缀设置"), EditorStyles.miniBoldLabel);
             string globalTypePrefix = GetPrefixForType(p.assetTypeLabel);
             EditorGUI.BeginChangeCheck();
 
             using (new EditorGUILayout.HorizontalScope())
             {
-                EditorGUILayout.LabelField(new GUIContent("覆盖类型前缀"), GUILayout.Width(120));
+                EditorGUILayout.LabelField(Content("Override Type Prefix", "覆盖类型前缀"), GUILayout.Width(120));
                 p.perItemPrefixOverride = EditorGUILayout.TextField(p.perItemPrefixOverride);
-                EditorGUILayout.LabelField(string.IsNullOrEmpty(p.perItemPrefixOverride) ? $"(用 {globalTypePrefix})" : "(已覆盖)", EditorStyles.miniLabel, GUILayout.Width(80));
+                EditorGUILayout.LabelField(string.IsNullOrEmpty(p.perItemPrefixOverride) ? $"(Using {globalTypePrefix})" : "(Overridden)", EditorStyles.miniLabel, GUILayout.Width(80));
             }
 
             using (new EditorGUILayout.HorizontalScope())
             {
-                EditorGUILayout.LabelField(new GUIContent("额外前缀"), GUILayout.Width(120));
+                EditorGUILayout.LabelField(Content("Extra Prefix", "额外前缀"), GUILayout.Width(120));
                 p.perItemExtraPrefix = EditorGUILayout.TextField(p.perItemExtraPrefix);
-                EditorGUILayout.LabelField("(可选)", EditorStyles.miniLabel, GUILayout.Width(80));
+                EditorGUILayout.LabelField("(Optional)", EditorStyles.miniLabel, GUILayout.Width(80));
             }
 
             if (EditorGUI.EndChangeCheck()) needRebuildPreview = true;
 
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("清空", GUILayout.Width(60)))
+                if (GUILayout.Button(Content("Clear", "清空"), GUILayout.Width(60)))
                 {
                     p.perItemPrefixOverride = "";
                     p.perItemExtraPrefix = "";
                     needRebuildPreview = true;
                 }
                 GUILayout.FlexibleSpace();
-                EditorGUILayout.LabelField("最终格式：{额外前缀}{类型前缀}{Prefab名}{贴图后缀}", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField(Content("Final format: {ExtraPrefix}{TypePrefix}{PrefabName}{TextureSuffix}", "最终格式：{额外前缀}{类型前缀}{Prefab名}{贴图后缀}"), EditorStyles.miniLabel);
             }
         }
     }
@@ -844,14 +846,14 @@ public class BatchRenameTool : EditorWindow
         {
             var oldColor = GUI.color;
             GUI.color = new Color(0.8f, 0.4f, 0.4f);
-            EditorGUILayout.LabelField($"        ↑ 被以下Prefab共享：{string.Join(", ", p.sharedBy)}", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField($"        ^ Shared by prefabs: {string.Join(", ", p.sharedBy)}", EditorStyles.miniLabel);
             GUI.color = oldColor;
         }
 
         using (new EditorGUILayout.HorizontalScope())
         {
             GUILayout.Space(20);
-            EditorGUILayout.LabelField("处理方式：", GUILayout.Width(70));
+            EditorGUILayout.LabelField(Content("Policy:", "处理方式："), GUILayout.Width(70));
             EditorGUI.BeginChangeCheck();
             p.perItemPolicy = (PerItemPolicy)EditorGUILayout.EnumPopup(p.perItemPolicy, GUILayout.Width(110));
             if (EditorGUI.EndChangeCheck()) needRebuildPreview = true;
@@ -878,7 +880,7 @@ public class BatchRenameTool : EditorWindow
             using (new EditorGUILayout.HorizontalScope())
             {
                 GUILayout.Space(20);
-                EditorGUILayout.LabelField("快速填入：", GUILayout.Width(70));
+                EditorGUILayout.LabelField(Content("Quick Fill:", "快速填入："), GUILayout.Width(70));
                 string typePrefix = !string.IsNullOrEmpty(p.perItemPrefixOverride) ? p.perItemPrefixOverride : GetPrefixForType(p.assetTypeLabel);
                 string extraPrefix = p.perItemExtraPrefix ?? "";
 
@@ -927,17 +929,17 @@ public class BatchRenameTool : EditorWindow
         string reason; Color reasonColor;
         if (p.texState == TextureIdentifyState.Ambiguous)
         {
-            reason = $"⚠ 多材质冲突：{string.Join(" / ", p.texCandidateSlots ?? new List<string>())}";
+            reason = $"⚠ Multi-material conflict: {string.Join(" / ", p.texCandidateSlots ?? new List<string>())}";
             reasonColor = new Color(0.85f, 0.65f, 0.2f);
         }
         else if (p.texState == TextureIdentifyState.Unknown)
         {
-            reason = "⚠ 未找到关联槽位";
+            reason = "⚠ No associated slot found";
             reasonColor = new Color(0.85f, 0.65f, 0.2f);
         }
         else
         {
-            reason = $"✓ 已识别：{p.texAutoSuffix}";
+            reason = $"✓ Identified: {p.texAutoSuffix}";
             reasonColor = new Color(0.5f, 0.85f, 0.5f);
         }
 
@@ -948,7 +950,7 @@ public class BatchRenameTool : EditorWindow
         using (new EditorGUILayout.HorizontalScope())
         {
             GUILayout.Space(20);
-            string label = p.texState == TextureIdentifyState.Identified ? "覆盖后缀：" : "手动指定后缀：";
+            string label = p.texState == TextureIdentifyState.Identified ? "Override Suffix:" : "Manual Suffix:";
             EditorGUILayout.LabelField(label, GUILayout.Width(100));
 
             var options = BuildManualSuffixOptions();

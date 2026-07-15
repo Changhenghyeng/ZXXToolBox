@@ -21,79 +21,80 @@ public class PrefabBatchReplacer : EditorWindow
         w.minSize = new Vector2(420, 480);
     }
 
+    private static GUIContent Content(string label, string tooltip) => new GUIContent(label, tooltip);
+
     private void OnGUI()
     {
         scroll = EditorGUILayout.BeginScrollView(scroll);
 
         // ---------- 标题 ----------
-        EditorGUILayout.LabelField("Prefab Batch Replacer  /  场景预制体批量替换", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(Content("Prefab Batch Replacer", "场景预制体批量替换工具"), EditorStyles.boldLabel);
         EditorGUILayout.Space(4);
 
         // ---------- 使用说明 ----------
         EditorGUILayout.HelpBox(
-            "工作流:\n" +
-            "  1)在 Hierarchy 里选中所有要被替换掉的物体(支持多选、搜索框筛选后 Ctrl+A 全选)\n" +
-            "  2)把新的预制体 / 模型 / 场景物体 拖到下面的【替换目标】栏\n" +
-            "  3)点【执行替换】\n\n" +
-            "替换逻辑:在原物体位置生成新物体,继承 父子关系 / 位置,\n" +
-            "Rotation、Scale、Name、Layer/Tag、Materials 可选保留,原物体删除。\n\n" +
-            "重要:执行前请用版本控制(Git/SVN)提交一次当前状态,便于回滚!\n" +
-            "如果手滑了也可以直接 Ctrl+Z 撤销本次替换。",
+            "Workflow:\n" +
+            "  1) Select objects to replace in Hierarchy (multi-select, search filter, Ctrl+A all work)\n" +
+            "  2) Drag the new prefab / model / scene object into the Target field below\n" +
+            "  3) Click Replace\n\n" +
+            "The new object is instantiated at each old object's position, preserving parent / sibling order.\n" +
+            "Rotation, Scale, Name, Layer/Tag, Materials can optionally be kept from the original.\n\n" +
+            "Important: Commit your current state (Git/SVN) before running. Ctrl+Z also undoes the operation.",
             MessageType.Info);
 
         EditorGUILayout.Space(6);
 
         // ---------- ① 替换目标 ----------
-        DrawSectionHeader("① 替换目标");
+        DrawSectionHeader("1. Target");
         using (new EditorGUILayout.HorizontalScope("box"))
         {
-            EditorGUILayout.LabelField("新物体", GUILayout.Width(60));
+            EditorGUILayout.LabelField(Content("New Object", "新物体：用于替换的预制体/模型/场景物体"), GUILayout.Width(80));
             target = (GameObject)EditorGUILayout.ObjectField(target, typeof(GameObject), true);
         }
         if (target != null)
         {
             string typeDesc = GetTargetTypeDesc(target);
-            EditorGUILayout.LabelField("类型识别:" + typeDesc, EditorStyles.miniLabel);
+            EditorGUILayout.LabelField("Type: " + typeDesc, EditorStyles.miniLabel);
         }
         else
         {
-            EditorGUILayout.LabelField("（可以是 Project 里的预制体、FBX 模型,也可以是场景里的 GameObject）",
+            EditorGUILayout.LabelField("(Can be a prefab, FBX model, or scene GameObject)",
                 EditorStyles.miniLabel);
         }
 
         EditorGUILayout.Space(6);
 
         // ---------- ② 设置 ----------
-        DrawSectionHeader("② 设置");
+        DrawSectionHeader("2. Options");
         using (new EditorGUILayout.VerticalScope("box"))
         {
-            keepName      = EditorGUILayout.Toggle("保留原物体名字",   keepName);
-            keepRotation  = EditorGUILayout.Toggle("保留原 Rotation",  keepRotation);
-            keepScale     = EditorGUILayout.Toggle("保留原 Scale",     keepScale);
-            keepLayerTag  = EditorGUILayout.Toggle("保留 Layer 和 Tag", keepLayerTag);
-            keepMaterials = EditorGUILayout.Toggle(new GUIContent("保留原材质",
+            keepName      = EditorGUILayout.Toggle(Content("Keep Original Name", "保留原物体名称"), keepName);
+            keepRotation  = EditorGUILayout.Toggle(Content("Keep Original Rotation", "保留原物体的旋转值"), keepRotation);
+            keepScale     = EditorGUILayout.Toggle(Content("Keep Original Scale", "保留原物体的缩放值"), keepScale);
+            keepLayerTag  = EditorGUILayout.Toggle(Content("Keep Layer & Tag", "保留原物体的 Layer 和 Tag"), keepLayerTag);
+            keepMaterials = EditorGUILayout.Toggle(new GUIContent("Keep Original Materials",
                 "把原物体根节点 Renderer 上的 sharedMaterials 复制到新物体根节点的 Renderer。\n" +
                 "材质槽数量不一致时按较小的数量复制。不处理子物体上的 Renderer。"), keepMaterials);
 
             using (new EditorGUI.DisabledScope(target == null || !IsPrefabAsset(target)))
             {
-                unpackPrefab = EditorGUILayout.Toggle("替换后解包预制体(变普通物体)", unpackPrefab);
+                unpackPrefab = EditorGUILayout.Toggle(Content("Unpack Prefab After Replace", "替换后解包预制体，使其变为普通场景物体"), unpackPrefab);
             }
         }
 
         EditorGUILayout.Space(6);
 
         // ---------- ③ 当前选中 ----------
-        DrawSectionHeader("③ 当前选中");
+        DrawSectionHeader("3. Current Selection");
         int selCount = Selection.gameObjects.Length;
         int sceneCount = CountSceneObjects(Selection.gameObjects);
         using (new EditorGUILayout.VerticalScope("box"))
         {
-            EditorGUILayout.LabelField($"Hierarchy 选中物体数:{selCount}");
+            EditorGUILayout.LabelField($"Hierarchy Selection: {selCount}");
             if (selCount != sceneCount)
             {
                 EditorGUILayout.LabelField(
-                    $"其中场景物体:{sceneCount}(非场景物体会被自动跳过)",
+                    $"Scene objects: {sceneCount} (non-scene objects will be skipped)",
                     EditorStyles.miniLabel);
             }
         }
@@ -101,17 +102,17 @@ public class PrefabBatchReplacer : EditorWindow
         EditorGUILayout.Space(6);
 
         // ---------- ④ 操作 ----------
-        DrawSectionHeader("④ 操作");
+        DrawSectionHeader("4. Execute");
         using (new EditorGUI.DisabledScope(target == null || sceneCount == 0))
         {
             GUI.backgroundColor = new Color(0.55f, 0.85f, 0.55f);
-            if (GUILayout.Button($"执行替换  ({sceneCount} 个物体  →  {(target ? target.name : "—")})",
-                                 GUILayout.Height(34)))
+            if (GUILayout.Button(Content($"Replace ({sceneCount} objects → {(target ? target.name : "-")})",
+                "执行批量替换操作"), GUILayout.Height(34)))
             {
-                if (EditorUtility.DisplayDialog("确认替换",
-                    $"将把选中的 {sceneCount} 个物体替换为 “{target.name}”,确定继续吗?\n\n" +
-                    $"(可通过 Ctrl+Z 撤销)",
-                    "执行", "取消"))
+                if (EditorUtility.DisplayDialog("Confirm Replace",
+                    $"Replace {sceneCount} selected objects with \"{target.name}\"?\n\n" +
+                    $"(You can undo with Ctrl+Z)",
+                    "Replace", "Cancel"))
                 {
                     Replace(Selection.gameObjects, target);
                 }
@@ -120,9 +121,9 @@ public class PrefabBatchReplacer : EditorWindow
         }
 
         if (target == null)
-            EditorGUILayout.HelpBox("请先指定【替换目标】", MessageType.Warning);
+            EditorGUILayout.HelpBox("Please specify a replacement target.", MessageType.Warning);
         else if (sceneCount == 0)
-            EditorGUILayout.HelpBox("请在 Hierarchy 里选中要被替换的场景物体", MessageType.Warning);
+            EditorGUILayout.HelpBox("Please select scene objects in Hierarchy to replace.", MessageType.Warning);
 
         EditorGUILayout.EndScrollView();
 

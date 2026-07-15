@@ -84,6 +84,8 @@ public class BoxColliderGenerator : EditorWindow
         SaveSettings();
     }
 
+    private static GUIContent Content(string label, string tooltip) => new GUIContent(label, tooltip);
+
     private void OnGUI()
     {
         EditorGUILayout.BeginHorizontal();
@@ -123,16 +125,16 @@ public class BoxColliderGenerator : EditorWindow
 
     private void DrawStep1_PrefabList()
     {
-        EditorGUILayout.LabelField("步骤 1：选预制体", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(Content("Step 1: Select Prefabs", "步骤 1：选择要处理的预制体"), EditorStyles.boldLabel);
 
         EditorGUILayout.BeginHorizontal();
-        if (GUILayout.Button("从当前选中导入", GUILayout.Height(22)))
+        if (GUILayout.Button(Content("Import From Selection", "从当前 Hierarchy 或 Project 选中项导入预制体"), GUILayout.Height(22)))
         {
             ImportFromSelection();
         }
         using (new EditorGUI.DisabledScope(prefabs.Count == 0))
         {
-            if (GUILayout.Button("清空", GUILayout.Width(60), GUILayout.Height(22)))
+            if (GUILayout.Button(Content("Clear", "清空预制体列表"), GUILayout.Width(60), GUILayout.Height(22)))
             {
                 prefabs.Clear();
                 pendingPlan = null;
@@ -141,12 +143,12 @@ public class BoxColliderGenerator : EditorWindow
         EditorGUILayout.EndHorizontal();
 
         Rect dropRect = GUILayoutUtility.GetRect(0, 36, GUILayout.ExpandWidth(true));
-        GUI.Box(dropRect, "拖入预制体资产到这里");
+        GUI.Box(dropRect, "Drag prefab assets here");
         HandleDragAndDrop(dropRect);
 
         if (prefabs.Count == 0)
         {
-            EditorGUILayout.HelpBox("当前未选择任何预制体。", MessageType.Info);
+            EditorGUILayout.HelpBox("No prefabs selected.", MessageType.Info);
             return;
         }
 
@@ -166,18 +168,18 @@ public class BoxColliderGenerator : EditorWindow
 
     private void DrawStep2_NodeSelection()
     {
-        EditorGUILayout.LabelField("步骤 2：为每个预制体勾选", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(Content("Step 2: Select Nodes", "步骤 2：为每个预制体勾选参与节点和挂点"), EditorStyles.boldLabel);
 
         if (prefabs.Count == 0)
         {
-            EditorGUILayout.HelpBox("先在上方添加预制体。", MessageType.None);
+            EditorGUILayout.HelpBox("Add prefabs above first.", MessageType.None);
             return;
         }
 
         EditorGUILayout.BeginHorizontal();
         using (new EditorGUI.DisabledScope(prefabs.Count < 2))
         {
-            if (GUILayout.Button("复制第一个的选择到所有", GUILayout.Height(22)))
+            if (GUILayout.Button(Content("Copy Selection To All", "将第一个预制体的勾选状态复制到所有预制体"), GUILayout.Height(22)))
             {
                 CopyFirstSelectionToAll();
                 pendingPlan = null;
@@ -186,10 +188,10 @@ public class BoxColliderGenerator : EditorWindow
         EditorGUILayout.EndHorizontal();
 
         EditorGUILayout.BeginHorizontal();
-        batchNameKeyword = EditorGUILayout.TextField("按名称批量勾选（参与）", batchNameKeyword);
+        batchNameKeyword = EditorGUILayout.TextField(Content("Batch Check By Name", "按节点名称批量勾选参与节点"), batchNameKeyword);
         using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(batchNameKeyword)))
         {
-            if (GUILayout.Button("应用", GUILayout.Width(60)))
+            if (GUILayout.Button(Content("Apply", "应用批量勾选"), GUILayout.Width(60)))
             {
                 BatchCheckByName(batchNameKeyword);
                 pendingPlan = null;
@@ -213,9 +215,9 @@ public class BoxColliderGenerator : EditorWindow
         EditorGUILayout.BeginVertical(EditorStyles.helpBox);
 
         EditorGUILayout.BeginHorizontal();
-        EditorGUILayout.LabelField("挂点", GUILayout.Width(32));
-        EditorGUILayout.LabelField("参与", GUILayout.Width(32));
-        EditorGUILayout.LabelField("节点");
+        EditorGUILayout.LabelField(Content("Mount", "挂点：BoxCollider 将添加到此节点").text, GUILayout.Width(32));
+        EditorGUILayout.LabelField(Content("Incl", "参与：此节点的 Mesh 将参与包围盒计算").text, GUILayout.Width(32));
+        EditorGUILayout.LabelField("Node");
         EditorGUILayout.EndHorizontal();
 
         foreach (NodeState node in entry.nodes)
@@ -260,14 +262,14 @@ public class BoxColliderGenerator : EditorWindow
 
     private void DrawStep3_Options()
     {
-        EditorGUILayout.LabelField("步骤 3：选项", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(Content("Step 3: Options", "步骤 3：BoxCollider 参数设置"), EditorStyles.boldLabel);
 
         EditorGUI.BeginChangeCheck();
         existingPolicy = (ExistingColliderPolicy)EditorGUILayout.EnumPopup(
-            "已有 BoxCollider 时", existingPolicy);
-        targetLayer = EditorGUILayout.LayerField("目标 Layer", targetLayer);
-        setMountLayer = EditorGUILayout.Toggle("同时设置挂点 Layer", setMountLayer);
-        isTrigger = EditorGUILayout.Toggle("设为 Trigger", isTrigger);
+            Content("When BoxCollider Exists", "已有 BoxCollider 时的处理策略"), existingPolicy);
+        targetLayer = EditorGUILayout.LayerField(Content("Target Layer", "新生成的 BoxCollider 所在 Layer"), targetLayer);
+        setMountLayer = EditorGUILayout.Toggle(Content("Also Set Mount Layer", "同时将挂点 GameObject 的 Layer 设为目标 Layer"), setMountLayer);
+        isTrigger = EditorGUILayout.Toggle(Content("Set As Trigger", "将 BoxCollider 设为触发器"), isTrigger);
         if (EditorGUI.EndChangeCheck()) pendingPlan = null;
     }
 
@@ -275,7 +277,7 @@ public class BoxColliderGenerator : EditorWindow
     {
         using (new EditorGUI.DisabledScope(prefabs.Count == 0))
         {
-            if (GUILayout.Button("生成预览", GUILayout.Height(36)))
+            if (GUILayout.Button(Content("Generate Preview", "生成预览计划，确认后再写入磁盘"), GUILayout.Height(36)))
             {
                 pendingPlan = BuildPlan();
             }
@@ -284,7 +286,7 @@ public class BoxColliderGenerator : EditorWindow
 
     private void DrawRightPanel()
     {
-        EditorGUILayout.LabelField("预览 / 操作", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(Content("Preview / Actions", "预览和操作面板"), EditorStyles.boldLabel);
 
         if (pendingPlan != null)
         {
@@ -293,7 +295,7 @@ public class BoxColliderGenerator : EditorWindow
         }
         else
         {
-            EditorGUILayout.HelpBox("点击左侧「生成预览」查看计划，确认后再写入磁盘。", MessageType.Info);
+            EditorGUILayout.HelpBox("Click Generate Preview to review the plan before writing to disk.", MessageType.Info);
             EditorGUILayout.Space(8);
         }
 
@@ -302,14 +304,14 @@ public class BoxColliderGenerator : EditorWindow
 
     private void DrawPlanPanel()
     {
-        EditorGUILayout.LabelField("待写入计划（B）", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(Content("Pending Plan (B)", "待写入计划"), EditorStyles.boldLabel);
 
         int newCount = pendingPlan.Count(p => p.action == PlanAction.New);
         int overwriteCount = pendingPlan.Count(p => p.action == PlanAction.Overwrite);
         int skipCount = pendingPlan.Count(p => IsSkip(p.action));
         int errorCount = pendingPlan.Count(p => p.action == PlanAction.ErrorMountMissing);
 
-        EditorGUILayout.LabelField($"新增 {newCount}    覆盖 {overwriteCount}    跳过 {skipCount}    错误 {errorCount}");
+        EditorGUILayout.LabelField($"New {newCount}    Overwrite {overwriteCount}    Skip {skipCount}    Error {errorCount}");
 
         EditorGUILayout.Space(4);
 
@@ -325,13 +327,13 @@ public class BoxColliderGenerator : EditorWindow
         using (new EditorGUI.DisabledScope(willWrite == 0))
         {
             GUI.backgroundColor = new Color(0.6f, 1f, 0.6f);
-            if (GUILayout.Button($"确认写入 {willWrite} 个预制体", GUILayout.Width(200), GUILayout.Height(30)))
+            if (GUILayout.Button(Content($"Confirm Write ({willWrite} prefabs)", $"确认写入 {willWrite} 个预制体"), GUILayout.Width(220), GUILayout.Height(30)))
             {
                 CommitPlan();
             }
             GUI.backgroundColor = Color.white;
         }
-        if (GUILayout.Button("取消", GUILayout.Width(60), GUILayout.Height(30)))
+        if (GUILayout.Button(Content("Cancel", "取消当前计划"), GUILayout.Width(60), GUILayout.Height(30)))
         {
             pendingPlan = null;
         }
@@ -344,10 +346,10 @@ public class BoxColliderGenerator : EditorWindow
         Color tint;
         switch (item.action)
         {
-            case PlanAction.New: icon = "✚"; tint = new Color(0.6f, 1f, 0.6f); break;
-            case PlanAction.Overwrite: icon = "↻"; tint = new Color(1f, 0.9f, 0.5f); break;
-            case PlanAction.ErrorMountMissing: icon = "✕"; tint = new Color(1f, 0.5f, 0.5f); break;
-            default: icon = "—"; tint = new Color(0.7f, 0.7f, 0.7f); break;
+            case PlanAction.New: icon = "+"; tint = new Color(0.6f, 1f, 0.6f); break;
+            case PlanAction.Overwrite: icon = "~"; tint = new Color(1f, 0.9f, 0.5f); break;
+            case PlanAction.ErrorMountMissing: icon = "x"; tint = new Color(1f, 0.5f, 0.5f); break;
+            default: icon = "-"; tint = new Color(0.7f, 0.7f, 0.7f); break;
         }
 
         Color prev = GUI.color;
@@ -362,16 +364,16 @@ public class BoxColliderGenerator : EditorWindow
 
     private void DrawHistoryPanel()
     {
-        EditorGUILayout.LabelField("上次操作", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(Content("Last Operation", "上次操作记录"), EditorStyles.boldLabel);
 
         if (lastRun == null)
         {
-            EditorGUILayout.HelpBox("尚无写入操作。", MessageType.None);
+            EditorGUILayout.HelpBox("No previous write operation.", MessageType.None);
             return;
         }
 
-        EditorGUILayout.LabelField($"已写入：{lastRun.totalWritten} 个预制体");
-        EditorGUILayout.LabelField($"本次新增 BoxCollider：{lastRun.newColliders.Count} 个");
+        EditorGUILayout.LabelField($"Written: {lastRun.totalWritten} prefabs");
+        EditorGUILayout.LabelField($"New BoxColliders: {lastRun.newColliders.Count}");
 
         EditorGUILayout.Space(4);
 
@@ -379,11 +381,11 @@ public class BoxColliderGenerator : EditorWindow
 
         using (new EditorGUI.DisabledScope(!backupExists))
         {
-            if (GUILayout.Button("还原上次写入（A：从备份还原）", GUILayout.Height(26)))
+            if (GUILayout.Button(Content("Restore From Backup (A)", "从备份还原上次写入的所有预制体文件"), GUILayout.Height(26)))
             {
-                if (EditorUtility.DisplayDialog("确认还原",
-                    $"将用备份覆盖 {lastRun.totalWritten} 个预制体文件，操作不可逆。继续吗？",
-                    "还原", "取消"))
+                if (EditorUtility.DisplayDialog("Confirm Restore",
+                    $"This will overwrite {lastRun.totalWritten} prefab files with backups. Continue?",
+                    "Restore", "Cancel"))
                 {
                     RestoreFromBackup();
                 }
@@ -392,11 +394,11 @@ public class BoxColliderGenerator : EditorWindow
 
         using (new EditorGUI.DisabledScope(lastRun.newColliders.Count == 0))
         {
-            if (GUILayout.Button("清除上次新增的 BoxCollider（C）", GUILayout.Height(26)))
+            if (GUILayout.Button(Content("Clear Newly Added BoxColliders (C)", "仅移除本次工具新增的 BoxCollider（覆盖更新的不受影响）"), GUILayout.Height(26)))
             {
-                if (EditorUtility.DisplayDialog("确认清除",
-                    $"将移除 {lastRun.newColliders.Count} 个本次工具新增的 BoxCollider（不影响覆盖更新的）。继续吗？",
-                    "清除", "取消"))
+                if (EditorUtility.DisplayDialog("Confirm Clear",
+                    $"Remove {lastRun.newColliders.Count} newly added BoxColliders? (Overwritten ones are unaffected.)",
+                    "Clear", "Cancel"))
                 {
                     ClearNewlyAddedColliders();
                 }
@@ -404,8 +406,8 @@ public class BoxColliderGenerator : EditorWindow
         }
 
         EditorGUILayout.HelpBox(
-            "还原：完整覆盖文件（含层级、size、center 等所有改动）。\n" +
-            "清除：仅移除本次新增的 BoxCollider，被覆盖前的旧数据无法恢复。",
+            "Restore: Full file overwrite (hierarchy, size, center, etc.).\n" +
+            "Clear: Only removes newly added BoxColliders; overwritten old data cannot be recovered.",
             MessageType.None);
     }
 

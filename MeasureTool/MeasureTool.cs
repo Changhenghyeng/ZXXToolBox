@@ -55,9 +55,11 @@ public class MeasureTool : EditorWindow
 
     // ════════════════ 窗口入口 ════════════════
 
+    private static GUIContent Content(string label, string tooltip) => new GUIContent(label, tooltip);
+
     public static void Open()
     {
-        var w = GetWindow<MeasureTool>("测量工具");
+        var w = GetWindow<MeasureTool>("Measure Tool");
         w.minSize = new Vector2(340, 400);
         w.Show();
     }
@@ -189,9 +191,9 @@ public class MeasureTool : EditorWindow
     private void DrawModeToolbar()
     {
         EditorGUILayout.BeginHorizontal();
-        EditorGUILayout.LabelField("测量模式", GUILayout.Width(60));
+        EditorGUILayout.LabelField(Content("Mode", "测量模式"), GUILayout.Width(60));
 
-        var names = new[] { "包围盒", "标尺" };
+        var names = new[] { "Bounding Box", "Ruler" };
         int idx = GUILayout.Toolbar((int)_mode, names);
         if (idx != (int)_mode)
         {
@@ -205,17 +207,17 @@ public class MeasureTool : EditorWindow
 
     private bool DrawDisplayFoldout(bool fold)
     {
-        fold = EditorGUILayout.Foldout(fold, "显示设置", true);
+        fold = EditorGUILayout.Foldout(fold, Content("Display Settings", "显示设置：单位、颜色、字号、线宽"), true);
         if (!fold) return fold;
 
         EditorGUI.indentLevel++;
         EditorGUI.BeginChangeCheck();
 
-        _unit = (DisplayUnit)EditorGUILayout.EnumPopup("单位", _unit);
-        _lineColor  = EditorGUILayout.ColorField("线条颜色", _lineColor);
-        _dimColor   = EditorGUILayout.ColorField("分量颜色", _dimColor);
-        _labelFontSize = EditorGUILayout.IntSlider("字号", _labelFontSize, 10, 36);
-        _lineThickness = EditorGUILayout.Slider("线宽", _lineThickness, 0.5f, 6f);
+        _unit = (DisplayUnit)EditorGUILayout.EnumPopup(Content("Unit", "显示单位：米/厘米/毫米"), _unit);
+        _lineColor  = EditorGUILayout.ColorField(Content("Line Color", "测量线条的颜色"), _lineColor);
+        _dimColor   = EditorGUILayout.ColorField(Content("Dimension Color", "分量分解线的颜色"), _dimColor);
+        _labelFontSize = EditorGUILayout.IntSlider(Content("Font Size", "标签字号"), _labelFontSize, 10, 36);
+        _lineThickness = EditorGUILayout.Slider(Content("Line Width", "线条粗细"), _lineThickness, 0.5f, 6f);
 
         if (EditorGUI.EndChangeCheck())
         {
@@ -223,7 +225,7 @@ public class MeasureTool : EditorWindow
             SceneView.RepaintAll();
         }
 
-        EditorGUILayout.HelpBox("Unity 默认 1 unit = 1 米", MessageType.None);
+        EditorGUILayout.HelpBox("Unity default: 1 unit = 1 meter", MessageType.None);
         EditorGUI.indentLevel--;
         return fold;
     }
@@ -232,12 +234,12 @@ public class MeasureTool : EditorWindow
 
     private bool DrawBoundingBoxFoldout(bool fold)
     {
-        fold = EditorGUILayout.Foldout(fold, "包围盒测量", true);
+        fold = EditorGUILayout.Foldout(fold, Content("Bounding Box", "包围盒测量模式"), true);
         if (!fold) return fold;
 
         EditorGUI.indentLevel++;
 
-        EditorGUILayout.LabelField("目标物体", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(Content("Target Objects", "目标物体列表"), EditorStyles.boldLabel);
 
         // 列表区域（超过 3 个物体时显示滚动条）
         EditorGUI.BeginChangeCheck();
@@ -267,7 +269,7 @@ public class MeasureTool : EditorWindow
 
         // 操作按钮
         EditorGUILayout.BeginHorizontal();
-        if (GUILayout.Button("从选中添加", GUILayout.Height(22)))
+        if (GUILayout.Button(Content("Add Selected", "从 Hierarchy 当前选中添加物体"), GUILayout.Height(22)))
         {
             if (Selection.activeGameObject != null)
             {
@@ -278,7 +280,7 @@ public class MeasureTool : EditorWindow
                 }
             }
         }
-        if (GUILayout.Button("清除全部", GUILayout.Height(22)))
+        if (GUILayout.Button(Content("Clear All", "清除全部目标物体"), GUILayout.Height(22)))
         {
             _targetObjects.Clear();
             SceneView.RepaintAll();
@@ -287,9 +289,9 @@ public class MeasureTool : EditorWindow
 
         EditorGUILayout.BeginHorizontal();
         EditorGUI.BeginChangeCheck();
-        _includeChildren = EditorGUILayout.ToggleLeft("包含子物体", _includeChildren, GUILayout.Width(100));
-        _showWireframe   = EditorGUILayout.ToggleLeft("线框", _showWireframe, GUILayout.Width(60));
-        _showDimLabels   = EditorGUILayout.ToggleLeft("尺寸标签", _showDimLabels, GUILayout.Width(80));
+        _includeChildren = EditorGUILayout.ToggleLeft(Content("Include Children", "包含子物体的 Renderer 参与计算").text, _includeChildren, GUILayout.Width(110));
+        _showWireframe   = EditorGUILayout.ToggleLeft(Content("Wireframe", "显示包围盒线框").text, _showWireframe, GUILayout.Width(70));
+        _showDimLabels   = EditorGUILayout.ToggleLeft(Content("Labels", "显示尺寸标签").text, _showDimLabels, GUILayout.Width(70));
         if (EditorGUI.EndChangeCheck()) SceneView.RepaintAll();
         EditorGUILayout.EndHorizontal();
 
@@ -297,16 +299,16 @@ public class MeasureTool : EditorWindow
         if (_targetObjects.Count > 0 && TryGetCombinedBounds(_targetObjects, _includeChildren, out Bounds b))
         {
             EditorGUILayout.Space(4);
-            EditorGUILayout.LabelField("测量结果", EditorStyles.boldLabel);
-            EditorGUILayout.SelectableLabel($"  宽 (X): {FormatValue(b.size.x)}");
-            EditorGUILayout.SelectableLabel($"  高 (Y): {FormatValue(b.size.y)}");
-            EditorGUILayout.SelectableLabel($"  深 (Z): {FormatValue(b.size.z)}");
+            EditorGUILayout.LabelField(Content("Results", "测量结果"), EditorStyles.boldLabel);
+            EditorGUILayout.SelectableLabel($"  Width (X): {FormatValue(b.size.x)}");
+            EditorGUILayout.SelectableLabel($"  Height (Y): {FormatValue(b.size.y)}");
+            EditorGUILayout.SelectableLabel($"  Depth (Z): {FormatValue(b.size.z)}");
             float vol = b.size.x * b.size.y * b.size.z;
-            EditorGUILayout.SelectableLabel($"  体积:   {FormatVolume(vol)}");
+            EditorGUILayout.SelectableLabel($"  Volume: {FormatVolume(vol)}");
         }
         else if (_targetObjects.Count > 0)
         {
-            EditorGUILayout.HelpBox("列表中所有物体及其子节点没有 Renderer 组件，无法计算包围盒。", MessageType.Warning);
+            EditorGUILayout.HelpBox("No Renderer found on target objects or their children.", MessageType.Warning);
         }
 
         EditorGUI.indentLevel--;
@@ -317,38 +319,38 @@ public class MeasureTool : EditorWindow
 
     private bool DrawRulerFoldout(bool fold)
     {
-        fold = EditorGUILayout.Foldout(fold, "标尺（Scene 点击放置）", true);
+        fold = EditorGUILayout.Foldout(fold, Content("Ruler (Click in Scene)", "标尺模式：在 Scene 视图中点击放置测量点"), true);
         if (!fold) return fold;
 
         EditorGUI.indentLevel++;
 
         EditorGUILayout.HelpBox(
-            "点击 Scene 空白处放置起点 → 再次点击放置终点\n" +
-            "拖拽: 拖动箭头手柄沿轴移动  |  按住 V: Unity 顶点吸附\n" +
-            "Esc: 取消/清除测量",
+            "Click in Scene to place start point → click again to place end point.\n" +
+            "Drag arrow handles to adjust  |  Hold V: Unity vertex snapping\n" +
+            "Esc: cancel / clear measurement",
             MessageType.Info);
 
         EditorGUILayout.Space(4);
 
         if (_rulerA.HasValue)
-            EditorGUILayout.SelectableLabel($"  起点: ({_rulerA.Value.x:F3}, {_rulerA.Value.y:F3}, {_rulerA.Value.z:F3})");
+            EditorGUILayout.SelectableLabel($"  Start: ({_rulerA.Value.x:F3}, {_rulerA.Value.y:F3}, {_rulerA.Value.z:F3})");
         if (_rulerB.HasValue)
-            EditorGUILayout.SelectableLabel($"  终点: ({_rulerB.Value.x:F3}, {_rulerB.Value.y:F3}, {_rulerB.Value.z:F3})");
+            EditorGUILayout.SelectableLabel($"  End: ({_rulerB.Value.x:F3}, {_rulerB.Value.y:F3}, {_rulerB.Value.z:F3})");
 
         if (_rulerA.HasValue && _rulerB.HasValue)
         {
             Vector3 delta = _rulerB.Value - _rulerA.Value;
             float dist = Vector3.Distance(_rulerA.Value, _rulerB.Value);
             EditorGUILayout.Space(4);
-            EditorGUILayout.LabelField("测量结果", EditorStyles.boldLabel);
-            EditorGUILayout.SelectableLabel($"  直线距离: {FormatValue(dist)}");
+            EditorGUILayout.LabelField(Content("Results", "测量结果"), EditorStyles.boldLabel);
+            EditorGUILayout.SelectableLabel($"  Distance: {FormatValue(dist)}");
             EditorGUILayout.SelectableLabel($"  ΔX: {FormatValue(Mathf.Abs(delta.x))}");
             EditorGUILayout.SelectableLabel($"  ΔY: {FormatValue(Mathf.Abs(delta.y))}");
             EditorGUILayout.SelectableLabel($"  ΔZ: {FormatValue(Mathf.Abs(delta.z))}");
         }
 
         EditorGUILayout.Space(4);
-        if (GUILayout.Button("清除标尺", GUILayout.Height(24)))
+        if (GUILayout.Button(Content("Clear Ruler", "清除标尺测量"), GUILayout.Height(24)))
         {
             _rulerA = null; _rulerB = null; _previewPoint = null;
             SceneView.RepaintAll();
@@ -555,11 +557,11 @@ public class MeasureTool : EditorWindow
         Handles.BeginGUI();
         string text;
         if (!_rulerA.HasValue)
-            text = "⏺ 点击 Scene 放置起点  |  按住 V 吸附顶点";
+            text = "Click in Scene to place start point  |  Hold V for vertex snap";
         else if (!_rulerB.HasValue)
-            text = "⏺ 点击 Scene 放置终点  |  Esc 取消  |  按住 V 吸附顶点";
+            text = "Click in Scene to place end point  |  Esc to cancel  |  Hold V for vertex snap";
         else
-            text = "✅ 测量完成  |  再次点击重新开始  |  Esc 清除  |  拖拽箭头微调";
+            text = "Measurement complete  |  Click again to restart  |  Esc to clear  |  Drag handles to adjust";
 
         var style = new GUIStyle(EditorStyles.helpBox)
         {

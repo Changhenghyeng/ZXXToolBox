@@ -49,7 +49,7 @@ namespace LabelTool
 
         public static void Open()
         {
-            var w = GetWindow<LabelManagerWindow>("名称标签");
+            var w = GetWindow<LabelManagerWindow>("Label Tool");
             w.minSize = new Vector2(360, 500);
             w.Show();
         }
@@ -91,6 +91,8 @@ namespace LabelTool
     {
         private const float EntriesMaxHeight = 260f;
 
+        private static GUIContent Content(string label, string tooltip) => new GUIContent(label, tooltip);
+
         private static bool HasGameObjectInDrag()
         {
             if (DragAndDrop.objectReferences == null) return false;
@@ -106,7 +108,7 @@ namespace LabelTool
         {
             EditorGUILayout.BeginHorizontal();
 
-            if (GUILayout.Button("扫描", GUILayout.Height(24)))
+            if (GUILayout.Button(Content("Scan", "扫描场景中所有带 Prefab 的物体，生成名称标签列表"), GUILayout.Height(24)))
             {
                 // 首次扫描时按需创建 LabelManager
                 if (!m) m = EnsureExists();
@@ -115,11 +117,11 @@ namespace LabelTool
 
             using (new EditorGUI.DisabledScope(!m))
             {
-                if (GUILayout.Button("清空", GUILayout.Height(24)))
+                if (GUILayout.Button(Content("Clear", "清空所有标签条目"), GUILayout.Height(24)))
                 {
                     Undo.RecordObject(m, "清空"); m.entries.Clear(); m.Refresh();
                 }
-                if (GUILayout.Button("刷新", GUILayout.Height(24)))
+                if (GUILayout.Button(Content("Refresh", "强制重建标签样式"), GUILayout.Height(24)))
                 {
                     Undo.RecordObject(m, "刷新"); m.ForceRebuildStyle();
                 }
@@ -128,7 +130,7 @@ namespace LabelTool
             var baked = GameObject.Find("[Baked Labels]");
             if (baked)
             {
-                if (GUILayout.Button("清除烘培", GUILayout.Height(24)))
+                if (GUILayout.Button(Content("Clear Bake", "删除烘培到场景中的标签对象"), GUILayout.Height(24)))
                 {
                     Undo.DestroyObjectImmediate(baked);
                     if (m) m.enabled = true;
@@ -138,7 +140,7 @@ namespace LabelTool
             {
                 using (new EditorGUI.DisabledScope(!m))
                 {
-                    if (GUILayout.Button("烘培", GUILayout.Height(24)) && m)
+                    if (GUILayout.Button(Content("Bake", "将标签烘培为场景中的静态 TextMeshPro 对象"), GUILayout.Height(24)) && m)
                         m.BakeToScene();
                 }
             }
@@ -162,8 +164,8 @@ namespace LabelTool
         {
             if (!m)
             {
-                EditorGUILayout.LabelField("扫描范围：拖入根节点", EditorStyles.miniLabel);
-                EditorGUILayout.LabelField("  未指定则扫描整个场景", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField("Scan Roots: drag root nodes here", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField("  (if empty, scans the entire scene)", EditorStyles.miniLabel);
                 EditorGUILayout.Space(4);
                 return;
             }
@@ -185,15 +187,17 @@ namespace LabelTool
 
             // 添加根节点
             var drop = (GameObject)EditorGUILayout.ObjectField(
-                hasRoots ? "+ 根节点" : "扫描范围：拖入根节点", null, typeof(GameObject), true);
+                hasRoots ? "+ Add Root" : "Scan Roots: drag root nodes here", null, typeof(GameObject), true);
             if (drop) { Undo.RecordObject(m, "添加根节点"); m.scanRoots.Add(drop); }
 
             if (!hasRoots && m.scanRoots.Count == 0)
-                EditorGUILayout.LabelField("  未指定则扫描整个场景", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField("  (if empty, scans the entire scene)", EditorStyles.miniLabel);
 
             EditorGUILayout.BeginHorizontal();
-            m.usePrefabName = EditorGUILayout.ToggleLeft("使用 Prefab 名", m.usePrefabName, GUILayout.Width(110));
-            m.onlyDirectChildren = EditorGUILayout.ToggleLeft("仅直接子节点", m.onlyDirectChildren);
+            m.usePrefabName = EditorGUILayout.ToggleLeft(
+                Content("Use Prefab Name", "使用 Prefab 资产名代替场景物体名作为标签文字").text, m.usePrefabName, GUILayout.Width(130));
+            m.onlyDirectChildren = EditorGUILayout.ToggleLeft(
+                Content("Direct Children Only", "仅扫描根节点的直接子节点，不递归子级").text, m.onlyDirectChildren);
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.Space(4);
@@ -210,7 +214,7 @@ namespace LabelTool
                 foreach (var e in m.entries) { if (!e.show) allOn = false; if (e.show) allOff = false; }
             EditorGUI.showMixedValue = !allOn && !allOff;
             EditorGUI.BeginChangeCheck();
-            bool newAll = EditorGUILayout.ToggleLeft($"标签条目 ({count})", allOn || allOff ? allOn : true, EditorStyles.boldLabel);
+            bool newAll = EditorGUILayout.ToggleLeft(Content($"Label Entries ({count})", "标签条目列表，拖入 GameObject 即可添加").text, allOn || allOff ? allOn : true, EditorStyles.boldLabel);
             EditorGUI.showMixedValue = false;
             if (EditorGUI.EndChangeCheck() && m && count > 0)
             {
@@ -220,7 +224,7 @@ namespace LabelTool
             }
 
         // ── 拖入区（支持多选 GameObject 一次性拖入） ──
-            var dropLabel = "拖入添加";
+            var dropLabel = "Drop GameObjects here to add";
             var dropRect = GUILayoutUtility.GetRect(new GUIContent(dropLabel), EditorStyles.textField, GUILayout.Height(20));
 
             // 拖拽时高亮
@@ -267,7 +271,7 @@ namespace LabelTool
             if (!m)
             {
                 EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-                EditorGUILayout.LabelField("点击「扫描」创建 LabelManager", EditorStyles.centeredGreyMiniLabel);
+                EditorGUILayout.LabelField("Click Scan to create a LabelManager", EditorStyles.centeredGreyMiniLabel);
                 EditorGUILayout.EndVertical();
                 EditorGUILayout.Space(4);
                 return;
@@ -321,7 +325,7 @@ namespace LabelTool
             else
             {
                 EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-                EditorGUILayout.LabelField("拖入物体或点击「扫描」", EditorStyles.centeredGreyMiniLabel);
+                EditorGUILayout.LabelField("Drop objects or click Scan", EditorStyles.centeredGreyMiniLabel);
                 EditorGUILayout.EndVertical();
             }
 
@@ -330,7 +334,7 @@ namespace LabelTool
             if (hasEntries)
             {
                 EditorGUILayout.BeginHorizontal();
-                if (GUILayout.Button("清理无效", EditorStyles.miniButtonRight))
+                if (GUILayout.Button(Content("Clean Invalid", "清理引用已丢失的无效条目").text, EditorStyles.miniButtonRight))
                 {
                     Undo.RecordObject(m, "清理无效");
                     int n = m.CleanInvalid();
@@ -346,8 +350,8 @@ namespace LabelTool
 
         public static bool DrawStyleFoldout(LabelManager m, bool fold)
         {
-            if (!m) { EditorGUILayout.Foldout(false, "样式设置", true); return false; }
-            fold = EditorGUILayout.Foldout(fold, "样式设置", true);
+            if (!m) { EditorGUILayout.Foldout(false, Content("Style", "样式设置").text, true); return false; }
+            fold = EditorGUILayout.Foldout(fold, Content("Style", "样式设置：底板、文字外观").text, true);
             if (!fold) return fold;
 
             EditorGUI.indentLevel++;
@@ -356,34 +360,34 @@ namespace LabelTool
             Undo.RecordObject(m, "修改样式");
             EditorGUI.BeginChangeCheck();
 
-            // 底板模式
-            st.bgMode = (BackgroundMode)EditorGUILayout.EnumPopup("底板模式", st.bgMode);
+            // Background Mode
+            st.bgMode = (BackgroundMode)EditorGUILayout.EnumPopup(Content("BG Mode", "底板模式：Sprite 贴图 或 纯色圆角矩形"), st.bgMode);
 
             if (st.bgMode == BackgroundMode.Sprite)
             {
-                st.bgSprite = (Sprite)EditorGUILayout.ObjectField("底板贴图", st.bgSprite, typeof(Sprite), false);
+                st.bgSprite = (Sprite)EditorGUILayout.ObjectField(Content("BG Sprite", "底板贴图 Sprite"), st.bgSprite, typeof(Sprite), false);
             }
             else
             {
-                st.backgroundColor = EditorGUILayout.ColorField("底板颜色", st.backgroundColor);
-                st.cornerRadius    = EditorGUILayout.Slider("圆角", st.cornerRadius, 0, 120);
-                st.padding         = EditorGUILayout.Vector2Field("内边距", st.padding);
-                st.bgOutlineColor  = EditorGUILayout.ColorField("描边颜色", st.bgOutlineColor);
-                st.bgOutlineWidth  = EditorGUILayout.Slider("描边粗细", st.bgOutlineWidth, 0, 20);
-                st.edgeBlur        = EditorGUILayout.Slider("边缘模糊", st.edgeBlur, 0, 60);
+                st.backgroundColor = EditorGUILayout.ColorField(Content("BG Color", "底板颜色"), st.backgroundColor);
+                st.cornerRadius    = EditorGUILayout.Slider(Content("Corner Radius", "底板圆角半径（像素）"), st.cornerRadius, 0, 120);
+                st.padding         = EditorGUILayout.Vector2Field(Content("Padding", "底板内边距"), st.padding);
+                st.bgOutlineColor  = EditorGUILayout.ColorField(Content("Outline Color", "底板描边颜色"), st.bgOutlineColor);
+                st.bgOutlineWidth  = EditorGUILayout.Slider(Content("Outline Width", "底板描边粗细"), st.bgOutlineWidth, 0, 20);
+                st.edgeBlur        = EditorGUILayout.Slider(Content("Edge Blur", "底板边缘模糊程度"), st.edgeBlur, 0, 60);
             }
 
             EditorGUILayout.Space(3);
 
-            // 文字
-            EditorGUILayout.LabelField("文字", EditorStyles.miniBoldLabel);
-            st.fontAsset   = (TMP_FontAsset)EditorGUILayout.ObjectField("字体", st.fontAsset, typeof(TMP_FontAsset), false);
-            st.textColor   = EditorGUILayout.ColorField("颜色", st.textColor);
-            st.fontSize    = EditorGUILayout.IntSlider("字号", st.fontSize, 8, 200);
-            st.fontStyle   = (FontStyles)EditorGUILayout.EnumPopup("样式", st.fontStyle);
-            st.textAlignment = (TextAlignmentOptions)EditorGUILayout.EnumPopup("对齐", st.textAlignment);
-            st.outlineColor = EditorGUILayout.ColorField("描边颜色", st.outlineColor);
-            st.outlineWidth = EditorGUILayout.Slider("描边粗细", st.outlineWidth, 0, 0.5f);
+            // Text
+            EditorGUILayout.LabelField(Content("Text", "文字样式"), EditorStyles.miniBoldLabel);
+            st.fontAsset   = (TMP_FontAsset)EditorGUILayout.ObjectField(Content("Font", "字体资源（TMP Font Asset）"), st.fontAsset, typeof(TMP_FontAsset), false);
+            st.textColor   = EditorGUILayout.ColorField(Content("Color", "文字颜色"), st.textColor);
+            st.fontSize    = EditorGUILayout.IntSlider(Content("Font Size", "字号"), st.fontSize, 8, 200);
+            st.fontStyle   = (FontStyles)EditorGUILayout.EnumPopup(Content("Font Style", "文字样式（粗体/斜体等）"), st.fontStyle);
+            st.textAlignment = (TextAlignmentOptions)EditorGUILayout.EnumPopup(Content("Alignment", "文字对齐方式"), st.textAlignment);
+            st.outlineColor = EditorGUILayout.ColorField(Content("Outline Color", "文字描边颜色"), st.outlineColor);
+            st.outlineWidth = EditorGUILayout.Slider(Content("Outline Width", "文字描边粗细"), st.outlineWidth, 0, 0.5f);
 
             if (EditorGUI.EndChangeCheck()) m.ForceRebuildStyle();
             EditorGUI.indentLevel--;
@@ -394,26 +398,26 @@ namespace LabelTool
 
         public static bool DrawPositionFoldout(LabelManager m, bool fold)
         {
-            if (!m) { EditorGUILayout.Foldout(false, "定位", true); return false; }
-            fold = EditorGUILayout.Foldout(fold, "定位", true);
+            if (!m) { EditorGUILayout.Foldout(false, Content("Position", "定位").text, true); return false; }
+            fold = EditorGUILayout.Foldout(fold, Content("Position", "定位：标签在场景中的放置方式").text, true);
             if (!fold) return fold;
 
             EditorGUI.indentLevel++;
             Undo.RecordObject(m, "修改定位");
-            m.useBounds = EditorGUILayout.Toggle("包围盒定位", m.useBounds);
+            m.useBounds = EditorGUILayout.Toggle(Content("Bounds Positioning", "使用包围盒定位标签（自动计算物体顶部位置）"), m.useBounds);
             if (m.useBounds)
             {
                 EditorGUI.indentLevel++;
-                m.heightMargin = EditorGUILayout.FloatField("顶部边距", m.heightMargin);
+                m.heightMargin = EditorGUILayout.FloatField(Content("Top Margin", "标签距离包围盒顶部的额外边距"), m.heightMargin);
                 m.worldOffset = new Vector3(
-                    EditorGUILayout.FloatField("偏移 X", m.worldOffset.x),
-                    EditorGUILayout.FloatField("偏移 Y", m.worldOffset.y),
-                    EditorGUILayout.FloatField("偏移 Z", m.worldOffset.z));
+                    EditorGUILayout.FloatField(Content("Offset X", "世界偏移 X"), m.worldOffset.x),
+                    EditorGUILayout.FloatField(Content("Offset Y", "世界偏移 Y"), m.worldOffset.y),
+                    EditorGUILayout.FloatField(Content("Offset Z", "世界偏移 Z"), m.worldOffset.z));
                 EditorGUI.indentLevel--;
             }
             else
             {
-                m.worldOffset = EditorGUILayout.Vector3Field("偏移", m.worldOffset);
+                m.worldOffset = EditorGUILayout.Vector3Field(Content("World Offset", "标签的世界空间偏移量"), m.worldOffset);
             }
             EditorGUI.indentLevel--;
             return fold;
@@ -423,15 +427,15 @@ namespace LabelTool
 
         public static bool DrawLodFoldout(LabelManager m, bool fold)
         {
-            if (!m) { EditorGUILayout.Foldout(false, "LOD", true); return false; }
-            fold = EditorGUILayout.Foldout(fold, "LOD", true);
+            if (!m) { EditorGUILayout.Foldout(false, Content("LOD", "LOD 距离设置").text, true); return false; }
+            fold = EditorGUILayout.Foldout(fold, Content("LOD", "LOD：标签显示距离与刷新频率").text, true);
             if (!fold) return fold;
 
             EditorGUI.indentLevel++;
             Undo.RecordObject(m, "修改LOD");
-            m.maxDistance       = EditorGUILayout.FloatField("最大距离", m.maxDistance);
-            m.recomputeInterval = EditorGUILayout.IntSlider("检测间隔（帧）", m.recomputeInterval, 1, 30);
-            m.viewportMargin    = EditorGUILayout.Slider("视口余量", m.viewportMargin, 0, 0.3f);
+            m.maxDistance       = EditorGUILayout.FloatField(Content("Max Distance", "标签可见的最大距离（世界单位）"), m.maxDistance);
+            m.recomputeInterval = EditorGUILayout.IntSlider(Content("Recompute Interval (frames)", "检测标签可见性的间隔帧数"), m.recomputeInterval, 1, 30);
+            m.viewportMargin    = EditorGUILayout.Slider(Content("Viewport Margin", "视口边缘余量，在此范围内的标签也会显示"), m.viewportMargin, 0, 0.3f);
             EditorGUI.indentLevel--;
             return fold;
         }
@@ -440,8 +444,8 @@ namespace LabelTool
 
         public static bool DrawAliasFoldout(LabelManager m, bool fold)
         {
-            if (!m) { EditorGUILayout.Foldout(false, "Prefab 别名 (0)", true); return false; }
-            fold = EditorGUILayout.Foldout(fold, $"Prefab 别名 ({m.aliases?.Count ?? 0})", true);
+            if (!m) { EditorGUILayout.Foldout(false, Content("Prefab Alias (0)", "Prefab 别名").text, true); return false; }
+            fold = EditorGUILayout.Foldout(fold, Content($"Prefab Alias ({m.aliases?.Count ?? 0})", "Prefab 别名：为特定 Prefab 指定自定义显示名称").text, true);
             if (!fold) return fold;
 
             EditorGUI.indentLevel++;
@@ -463,7 +467,7 @@ namespace LabelTool
             }
             if (removeIndex >= 0) { Undo.RecordObject(m, "删除别名"); m.aliases.RemoveAt(removeIndex); }
 
-            if (GUILayout.Button("+ 添加别名", GUILayout.Height(20)))
+            if (GUILayout.Button(Content("+ Add Alias", "添加新的 Prefab 别名映射"), GUILayout.Height(20)))
             {
                 Undo.RecordObject(m, "添加别名");
                 m.aliases.Add(new LabelManager.Alias());
