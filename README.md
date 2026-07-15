@@ -13,7 +13,7 @@ git clone https://github.com/Changhenghyeng/ZXXToolBox.git Assets/ZXXToolBox
 或通过 Unity Package Manager 以 git URL 导入：
 
 ```
-https://github.com/Changhenghyeng/ZXXToolBox.git#v0.1.0
+https://github.com/Changhenghyeng/ZXXToolBox.git#v0.3.1
 ```
 
 ---
