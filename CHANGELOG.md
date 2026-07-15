@@ -1,5 +1,19 @@
 # Changelog
 
+## [v0.3.0] — 2026-07-15
+
+### 新增
+
+- **BuildingCardTool 图集面板**：AtlasPanel 批量管理多张建筑面片，渲染顺序优化
+- **全工具 Tooltip**：Content() 双语提示，所有按钮/标签带中文说明
+
+### 变更
+
+- **ZXXToolBox 分类重构**：生成工具 → 场景搭建 / 资源制作 / 视觉烘焙
+- **英文注释中文化**：BuildingCardTool / SelfShadowBaker / ShadowBaker 英文 XML doc 改为中文
+
+---
+
 ## [v0.2.0] — 2026-07-14
 
 ### 新增
