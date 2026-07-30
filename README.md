@@ -13,7 +13,7 @@ git clone https://github.com/Changhenghyeng/ZXXToolBox.git Assets/ZXXToolBox
 或通过 Unity Package Manager 以 git URL 导入：
 
 ```
-https://github.com/Changhenghyeng/ZXXToolBox.git#v0.3.1
+https://github.com/Changhenghyeng/ZXXToolBox.git#v0.4.0
 ```
 
 ---
@@ -36,6 +36,7 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.3.1
 | **LightCookieScroller** | 灯光 Cookie 纹理滚动动画（云影/焦散/斑驳光影） | 工具箱面板 |
 | **MeasureTool** | 场景视图距离/角度测量 | 工具箱面板 |
 | **OutlineTool** | 卡通描边效果设置 | 工具箱面板 |
+| **PathBuilder** | 路径生成工具，含 PathSpline 曲线编辑子系统 | 工具箱面板 |
 | **PrefabBatchReplacer** | 批量替换场景中的 Prefab 实例 | 工具箱面板 |
 | **PrefabExtractorTool** | 从场景中提取选中物体为 Prefab（支持 Undo/Backup） | 工具箱面板 |
 | **PrefabNameSyncTool** | 将 Prefab 实例名称同步为 Prefab 资源名称 | 工具箱面板 |
@@ -43,10 +44,11 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.3.1
 | **ProcGen** | 程序化生成系统，基于 SpatialHash 的摆放与去重 | 工具箱面板 |
 | **SelfShadowBaker** | 自阴影（SDF 投影）烘焙 | 工具箱面板 |
 | **ShadingModeToggle** | 一键切换场景视图着色模式（Lit/Wireframe/Unlit 等） | 工具箱面板 |
+| **SLGMapTileCutter** | 沙盘地图地块切割，支持内描边渲染 | 工具箱面板 |
+| **SLGTerrainBaker** | 沙盘地形烘焙，合成贴图生成 | 工具箱面板 |
 | **ShadowBakerTool** | 阴影贴图烘焙 + 贴花生成，含 Blur/Silhouette Shader | 工具箱面板 |
 | **ShadowCastOffTool** | 批量关闭选中物体的阴影投射 | 工具箱面板 / `GameObject/Cast Shadows OFF` |
 | **TransparentScreenshot** | 透明背景截图 + 粒子序列渲染 | 工具箱面板 / `Ctrl+Shift+X` |
-| **WallBuilderTool** | 场景墙体快速搭建 | 工具箱面板 |
 
 ### 🏃 运行时组件
 
@@ -65,6 +67,11 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.3.1
 | **StylizedRiver** | 水面 | 双层法线混合 + 焦散 + 泡沫 + 速度线 + 深浅渐变 |
 | **ToonOutline_URP** | 描边 | 卡通风格外描边 |
 | **SelfShadowBaker** | 阴影 | SDF 自阴影投射 |
+| **SLGMapTileInnerOutline** | 描边 | 沙盘地块内描边 |
+| **SLG_TerrainComposite_Baker** | 地形 | 地形合成烘焙 |
+| **SLG_TerrainBlend_Lite** | 地形 | SLG 地形混合（轻量版） |
+| **SLG_TerrainBlend_Mobile** | 地形 | SLG 地形混合（移动版） |
+| **BuildingCard_URP** | 建筑 | 建筑面片图集 URP |
 | **Blur_URP** | 后处理 | 模糊 |
 | **Silhouette_URP** | 剪影 | 剪影效果 |
 | **Fog Of War** | 迷雾 | 网格战争迷雾 |

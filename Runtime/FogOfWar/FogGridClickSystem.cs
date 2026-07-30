@@ -31,13 +31,21 @@ namespace ArtCode
         [SerializeField] private string maskTextureProperty = "_MainTex";
         [SerializeField, HideInInspector] private byte[] maskRData;
 
+        [Header("Transition")]
+        [SerializeField, Min(0f)] private float transitionDuration = 1f;
+
         [Header("Interaction")]
         [SerializeField] private Camera inputCamera;
-        [SerializeField] private LayerMask clickLayer = -1;
         [SerializeField] private bool handleMouseInput = true;
+        [SerializeField, Min(1)] private int clickAreaSize = 2;
 
         private Texture2D maskTexture;
         private Color32[] maskPixels;
+        private float[] displayedFogValues;
+        private float[] targetFogValues;
+        private float[] transitionStartValues;
+        private float[] transitionElapsedValues;
+        private bool[] transitionActive;
 
         public int Columns { get { return columns; } }
         public int Rows { get { return rows; } }
@@ -75,6 +83,8 @@ namespace ArtCode
             columns = Mathf.Max(1, columns);
             rows = Mathf.Max(1, rows);
             maskPixelsPerCell = Mathf.Max(1, maskPixelsPerCell);
+            clickAreaSize = Mathf.Max(1, clickAreaSize);
+            transitionDuration = Mathf.Max(0f, transitionDuration);
             worldSize.x = Mathf.Max(0.001f, worldSize.x);
             worldSize.y = Mathf.Max(0.001f, worldSize.y);
             if (maskTexture != null)
@@ -102,9 +112,13 @@ namespace ArtCode
 
         private void Update()
         {
-            if (!handleMouseInput) return;
-            if (Input.GetMouseButtonDown(0)) TryClick(Input.mousePosition, false);
-            if (Input.GetMouseButtonDown(1)) TryClick(Input.mousePosition, true);
+            if (handleMouseInput)
+            {
+                if (Input.GetMouseButtonDown(0)) TryClick(Input.mousePosition, false);
+                if (Input.GetMouseButtonDown(1)) TryClick(Input.mousePosition, true);
+            }
+
+            UpdateTransitions();
         }
 
         public void Configure(int columnCount, int rowCount, Vector2 origin, Vector2 size, float height, PivotType pivot)
@@ -150,20 +164,29 @@ namespace ArtCode
             if (cam == null) return false;
 
             Ray ray = cam.ScreenPointToRay(screenPosition);
-            RaycastHit[] hits = Physics.RaycastAll(ray, float.PositiveInfinity, clickLayer);
-            if (hits == null || hits.Length == 0) return false;
+            Vector3 gridPoint;
+            if (!TryGetGridPlanePoint(ray, out gridPoint)) return false;
 
-            Array.Sort(hits, CompareHitDistance);
-            for (int i = 0; i < hits.Length; i++)
+            int x;
+            int y;
+            if (!WorldToCell(gridPoint, out x, out y)) return false;
+
+            SetClickAreaVisibleAtWorldPosition(gridPoint, x, y, visible);
+            return true;
+        }
+
+        private bool TryGetGridPlanePoint(Ray ray, out Vector3 gridPoint)
+        {
+            Plane gridPlane = new Plane(Vector3.up, new Vector3(0f, gridHeight, 0f));
+            float enter;
+            if (!gridPlane.Raycast(ray, out enter))
             {
-                int x;
-                int y;
-                if (!WorldToCell(hits[i].point, out x, out y)) continue;
-                SetCellVisible(x, y, visible);
-                return true;
+                gridPoint = default(Vector3);
+                return false;
             }
 
-            return false;
+            gridPoint = ray.GetPoint(enter);
+            return true;
         }
 
         public void SetCellVisible(int x, int y, bool visible)
@@ -172,9 +195,77 @@ namespace ArtCode
             EnsureMask();
 
             int index = ToIndex(x, y);
-            byte value = visible ? FogValue : ClearValue;
-            maskRData[index] = value;
-            FillCellPixels(x, y, value);
+            StartCellTransition(index, visible ? 1f : 0f);
+            FillCellPixels(x, y);
+            ApplyMask();
+        }
+
+        public void SetClickAreaVisible(int clickedX, int clickedY, bool visible)
+        {
+            if (!IsValidCell(clickedX, clickedY)) return;
+
+            int width = Mathf.Min(Mathf.Max(1, clickAreaSize), columns);
+            int height = Mathf.Min(Mathf.Max(1, clickAreaSize), rows);
+            int startX = Mathf.Clamp(clickedX - width / 2, 0, columns - width);
+            int startY = Mathf.Clamp(clickedY - height / 2, 0, rows - height);
+            SetAreaVisible(startX, startY, width, height, visible);
+        }
+
+        private void SetClickAreaVisibleAtWorldPosition(
+            Vector3 worldPosition,
+            int clickedX,
+            int clickedY,
+            bool visible)
+        {
+            int width = Mathf.Min(Mathf.Max(1, clickAreaSize), columns);
+            int height = Mathf.Min(Mathf.Max(1, clickAreaSize), rows);
+            int startX;
+            int startY;
+
+            if ((width & 1) == 0)
+            {
+                Vector2 bottomLeft = GetBottomLeft();
+                float gridX = (worldPosition.x - bottomLeft.x) / CellWidth;
+                int centerLineX = Mathf.RoundToInt(gridX);
+                startX = centerLineX - width / 2;
+            }
+            else
+            {
+                startX = clickedX - width / 2;
+            }
+
+            if ((height & 1) == 0)
+            {
+                Vector2 bottomLeft = GetBottomLeft();
+                float gridY = (worldPosition.z - bottomLeft.y) / CellHeight;
+                int centerLineY = Mathf.RoundToInt(gridY);
+                startY = centerLineY - height / 2;
+            }
+            else
+            {
+                startY = clickedY - height / 2;
+            }
+
+            startX = Mathf.Clamp(startX, 0, columns - width);
+            startY = Mathf.Clamp(startY, 0, rows - height);
+            SetAreaVisible(startX, startY, width, height, visible);
+        }
+
+        private void SetAreaVisible(int startX, int startY, int width, int height, bool visible)
+        {
+            EnsureMask();
+            float targetValue = visible ? 1f : 0f;
+
+            for (int y = startY; y < startY + height; y++)
+            {
+                for (int x = startX; x < startX + width; x++)
+                {
+                    int index = ToIndex(x, y);
+                    StartCellTransition(index, targetValue);
+                    FillCellPixels(x, y);
+                }
+            }
+
             ApplyMask();
         }
 
@@ -217,6 +308,7 @@ namespace ArtCode
                 maskRData[i] = i < count && data[i] == ClearValue ? ClearValue : FogValue;
             }
 
+            ResetTransitionDataFromMaskData();
             RebuildMaskPixelsFromData();
             ApplyMask();
         }
@@ -246,6 +338,7 @@ namespace ArtCode
                 maskRData[i] = value;
             }
 
+            ResetTransitionDataFromMaskData();
             FillAllMaskPixels(value);
             ApplyMask();
         }
@@ -260,11 +353,15 @@ namespace ArtCode
             int textureHeight = rows * maskPixelsPerCell;
             int texturePixelCount = textureWidth * textureHeight;
 
-            if (maskRData == null || maskRData.Length != count)
+            bool maskDataCreated = maskRData == null || maskRData.Length != count;
+            if (maskDataCreated)
             {
                 maskRData = new byte[count];
                 for (int i = 0; i < maskRData.Length; i++) maskRData[i] = FogValue;
             }
+
+            if (maskDataCreated) ResetTransitionDataFromMaskData();
+            else EnsureTransitionData(count);
 
             if (maskPixels == null || maskPixels.Length != texturePixelCount)
             {
@@ -296,6 +393,7 @@ namespace ArtCode
                 maskRData[i] = value;
             }
 
+            ResetTransitionDataFromMaskData();
             EnsureMask();
             FillAllMaskPixels(value);
         }
@@ -311,7 +409,7 @@ namespace ArtCode
                     if (index < 0 || index >= maskRData.Length) continue;
                     byte value = maskRData[index] == ClearValue ? ClearValue : FogValue;
                     maskRData[index] = value;
-                    FillCellPixels(x, y, value);
+                    FillCellPixels(x, y);
                 }
             }
         }
@@ -319,18 +417,21 @@ namespace ArtCode
         private void FillAllMaskPixels(byte value)
         {
             if (maskPixels == null) return;
-            Color32 color = new Color32(value, ClearValue, ClearValue, FogValue);
+            Color32 color = new Color32(value, ClearValue, value, FogValue);
             for (int i = 0; i < maskPixels.Length; i++) maskPixels[i] = color;
         }
 
-        private void FillCellPixels(int cellX, int cellY, byte value)
+        private void FillCellPixels(int cellX, int cellY)
         {
             if (maskPixels == null) return;
             int pixelsPerCell = Mathf.Max(1, maskPixelsPerCell);
             int textureWidth = Mathf.Max(1, columns) * pixelsPerCell;
             int startX = cellX * pixelsPerCell;
             int startY = cellY * pixelsPerCell;
-            Color32 color = new Color32(value, ClearValue, ClearValue, FogValue);
+            int cellIndex = ToIndex(cellX, cellY);
+            byte visualR = IsVisualMaskActive(cellIndex) ? FogValue : ClearValue;
+            byte progressB = ToByte(GetDisplayedFogValue(cellIndex));
+            Color32 color = new Color32(visualR, ClearValue, progressB, FogValue);
 
             for (int y = 0; y < pixelsPerCell; y++)
             {
@@ -343,6 +444,128 @@ namespace ArtCode
                     if (pixelIndex >= 0 && pixelIndex < maskPixels.Length) maskPixels[pixelIndex] = color;
                 }
             }
+        }
+
+        private void StartCellTransition(int index, float targetValue)
+        {
+            targetValue = Mathf.Clamp01(targetValue);
+            maskRData[index] = targetValue >= 0.5f ? FogValue : ClearValue;
+
+            float currentValue = GetDisplayedFogValue(index);
+            targetFogValues[index] = targetValue;
+            transitionStartValues[index] = currentValue;
+            transitionElapsedValues[index] = 0f;
+
+            if (transitionDuration <= 0f || Mathf.Approximately(currentValue, targetValue))
+            {
+                displayedFogValues[index] = targetValue;
+                transitionActive[index] = false;
+            }
+            else
+            {
+                transitionActive[index] = true;
+            }
+        }
+
+        private void UpdateTransitions()
+        {
+            if (transitionActive == null || displayedFogValues == null) return;
+
+            bool changed = false;
+            float duration = Mathf.Max(0.0001f, transitionDuration);
+            for (int i = 0; i < transitionActive.Length; i++)
+            {
+                if (!transitionActive[i]) continue;
+
+                transitionElapsedValues[i] += Time.deltaTime;
+                float t = Mathf.Clamp01(transitionElapsedValues[i] / duration);
+                displayedFogValues[i] = Mathf.Lerp(transitionStartValues[i], targetFogValues[i], t);
+
+                int x = i % columns;
+                int y = i / columns;
+                FillCellPixels(x, y);
+                changed = true;
+
+                if (t >= 1f)
+                {
+                    displayedFogValues[i] = targetFogValues[i];
+                    transitionActive[i] = false;
+                    FillCellPixels(x, y);
+                }
+            }
+
+            if (changed) ApplyMask();
+        }
+
+        private void EnsureTransitionData(int count)
+        {
+            if (displayedFogValues != null
+                && displayedFogValues.Length == count
+                && targetFogValues != null
+                && targetFogValues.Length == count
+                && transitionStartValues != null
+                && transitionStartValues.Length == count
+                && transitionElapsedValues != null
+                && transitionElapsedValues.Length == count
+                && transitionActive != null
+                && transitionActive.Length == count)
+            {
+                return;
+            }
+
+            ResetTransitionDataFromMaskData();
+        }
+
+        private void ResetTransitionDataFromMaskData()
+        {
+            int count = maskRData == null ? 0 : maskRData.Length;
+            displayedFogValues = new float[count];
+            targetFogValues = new float[count];
+            transitionStartValues = new float[count];
+            transitionElapsedValues = new float[count];
+            transitionActive = new bool[count];
+
+            for (int i = 0; i < count; i++)
+            {
+                float value = maskRData[i] == ClearValue ? 0f : 1f;
+                displayedFogValues[i] = value;
+                targetFogValues[i] = value;
+                transitionStartValues[i] = value;
+            }
+        }
+
+        private float GetDisplayedFogValue(int index)
+        {
+            if (displayedFogValues == null || index < 0 || index >= displayedFogValues.Length)
+            {
+                return maskRData != null
+                    && index >= 0
+                    && index < maskRData.Length
+                    && maskRData[index] != ClearValue
+                    ? 1f
+                    : 0f;
+            }
+
+            return Mathf.Clamp01(displayedFogValues[index]);
+        }
+
+        private bool IsVisualMaskActive(int index)
+        {
+            if (targetFogValues == null || index < 0 || index >= targetFogValues.Length)
+            {
+                return maskRData != null
+                    && index >= 0
+                    && index < maskRData.Length
+                    && maskRData[index] != ClearValue;
+            }
+
+            // Appearance enables R before B rises. Disappearance keeps R until B reaches zero.
+            return targetFogValues[index] > 0f || GetDisplayedFogValue(index) > 0f;
+        }
+
+        private static byte ToByte(float value)
+        {
+            return (byte)Mathf.RoundToInt(Mathf.Clamp01(value) * FogValue);
         }
 
         private void ApplyMask()
@@ -416,9 +639,5 @@ namespace ArtCode
             return x >= 0 && y >= 0 && x < columns && y < rows;
         }
 
-        private static int CompareHitDistance(RaycastHit a, RaycastHit b)
-        {
-            return a.distance.CompareTo(b.distance);
-        }
     }
 }

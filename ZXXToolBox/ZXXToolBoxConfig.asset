@@ -18,9 +18,8 @@ MonoBehaviour:
     desc: "\u5728\u6A21\u578B\u8868\u9762\u6309\u89C4\u5219\u6563\u5E03\u9884\u5236\u4F53"
     category: "\u573A\u666F\u642D\u5EFA"
     visible: 1
-  - id: Wall Builder
-    desc: "\u5899\u6BB5\u62FC\u63A5\uFF1A\u56DB\u9762\u56F4\u5408 / L \u578B / \u8D70\u5ECA
-      / \u5355\u6392\u76F4\u7EBF"
+  - id: Path Builder
+    desc: "\u6CBF\u8DEF\u5F84\u751F\u6210\u5899\u4F53\u3001\u5C71\u8109\u6563\u5E03\u548C\u53EF\u53D8\u5BBD\u6CB3\u6D41"
     category: "\u573A\u666F\u642D\u5EFA"
     visible: 1
   - id: Box Collider Generator

@@ -12,18 +12,22 @@ using ShadowBakerTool.Editor;
 using SelfShadowBakerTool.Editor;
 using FogOfWarTool.Editor;
 using DayChangeTransitionTool.Editor;
+using SLGTerrainBakerTool.Editor;
+using SLGMapTileCutter.Editor;
 
 public class ZXXToolBox : EditorWindow
 {
     // ── Tool registry ──
     private static readonly (string id, string defaultDesc, string category, Action action)[] _registry =
     {
+        ("SLG Map Tile Cutter", "根据线框在模型表面生成可编辑的独立 SLG 地块 Mesh", "场景搭建", SLGMapTileCutterWindow.Open),
         ("ProcGen",              "在模型表面按规则散布预制体",                       "场景搭建",   ProcGenWindow.Open),
-        ("Wall Builder",         "墙段拼接：四面围合 / L 型 / 走廊 / 单排直线",      "场景搭建",   WallBuilderTool.ShowWindow),
+        ("Path Builder",         "沿路径生成墙体、山脉散布和可变宽河流",              "场景搭建",   PathBuilderWindow.ShowWindow),
         ("Building Card Prefab", "SLG 建筑 PNG：自动原点、面片和点击 BoxCollider",    "资源制作",   BuildingCardTool.ShowWindow),
         ("Box Collider Generator","批量为预制体生成 BoxCollider",                     "资源制作",   BoxColliderGenerator.ShowWindow),
         ("Shadow Baker",         "建筑顶光影子烘培 + 地面面片生成",                  "视觉烘焙",   ShadowBakerWindow.Open),
         ("Self Shadow Baker",    "建筑自投影阴影烘焙：uv2 展开 + PCF 软边 + 自动赋 _BakedMap", "视觉烘焙", SelfShadowBakerWindow.Open),
+        ("SLG Terrain Baker",    "SLG 地貌制作材质：烘焙自定义 Mipmap + 生成手机运行材质", "视觉烘焙", SLGTerrainBakeWindow.Open),
         ("Fog Of War Tool",      "战争迷雾 RGBA Mask：R 探索 / G 选中 / B 溶解边缘", "场景搭建",   FogOfWarToolWindow.Open),
         ("Day Change Transition","SLG 跨天短夜晚过渡：一键创建 Night Volume + 主光过渡控制", "场景搭建",   DayChangeTransitionToolWindow.Open),
         ("Outline",              "Mesh 外描边：平滑法线烘焙 + Outline Shader",    "视觉烘焙",   OutlineToolWindow.Open),

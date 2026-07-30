@@ -12,14 +12,25 @@ namespace FogOfWarTool.Editor
         private const string DebugGridName = "Fog Grid Debug Overlay";
         private const string DebugGridShaderName = "Hidden/Fog Of War/Grid Debug Overlay";
         private const string DebugGridShaderAssetPath = "Assets/Scripts/Editor/ArtTools/ZXXTools/FogOfWarTool/FogGridDebugOverlay.shader";
+        private static readonly GUIContent[] ViewTabs =
+        {
+            new GUIContent("Create Grid", "配置并创建一个可点击交互的战争迷雾网格。"),
+            new GUIContent("Selected Grid", "编辑和测试当前选中的战争迷雾网格。")
+        };
 
         private Vector2 _scroll;
+        private int _viewMode;
+        private int _selectedGridInstanceId;
+        private int _selectedColumns;
+        private int _selectedRows;
         private int _columns = 10;
         private int _rows = 8;
         private Vector2 _worldOrigin = Vector2.zero;
         private Vector2 _worldSize = new Vector2(10f, 8f);
         private float _heightOffset = 0.05f;
         private Color _fogColor = new Color(1f, 1f, 1f, 0.55f);
+        private int _clickAreaSize = 2;
+        private float _transitionDuration = 1f;
         private Color _debugGridColor = new Color(0f, 1f, 1f, 0.85f);
         private float _debugGridThickness = 0.02f;
         private bool _forceSquareCells = true;
@@ -35,17 +46,19 @@ namespace FogOfWarTool.Editor
         public static void Open()
         {
             FogOfWarToolWindow window = GetWindow<FogOfWarToolWindow>("Fog Grid Tool");
-            window.minSize = new Vector2(380f, 390f);
+            window.minSize = new Vector2(420f, 460f);
             window.Show();
         }
 
         private void OnEnable()
         {
             LoadSettings();
+            Selection.selectionChanged += Repaint;
         }
 
         private void OnDisable()
         {
+            Selection.selectionChanged -= Repaint;
             SaveSettings();
         }
 
@@ -53,18 +66,25 @@ namespace FogOfWarTool.Editor
         {
             _scroll = EditorGUILayout.BeginScrollView(_scroll);
 
-            EditorGUILayout.LabelField("Fog Mask Grid", EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox(
-                "根据选中物体的俯视包围盒生成一张可点击的战争迷雾遮罩面。点击会转换成网格坐标，并写入运行时 Mask 贴图。",
-                MessageType.Info);
+            EditorGUILayout.Space(4f);
+            EditorGUILayout.LabelField("Fog of War Grid", EditorStyles.boldLabel);
+            EditorGUILayout.Space(4f);
 
-            DrawBoundsSection();
+            _viewMode = GUILayout.Toolbar(_viewMode, ViewTabs);
             EditorGUILayout.Space(8f);
-            DrawGridSection();
-            EditorGUILayout.Space(8f);
-            DrawCreateSection();
-            EditorGUILayout.Space(8f);
-            DrawSelectedTools();
+
+            if (_viewMode == 0)
+            {
+                DrawBoundsSection();
+                EditorGUILayout.Space(6f);
+                DrawGridSection();
+                EditorGUILayout.Space(6f);
+                DrawCreateSection();
+            }
+            else
+            {
+                DrawSelectedTools();
+            }
 
             EditorGUILayout.EndScrollView();
 
@@ -85,94 +105,348 @@ namespace FogOfWarTool.Editor
 
         private void DrawBoundsSection()
         {
-            EditorGUILayout.LabelField("1. Area", EditorStyles.boldLabel);
-            _pivot = (PivotChoice)EditorGUILayout.EnumPopup("Pivot", _pivot);
-            _worldOrigin = EditorGUILayout.Vector2Field("Origin XZ", _worldOrigin);
-            _worldSize = EditorGUILayout.Vector2Field("Size XZ", _worldSize);
-            _heightOffset = EditorGUILayout.FloatField("Height Offset", _heightOffset);
-
-            using (new EditorGUILayout.HorizontalScope())
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                if (GUILayout.Button("Fit To Selection Top View")) FitToSelectionBounds();
-                if (GUILayout.Button("Use Scene Origin")) _worldOrigin = Vector2.zero;
+                EditorGUILayout.LabelField("Grid Area", EditorStyles.boldLabel);
+                _pivot = (PivotChoice)EditorGUILayout.EnumPopup(
+                    new GUIContent("Pivot", "设置 Origin XZ 在矩形网格区域中的锚点方式。"),
+                    _pivot);
+                _worldOrigin = EditorGUILayout.Vector2Field(
+                    new GUIContent("Origin XZ", "网格原点在世界空间中的 XZ 坐标。"),
+                    _worldOrigin);
+                _worldSize = EditorGUILayout.Vector2Field(
+                    new GUIContent("Size XZ", "网格在世界空间中覆盖的总宽度和总深度。"),
+                    _worldSize);
+                _heightOffset = EditorGUILayout.FloatField(
+                    new GUIContent("Height Offset", "相对于选中物体包围盒顶部的垂直偏移。"),
+                    _heightOffset);
+
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    if (GUILayout.Button(new GUIContent(
+                            "Fit Selection Top View",
+                            "根据选中物体的顶视图包围盒自动设置 Origin XZ 和 Size XZ。")))
+                    {
+                        FitToSelectionBounds();
+                    }
+
+                    if (GUILayout.Button(new GUIContent(
+                            "Reset Origin",
+                            "将 Origin XZ 重置为世界原点 (0, 0)。")))
+                    {
+                        _worldOrigin = Vector2.zero;
+                    }
+                }
             }
         }
 
         private void DrawGridSection()
         {
-            EditorGUILayout.LabelField("2. Grid", EditorStyles.boldLabel);
-            _columns = EditorGUILayout.IntField("Columns", Mathf.Max(1, _columns));
-            _rows = EditorGUILayout.IntField("Rows", Mathf.Max(1, _rows));
-            _fogColor = EditorGUILayout.ColorField("Fog Color", _fogColor);
-            _forceSquareCells = EditorGUILayout.ToggleLeft("Force Square Cells", _forceSquareCells);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUILayout.LabelField("Grid Settings", EditorStyles.boldLabel);
+                _columns = Mathf.Max(
+                    1,
+                    EditorGUILayout.IntField(
+                        new GUIContent("Columns", "世界空间 X 方向的网格数量。"),
+                        _columns));
+                _rows = Mathf.Max(
+                    1,
+                    EditorGUILayout.IntField(
+                        new GUIContent("Rows", "世界空间 Z 方向的网格数量。"),
+                        _rows));
+                _forceSquareCells = EditorGUILayout.Toggle(
+                    new GUIContent(
+                        "Force Square Cells",
+                        "自动调整最终网格区域，使每个格子的宽度和高度相等。"),
+                    _forceSquareCells);
 
-            Vector2 previewSize = GetResolvedWorldSize();
-            float cellW = Mathf.Max(0.001f, previewSize.x) / Mathf.Max(1, _columns);
-            float cellH = Mathf.Max(0.001f, previewSize.y) / Mathf.Max(1, _rows);
-            EditorGUILayout.LabelField("Cell Size", cellW.ToString("0.###") + " x " + cellH.ToString("0.###"));
-            EditorGUILayout.LabelField("Cell Count", (_columns * _rows).ToString());
+                Vector2 previewSize = GetResolvedWorldSize();
+                float cellW = Mathf.Max(0.001f, previewSize.x) / _columns;
+                float cellH = Mathf.Max(0.001f, previewSize.y) / _rows;
+                using (new EditorGUI.DisabledScope(true))
+                {
+                    EditorGUILayout.Vector2Field(
+                        new GUIContent("Cell Size", "单个格子计算后的世界空间尺寸。"),
+                        new Vector2(cellW, cellH));
+                    EditorGUILayout.IntField(
+                        new GUIContent("Cell Count", "格子总数，等于 Columns 乘以 Rows。"),
+                        _columns * _rows);
+                }
+
+                EditorGUILayout.Space(4f);
+                EditorGUILayout.LabelField("Fog and Interaction", EditorStyles.boldLabel);
+                _fogColor = EditorGUILayout.ColorField(
+                    new GUIContent("Fog Color", "新建战争迷雾材质使用的初始颜色和透明度。"),
+                    _fogColor);
+                _clickAreaSize = Mathf.Max(
+                    1,
+                    EditorGUILayout.IntField(
+                        new GUIContent(
+                            "Click Area (N x N)",
+                            "单次点击影响的格子范围。数值为 2 时会影响 2 x 2 个格子。"),
+                        _clickAreaSize));
+                _transitionDuration = Mathf.Max(
+                    0f,
+                    EditorGUILayout.FloatField(
+                        new GUIContent(
+                            "Transition (Seconds)",
+                            "云雾消散和出现的过渡时间。设置为 0 时立即完成变化。"),
+                        _transitionDuration));
+            }
         }
 
         private void DrawCreateSection()
         {
-            EditorGUILayout.LabelField("3. Create", EditorStyles.boldLabel);
-            _assetFolder = EditorGUILayout.TextField("Asset Folder", _assetFolder);
-
-            if (GUILayout.Button("Create Clickable Fog Grid", GUILayout.Height(34f)))
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                CreateGrid();
+                EditorGUILayout.LabelField("Output", EditorStyles.boldLabel);
+                _assetFolder = EditorGUILayout.TextField(
+                    new GUIContent("Asset Folder", "用于保存新生成战争迷雾材质的项目文件夹。"),
+                    _assetFolder);
+
+                if (GUILayout.Button(
+                        new GUIContent(
+                            "Create Fog Grid",
+                            "创建运行时网格组件、云雾面片、碰撞体和材质。"),
+                        GUILayout.Height(32f)))
+                {
+                    CreateGrid();
+                }
             }
         }
 
         private void DrawSelectedTools()
         {
-            EditorGUILayout.LabelField("4. Selected Grid", EditorStyles.boldLabel);
-
             Component grid = FindSelectedGrid();
-            using (new EditorGUI.DisabledScope(grid == null))
+            if (grid == null)
             {
+                EditorGUILayout.HelpBox(
+                    "Select a generated Fog Grid object or its Fog Mask Surface.",
+                    MessageType.Info);
+                return;
+            }
+
+            UnityEngine.Object gridObject = grid as UnityEngine.Object;
+            SyncSelectedGridResolution(grid);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUILayout.LabelField("Selected Grid", EditorStyles.boldLabel);
+                using (new EditorGUI.DisabledScope(true))
+                {
+                    EditorGUILayout.ObjectField(
+                        new GUIContent("Object", "当前由此面板控制的战争迷雾网格对象。"),
+                        gridObject,
+                        grid.GetType(),
+                        true);
+                }
+
+                EditorGUILayout.Space(4f);
+                EditorGUILayout.LabelField("Grid Resolution", EditorStyles.boldLabel);
+                _selectedColumns = Mathf.Max(
+                    1,
+                    EditorGUILayout.IntField(
+                        new GUIContent(
+                            "Columns",
+                            "修改当前面片在世界空间 X 方向划分的格子数量。"),
+                        _selectedColumns));
+                _selectedRows = Mathf.Max(
+                    1,
+                    EditorGUILayout.IntField(
+                        new GUIContent(
+                            "Rows",
+                            "修改当前面片在世界空间 Z 方向划分的格子数量。"),
+                        _selectedRows));
+
+                Vector2 selectedWorldSize = GetVector2Property(grid, "WorldSize", Vector2.one);
+                using (new EditorGUI.DisabledScope(true))
+                {
+                    EditorGUILayout.Vector2Field(
+                        new GUIContent(
+                            "Cell Size",
+                            "修改分辨率后单个格子的世界空间尺寸。"),
+                        new Vector2(
+                            selectedWorldSize.x / _selectedColumns,
+                            selectedWorldSize.y / _selectedRows));
+                    EditorGUILayout.IntField(
+                        new GUIContent("Cell Count", "修改后的格子总数。"),
+                        _selectedColumns * _selectedRows);
+                }
+
+                int currentColumns = Mathf.Max(1, GetIntProperty(grid, "Columns", _selectedColumns));
+                int currentRows = Mathf.Max(1, GetIntProperty(grid, "Rows", _selectedRows));
+                bool resolutionChanged =
+                    _selectedColumns != currentColumns
+                    || _selectedRows != currentRows;
+                using (new EditorGUI.DisabledScope(!resolutionChanged || EditorApplication.isPlaying))
+                {
+                    if (GUILayout.Button(new GUIContent(
+                            "Apply Grid Resolution (Reset Mask)",
+                            "保持面片世界尺寸不变，重新划分网格并将 Mask 重置为全云雾状态。")))
+                    {
+                        ApplySelectedGridResolution(grid, _selectedColumns, _selectedRows);
+                    }
+                }
+
+                EditorGUILayout.Space(4f);
+                EditorGUILayout.LabelField("Interaction", EditorStyles.boldLabel);
+                int currentClickAreaSize = GetIntField(grid, "clickAreaSize", _clickAreaSize);
+                float currentTransitionDuration = GetFloatField(
+                    grid,
+                    "transitionDuration",
+                    _transitionDuration);
+
+                EditorGUI.BeginChangeCheck();
+                int nextClickAreaSize = Mathf.Max(
+                    1,
+                    EditorGUILayout.IntField(
+                        new GUIContent(
+                            "Click Area (N x N)",
+                            "鼠标左键消散和右键恢复使用的格子范围，两种操作的范围完全相同。"),
+                        currentClickAreaSize));
+                float nextTransitionDuration = Mathf.Max(
+                    0f,
+                    EditorGUILayout.FloatField(
+                        new GUIContent(
+                            "Transition (Seconds)",
+                            "当前网格在云雾消散和出现时共同使用的过渡时间。"),
+                        currentTransitionDuration));
+                if (EditorGUI.EndChangeCheck())
+                {
+                    if (gridObject != null) Undo.RecordObject(gridObject, "Change Fog Grid Interaction");
+                    SetField(grid, "clickAreaSize", nextClickAreaSize);
+                    SetField(grid, "transitionDuration", nextTransitionDuration);
+                    if (gridObject != null) EditorUtility.SetDirty(gridObject);
+                }
+            }
+
+            EditorGUILayout.Space(6f);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUILayout.LabelField("Mask Controls", EditorStyles.boldLabel);
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    if (GUILayout.Button("Reset Mask")) InvokeNoArg(grid, "ResetMask");
+                    if (GUILayout.Button(new GUIContent(
+                            "Show All",
+                            "按照当前过渡时间恢复所有格子的云雾。")))
+                    {
+                        InvokeNoArg(grid, "ShowAll");
+                    }
+
+                    if (GUILayout.Button(new GUIContent(
+                            "Hide All",
+                            "按照当前过渡时间消散所有格子的云雾。")))
+                    {
+                        InvokeNoArg(grid, "HideAll");
+                    }
                 }
 
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    if (GUILayout.Button("Show All")) InvokeNoArg(grid, "ShowAll");
-                    if (GUILayout.Button("Hide All")) InvokeNoArg(grid, "HideAll");
+                    if (GUILayout.Button(new GUIContent(
+                            "Reset Mask",
+                            "重新创建运行时 Mask，并恢复为初始的全云雾状态。")))
+                    {
+                        InvokeNoArg(grid, "ResetMask");
+                    }
                 }
 
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    if (GUILayout.Button("Ping Runtime Mask")) PingRuntimeMask(grid);
-                    if (GUILayout.Button("Export Mask PNG")) ExportRuntimeMask(grid);
-                }
+                    if (GUILayout.Button(new GUIContent(
+                            "Ping Runtime Mask",
+                            "在 Unity 编辑器中定位并高亮运行时生成的 Mask 贴图。")))
+                    {
+                        PingRuntimeMask(grid);
+                    }
 
-                if (GUILayout.Button("Refresh Cloud Material"))
-                {
-                    RefreshSelectedCloudMaterial(grid);
+                    if (GUILayout.Button(new GUIContent(
+                            "Export Mask PNG",
+                            "将当前运行时 Mask 贴图导出为 PNG 资源。")))
+                    {
+                        ExportRuntimeMask(grid);
+                    }
                 }
+            }
 
+            EditorGUILayout.Space(6f);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUILayout.LabelField("Debug Grid", EditorStyles.boldLabel);
                 bool debugGridVisible = IsDebugGridVisible(grid);
-                bool nextDebugGridVisible = EditorGUILayout.ToggleLeft("Show Debug Grid", debugGridVisible);
+                bool nextDebugGridVisible = EditorGUILayout.Toggle(
+                    new GUIContent(
+                        "Visible",
+                        "在 Game View 中显示参考网格，不会参与或影响战争迷雾 Mask。"),
+                    debugGridVisible);
                 if (nextDebugGridVisible != debugGridVisible)
                 {
                     SetDebugGridVisible(grid, nextDebugGridVisible);
                 }
 
-                using (new EditorGUILayout.HorizontalScope())
+                if (nextDebugGridVisible)
                 {
-                    _debugGridColor = EditorGUILayout.ColorField("Debug Grid Color", _debugGridColor);
-                    if (GUILayout.Button("Refresh Grid", GUILayout.Width(96f))) RefreshDebugGrid(grid);
+                    _debugGridColor = EditorGUILayout.ColorField(
+                        new GUIContent("Color", "Game View 参考网格的颜色和透明度。"),
+                        _debugGridColor);
+                    _debugGridThickness = Mathf.Max(
+                        0.001f,
+                        EditorGUILayout.FloatField(
+                            new GUIContent(
+                                "Line Thickness",
+                                "参考网格线的宽度，使用世界空间单位。"),
+                            _debugGridThickness));
+
+                    if (GUILayout.Button(new GUIContent(
+                            "Refresh Debug Grid",
+                            "修改颜色或线宽后，重新生成参考网格。")))
+                    {
+                        RefreshDebugGrid(grid);
+                    }
                 }
-
-                _debugGridThickness = EditorGUILayout.FloatField("Debug Grid Thickness", Mathf.Max(0.001f, _debugGridThickness));
             }
+        }
 
-            if (grid == null)
+        private void SyncSelectedGridResolution(Component grid)
+        {
+            int instanceId = grid == null ? 0 : grid.GetInstanceID();
+            if (_selectedGridInstanceId == instanceId) return;
+
+            _selectedGridInstanceId = instanceId;
+            _selectedColumns = Mathf.Max(1, GetIntProperty(grid, "Columns", _columns));
+            _selectedRows = Mathf.Max(1, GetIntProperty(grid, "Rows", _rows));
+        }
+
+        private void ApplySelectedGridResolution(Component grid, int columns, int rows)
+        {
+            if (grid == null || EditorApplication.isPlaying) return;
+
+            columns = Mathf.Max(1, columns);
+            rows = Mathf.Max(1, rows);
+            if (!EditorUtility.DisplayDialog(
+                    "应用网格分辨率",
+                    "修改网格分辨率会重建运行时 Mask，并将全部格子重置为云雾状态。是否继续？",
+                    "应用",
+                    "取消"))
             {
-                EditorGUILayout.HelpBox("选中已生成的 Fog Grid 对象后，才能使用这些操作按钮。", MessageType.None);
+                return;
             }
+
+            Undo.RecordObject(grid, "Change Fog Grid Resolution");
+            SetField(grid, "columns", columns);
+            SetField(grid, "rows", rows);
+            InvokeNoArg(grid, "RebuildGrid");
+            EditorUtility.SetDirty(grid);
+
+            _selectedColumns = columns;
+            _selectedRows = rows;
+            if (FindDebugGridTransform(grid.transform) != null)
+            {
+                RefreshDebugGrid(grid);
+            }
+
+            SceneView.RepaintAll();
+            Repaint();
         }
 
         private void CreateGrid()
@@ -193,6 +467,8 @@ namespace FogOfWarTool.Editor
 
             Component grid = root.AddComponent(gridType);
             SetField(grid, "inputCamera", Camera.main);
+            SetField(grid, "clickAreaSize", Mathf.Max(1, _clickAreaSize));
+            SetField(grid, "transitionDuration", Mathf.Max(0f, _transitionDuration));
 
             MethodInfo configure = gridType.GetMethod("Configure", BindingFlags.Instance | BindingFlags.Public);
             Type pivotType = gridType.GetNestedType("PivotType");
@@ -218,6 +494,7 @@ namespace FogOfWarTool.Editor
             InvokeNoArg(grid, "RebuildGrid");
 
             Selection.activeGameObject = root;
+            _viewMode = 1;
             EditorGUIUtility.PingObject(root);
         }
 
@@ -244,20 +521,21 @@ namespace FogOfWarTool.Editor
             if (material == null) return;
             if (material.HasProperty("_FogColor")) material.SetColor("_FogColor", _fogColor);
             if (material.HasProperty("_CloudColor")) material.SetColor("_CloudColor", _fogColor);
-            if (material.HasProperty("_TilingFactor")) material.SetFloat("_TilingFactor", 2f);
-            if (material.HasProperty("_SecondTilingFactor")) material.SetFloat("_SecondTilingFactor", 1f);
-            if (material.HasProperty("_CloudLayer1Speed")) material.SetVector("_CloudLayer1Speed", new Vector4(0.018f, 0.011f, 0f, 0f));
-            if (material.HasProperty("_CloudLayer2Speed")) material.SetVector("_CloudLayer2Speed", new Vector4(-0.013f, -0.017f, 0f, 0f));
-            if (material.HasProperty("_CloudLayer1SpeedX")) material.SetFloat("_CloudLayer1SpeedX", 0.018f);
-            if (material.HasProperty("_CloudLayer1SpeedY")) material.SetFloat("_CloudLayer1SpeedY", 0.011f);
-            if (material.HasProperty("_CloudLayer2SpeedX")) material.SetFloat("_CloudLayer2SpeedX", -0.013f);
-            if (material.HasProperty("_CloudLayer2SpeedY")) material.SetFloat("_CloudLayer2SpeedY", -0.017f);
-            if (material.HasProperty("_CloudAlphaPower")) material.SetFloat("_CloudAlphaPower", 1.25f);
-            if (material.HasProperty("_MaskEdgeSoftness")) material.SetFloat("_MaskEdgeSoftness", 0.05f);
-            if (material.HasProperty("_MaskEdgeContrast")) material.SetFloat("_MaskEdgeContrast", 1f);
-            if (material.HasProperty("_ShadeOffset")) material.SetVector("_ShadeOffset", new Vector4(0.5f, 0.5f, 1f, 0f));
-            if (material.HasProperty("_ShadowOffsetX")) material.SetFloat("_ShadowOffsetX", 0f);
-            if (material.HasProperty("_ShadowOffsetY")) material.SetFloat("_ShadowOffsetY", 0f);
+            if (material.HasProperty("_DissolveStrength")) material.SetFloat("_DissolveStrength", 1f);
+            if (material.HasProperty("_DissolveSpeedX")) material.SetFloat("_DissolveSpeedX", 0.1f);
+            if (material.HasProperty("_DissolveSpeedY")) material.SetFloat("_DissolveSpeedY", 0.06f);
+            if (material.HasProperty("_TillingFactor")) material.SetFloat("_TillingFactor", 2f);
+            if (material.HasProperty("_CloudSpeed"))
+            {
+                material.SetVector("_CloudSpeed", new Vector4(0.018f, 0.011f, -0.013f, -0.017f));
+            }
+            if (material.HasProperty("_MaskEdgeMin")) material.SetFloat("_MaskEdgeMin", 0.2f);
+            if (material.HasProperty("_MaskEdgeMax")) material.SetFloat("_MaskEdgeMax", 0.8f);
+            if (material.HasProperty("_MaskEdgePower")) material.SetFloat("_MaskEdgePower", 1f);
+            if (material.HasProperty("_MaskDistortCenterX")) material.SetFloat("_MaskDistortCenterX", 0.5f);
+            if (material.HasProperty("_MaskDistortCenterY")) material.SetFloat("_MaskDistortCenterY", 0.5f);
+            if (material.HasProperty("_MaskDistortStrength")) material.SetFloat("_MaskDistortStrength", 10f);
+            if (material.HasProperty("_ShadowOffset")) material.SetVector("_ShadowOffset", Vector4.zero);
             if (material.HasProperty("_EnableDepthOcclusion")) material.SetFloat("_EnableDepthOcclusion", 1f);
             if (material.HasProperty("_DepthOcclusionDistance")) material.SetFloat("_DepthOcclusionDistance", 1f);
             if (material.HasProperty("_DepthOcclusionStrength")) material.SetFloat("_DepthOcclusionStrength", 1f);
@@ -724,6 +1002,13 @@ namespace FogOfWarTool.Editor
             return field == null ? fallback : (float)field.GetValue(target);
         }
 
+        private static int GetIntField(object target, string fieldName, int fallback)
+        {
+            if (target == null) return fallback;
+            FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            return field == null ? fallback : (int)field.GetValue(target);
+        }
+
         private static string NormalizeAssetFolder(string folder)
         {
             folder = string.IsNullOrEmpty(folder) ? "Assets" : folder.Replace('\\', '/').Trim();
@@ -749,6 +1034,8 @@ namespace FogOfWarTool.Editor
             EditorPrefs.SetFloat(PrefKey + ".sizeX", _worldSize.x);
             EditorPrefs.SetFloat(PrefKey + ".sizeY", _worldSize.y);
             EditorPrefs.SetFloat(PrefKey + ".heightOffset", _heightOffset);
+            EditorPrefs.SetInt(PrefKey + ".clickAreaSize", _clickAreaSize);
+            EditorPrefs.SetFloat(PrefKey + ".transitionDuration", _transitionDuration);
             EditorPrefs.SetBool(PrefKey + ".forceSquareCells", _forceSquareCells);
             EditorPrefs.SetInt(PrefKey + ".pivot", (int)_pivot);
             EditorPrefs.SetString(PrefKey + ".assetFolder", _assetFolder);
@@ -770,6 +1057,12 @@ namespace FogOfWarTool.Editor
             _worldOrigin = new Vector2(EditorPrefs.GetFloat(PrefKey + ".originX", _worldOrigin.x), EditorPrefs.GetFloat(PrefKey + ".originY", _worldOrigin.y));
             _worldSize = new Vector2(EditorPrefs.GetFloat(PrefKey + ".sizeX", _worldSize.x), EditorPrefs.GetFloat(PrefKey + ".sizeY", _worldSize.y));
             _heightOffset = EditorPrefs.GetFloat(PrefKey + ".heightOffset", _heightOffset);
+            _clickAreaSize = Mathf.Max(
+                1,
+                EditorPrefs.GetInt(PrefKey + ".clickAreaSize", _clickAreaSize));
+            _transitionDuration = Mathf.Max(
+                0f,
+                EditorPrefs.GetFloat(PrefKey + ".transitionDuration", _transitionDuration));
             _forceSquareCells = EditorPrefs.GetBool(PrefKey + ".forceSquareCells", _forceSquareCells);
             _pivot = (PivotChoice)Mathf.Clamp(EditorPrefs.GetInt(PrefKey + ".pivot", (int)_pivot), 0, 1);
             _assetFolder = EditorPrefs.GetString(PrefKey + ".assetFolder", _assetFolder);

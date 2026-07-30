@@ -1,5 +1,35 @@
 # Changelog
 
+## [v0.4.0] — 2026-07-30
+
+### 新增
+
+- **PathBuilder**：路径生成工具，含 PathSpline 曲线编辑子系统，替代 WallBuilderTool
+- **SLGMapTileCutter**：沙盘地图地块切割工具，含内描边 Shader（5248 行）
+- **SLGTerrainBaker**：沙盘地形烘焙工具，合成贴图生成
+
+### 新增 Shader
+
+- **BuildingCard_URP**：建筑面片图集 URP Shader
+- **SLG_TerrainBlend_Lite**：SLG 地形混合（轻量版）
+- **SLG_TerrainBlend_Mobile**：SLG 地形混合（移动版）
+- **SLGMapTileInnerOutline**：沙盘地块内描边
+- **SLG_TerrainComposite_Baker**：地形合成烘焙
+
+### 变更
+
+- **FogOfWarTool**：战争迷雾边缘控制优化
+- **MeasureTool**：测量工具功能增强
+- **Fog Of War.shader**：迷雾 Shader 边缘控制
+- **FogGridClickSystem**：迷雾点击交互优化
+- **ZXXToolBox**：面板配置更新，注册新工具
+
+### 移除
+
+- **WallBuilderTool**：被 PathBuilder 替代
+
+---
+
 ## [v0.3.1] — 2026-07-15
 
 ### 新增

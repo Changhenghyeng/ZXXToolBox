@@ -34,16 +34,25 @@ public class MeasureTool : EditorWindow
     private bool _showDimLabels = true;
     private bool _includeChildren = true;
     private Vector2 _bboxScrollPos;
+    private Vector3 _targetSizeMeters = Vector3.one;
+    private bool _resizeX = true;
+    private bool _resizeY;
+    private bool _resizeZ = true;
 
     // 标尺
     private Vector3? _rulerA;
     private Vector3? _rulerB;
+    private bool _previewSnapped;
+    private bool _rulerVertexSnap = true;
+    private float _rulerSnapPixelRadius = 14f;
+    private readonly List<Vector3> _snapVertexBuffer = new List<Vector3>(4096);
     private Vector3? _previewPoint;       // 鼠标悬停预览点
 
     // 面板折叠
     private bool _foldDisplay  = true;
     private bool _foldBBox     = true;
     private bool _foldRuler    = true;
+    private Vector2 _mainScrollPos;
 
     // Scene 标签样式（延迟初始化）
     private GUIStyle  _sceneLabelStyle;
@@ -51,7 +60,7 @@ public class MeasureTool : EditorWindow
     private GUIContent _cachedLabelContent; // 减少分配
 
     // ── EditorPrefs Key ──
-    private const string PrefKey = "MeasureTool.Settings_v3";
+    private const string PrefKey = "MeasureTool.Settings_v5";
 
     // ════════════════ 窗口入口 ════════════════
 
@@ -60,7 +69,7 @@ public class MeasureTool : EditorWindow
     public static void Open()
     {
         var w = GetWindow<MeasureTool>("Measure Tool");
-        w.minSize = new Vector2(340, 400);
+        w.minSize = new Vector2(340, 500);
         w.Show();
     }
 
@@ -91,6 +100,7 @@ public class MeasureTool : EditorWindow
     [Serializable]
     private class SavedState
     {
+        public int version;
         public int mode;
         public int unit;
         public float lineR, lineG, lineB, lineA;
@@ -100,6 +110,14 @@ public class MeasureTool : EditorWindow
         public bool showWireframe;
         public bool showDimLabels;
         public bool includeChildren;
+        public bool rulerVertexSnap;
+        public float rulerSnapPixelRadius;
+        public float targetSizeX;
+        public float targetSizeY;
+        public float targetSizeZ;
+        public bool resizeX;
+        public bool resizeY;
+        public bool resizeZ;
     }
 
     private void LoadPrefs()
@@ -107,8 +125,12 @@ public class MeasureTool : EditorWindow
         string json = EditorPrefs.GetString(PrefKey, "");
         if (string.IsNullOrEmpty(json))
         {
-            // 尝试迁移旧版数据（v1 / v2）
-            json = EditorPrefs.GetString("MeasureTool.Settings_v2", "");
+            // 尝试迁移旧版数据（v1 / v2 / v3 / v4）
+            json = EditorPrefs.GetString("MeasureTool.Settings_v4", "");
+            if (string.IsNullOrEmpty(json))
+                json = EditorPrefs.GetString("MeasureTool.Settings_v3", "");
+            if (string.IsNullOrEmpty(json))
+                json = EditorPrefs.GetString("MeasureTool.Settings_v2", "");
             if (string.IsNullOrEmpty(json))
                 json = EditorPrefs.GetString("MeasureTool.Settings", "");
             if (string.IsNullOrEmpty(json)) return;
@@ -128,6 +150,21 @@ public class MeasureTool : EditorWindow
             _showWireframe  = s.showWireframe;
             _showDimLabels  = s.showDimLabels;
             _includeChildren = s.includeChildren;
+            if (s.version >= 4)
+            {
+                _rulerVertexSnap = s.rulerVertexSnap;
+                _rulerSnapPixelRadius = Mathf.Clamp(s.rulerSnapPixelRadius, 6f, 30f);
+            }
+            if (s.version >= 5)
+            {
+                _targetSizeMeters = new Vector3(
+                    Mathf.Max(0f, s.targetSizeX),
+                    Mathf.Max(0f, s.targetSizeY),
+                    Mathf.Max(0f, s.targetSizeZ));
+                _resizeX = s.resizeX;
+                _resizeY = s.resizeY;
+                _resizeZ = s.resizeZ;
+            }
         }
         catch (Exception e)
         {
@@ -139,6 +176,7 @@ public class MeasureTool : EditorWindow
     {
         var s = new SavedState
         {
+            version         = 5,
             mode            = (int)_mode,
             unit            = (int)_unit,
             lineR = _lineColor.r, lineG = _lineColor.g, lineB = _lineColor.b, lineA = _lineColor.a,
@@ -148,6 +186,14 @@ public class MeasureTool : EditorWindow
             showWireframe   = _showWireframe,
             showDimLabels   = _showDimLabels,
             includeChildren = _includeChildren,
+            rulerVertexSnap = _rulerVertexSnap,
+            rulerSnapPixelRadius = _rulerSnapPixelRadius,
+            targetSizeX     = _targetSizeMeters.x,
+            targetSizeY     = _targetSizeMeters.y,
+            targetSizeZ     = _targetSizeMeters.z,
+            resizeX         = _resizeX,
+            resizeY         = _resizeY,
+            resizeZ         = _resizeZ,
         };
         EditorPrefs.SetString(PrefKey, JsonUtility.ToJson(s));
     }
@@ -158,6 +204,8 @@ public class MeasureTool : EditorWindow
     {
         // 自动清理已删除的物体引用
         _targetObjects.RemoveAll(go => go == null);
+
+        _mainScrollPos = EditorGUILayout.BeginScrollView(_mainScrollPos);
 
         DrawModeToolbar();
         EditorGUILayout.Space(4);
@@ -176,7 +224,7 @@ public class MeasureTool : EditorWindow
         }
 
         // ── 署名 ──
-        GUILayout.FlexibleSpace();
+        EditorGUILayout.Space(8);
         var authorStyle = new GUIStyle(EditorStyles.miniLabel)
         {
             alignment = TextAnchor.MiddleRight,
@@ -184,6 +232,8 @@ public class MeasureTool : EditorWindow
         };
         EditorGUILayout.LabelField("Developed by ZXX", authorStyle);
         EditorGUILayout.LabelField("114.21, 30.56", authorStyle);
+
+        EditorGUILayout.EndScrollView();
     }
 
     // ── 模式工具栏 ──
@@ -193,7 +243,11 @@ public class MeasureTool : EditorWindow
         EditorGUILayout.BeginHorizontal();
         EditorGUILayout.LabelField(Content("Mode", "测量模式"), GUILayout.Width(60));
 
-        var names = new[] { "Bounding Box", "Ruler" };
+        var names = new[]
+        {
+            Content("Bounding Box", "测量一个或多个物体的包围盒尺寸"),
+            Content("Ruler", "在 Scene 视图中放置两个点测量距离"),
+        };
         int idx = GUILayout.Toolbar((int)_mode, names);
         if (idx != (int)_mode)
         {
@@ -252,7 +306,9 @@ public class MeasureTool : EditorWindow
             EditorGUILayout.BeginHorizontal();
             _targetObjects[i] = (GameObject)EditorGUILayout.ObjectField(
                 _targetObjects[i], typeof(GameObject), true);
-            if (GUILayout.Button("✕", GUILayout.Width(24), GUILayout.Height(18)))
+            if (GUILayout.Button(
+                    Content("✕", "从目标列表中移除此物体"),
+                    GUILayout.Width(24), GUILayout.Height(18)))
                 removeIndex = i;
             EditorGUILayout.EndHorizontal();
         }
@@ -289,22 +345,33 @@ public class MeasureTool : EditorWindow
 
         EditorGUILayout.BeginHorizontal();
         EditorGUI.BeginChangeCheck();
-        _includeChildren = EditorGUILayout.ToggleLeft(Content("Include Children", "包含子物体的 Renderer 参与计算").text, _includeChildren, GUILayout.Width(110));
-        _showWireframe   = EditorGUILayout.ToggleLeft(Content("Wireframe", "显示包围盒线框").text, _showWireframe, GUILayout.Width(70));
-        _showDimLabels   = EditorGUILayout.ToggleLeft(Content("Labels", "显示尺寸标签").text, _showDimLabels, GUILayout.Width(70));
+        _includeChildren = EditorGUILayout.ToggleLeft(
+            Content("Include Children", "包含子物体的 Renderer 参与尺寸计算"),
+            _includeChildren, GUILayout.Width(110));
+        _showWireframe = EditorGUILayout.ToggleLeft(
+            Content("Wireframe", "在 Scene 视图中显示包围盒线框"),
+            _showWireframe, GUILayout.Width(80));
+        _showDimLabels = EditorGUILayout.ToggleLeft(
+            Content("Labels", "在 Scene 视图中显示尺寸标签"),
+            _showDimLabels, GUILayout.Width(70));
         if (EditorGUI.EndChangeCheck()) SceneView.RepaintAll();
         EditorGUILayout.EndHorizontal();
 
         // 显示测量结果
-        if (_targetObjects.Count > 0 && TryGetCombinedBounds(_targetObjects, _includeChildren, out Bounds b))
+        if (_targetObjects.Count > 0 && TryGetCombinedBounds(_targetObjects, _includeChildren, out OrientedMeasurementBounds b))
         {
             EditorGUILayout.Space(4);
             EditorGUILayout.LabelField(Content("Results", "测量结果"), EditorStyles.boldLabel);
-            EditorGUILayout.SelectableLabel($"  Width (X): {FormatValue(b.size.x)}");
-            EditorGUILayout.SelectableLabel($"  Height (Y): {FormatValue(b.size.y)}");
-            EditorGUILayout.SelectableLabel($"  Depth (Z): {FormatValue(b.size.z)}");
-            float vol = b.size.x * b.size.y * b.size.z;
+            Vector3 size = b.LocalBounds.size;
+            EditorGUILayout.SelectableLabel($"  Width (X): {FormatValue(size.x)}");
+            EditorGUILayout.SelectableLabel($"  Height (Y): {FormatValue(size.y)}");
+            EditorGUILayout.SelectableLabel($"  Depth (Z): {FormatValue(size.z)}");
+            float vol = size.x * size.y * size.z;
             EditorGUILayout.SelectableLabel($"  Volume: {FormatVolume(vol)}");
+            EditorGUILayout.LabelField($"  Axes: {_targetObjects[0].name} local rotation", EditorStyles.miniLabel);
+
+            EditorGUILayout.Space(6);
+            DrawResizeTargetControls(b);
         }
         else if (_targetObjects.Count > 0)
         {
@@ -313,6 +380,111 @@ public class MeasureTool : EditorWindow
 
         EditorGUI.indentLevel--;
         return fold;
+    }
+
+    private void DrawResizeTargetControls(OrientedMeasurementBounds measurement)
+    {
+        EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+        EditorGUILayout.LabelField(
+            Content("Set Target Size", "将单个目标物体缩放到指定的实际测量尺寸"),
+            EditorStyles.boldLabel);
+
+        if (_targetObjects.Count != 1)
+        {
+            EditorGUILayout.HelpBox(
+                "Set Target Size requires exactly one target object.",
+                MessageType.Info);
+            EditorGUILayout.EndVertical();
+            return;
+        }
+
+        Vector3 currentSize = measurement.LocalBounds.size;
+        EditorGUILayout.LabelField(
+            $"Current: {FormatValue(currentSize.x)} × {FormatValue(currentSize.y)} × {FormatValue(currentSize.z)}",
+            EditorStyles.miniLabel);
+
+        _targetSizeMeters.x = DrawTargetSizeField("Width (X)", _resizeX, _targetSizeMeters.x, out _resizeX);
+        _targetSizeMeters.y = DrawTargetSizeField("Height (Y)", _resizeY, _targetSizeMeters.y, out _resizeY);
+        _targetSizeMeters.z = DrawTargetSizeField("Depth (Z)", _resizeZ, _targetSizeMeters.z, out _resizeZ);
+
+        bool hasAxis = _resizeX || _resizeY || _resizeZ;
+        bool valid =
+            hasAxis &&
+            (!_resizeX || (_targetSizeMeters.x > 0f && currentSize.x > Mathf.Epsilon)) &&
+            (!_resizeY || (_targetSizeMeters.y > 0f && currentSize.y > Mathf.Epsilon)) &&
+            (!_resizeZ || (_targetSizeMeters.z > 0f && currentSize.z > Mathf.Epsilon));
+
+        EditorGUILayout.BeginHorizontal();
+        if (GUILayout.Button(
+                Content("Use Current Size", "将当前测量尺寸复制到目标尺寸输入框"),
+                GUILayout.Height(24)))
+        {
+            _targetSizeMeters = currentSize;
+        }
+
+        using (new EditorGUI.DisabledScope(!valid))
+        {
+            if (GUILayout.Button(
+                    Content("Apply Size", "调整目标物体的 Transform 缩放，使勾选轴达到指定尺寸；支持撤销"),
+                    GUILayout.Height(24)))
+            {
+                ApplyTargetSize(measurement);
+            }
+        }
+        EditorGUILayout.EndHorizontal();
+
+        if (!hasAxis)
+            EditorGUILayout.HelpBox("Enable at least one axis.", MessageType.Warning);
+        else if (!valid)
+            EditorGUILayout.HelpBox(
+                "Enabled axes require a target value greater than zero and a measurable current size.",
+                MessageType.Warning);
+
+        EditorGUILayout.EndVertical();
+    }
+
+    private float DrawTargetSizeField(string label, bool enabled, float meters, out bool newEnabled)
+    {
+        EditorGUILayout.BeginHorizontal();
+        newEnabled = GUILayout.Toggle(
+            enabled,
+            Content("", $"勾选后修改 {label}；取消勾选则保持该轴当前尺寸"),
+            GUILayout.Width(18));
+
+        float displayValue = ConvertFromMeters(meters);
+        using (new EditorGUI.DisabledScope(!newEnabled))
+        {
+            displayValue = EditorGUILayout.FloatField(
+                Content($"{label} ({GetUnitLabel()})", $"输入目标 {label}，单位为当前显示单位 {GetUnitLabel()}"),
+                displayValue);
+        }
+
+        EditorGUILayout.EndHorizontal();
+        return Mathf.Max(0f, ConvertToMeters(displayValue));
+    }
+
+    private void ApplyTargetSize(OrientedMeasurementBounds measurement)
+    {
+        if (_targetObjects.Count != 1 || _targetObjects[0] == null) return;
+
+        Transform targetTransform = _targetObjects[0].transform;
+        Vector3 currentSize = measurement.LocalBounds.size;
+        Vector3 newScale = targetTransform.localScale;
+
+        if (_resizeX)
+            newScale.x *= _targetSizeMeters.x / currentSize.x;
+        if (_resizeY)
+            newScale.y *= _targetSizeMeters.y / currentSize.y;
+        if (_resizeZ)
+            newScale.z *= _targetSizeMeters.z / currentSize.z;
+
+        Undo.RecordObject(targetTransform, "Set Measured Object Size");
+        targetTransform.localScale = newScale;
+        PrefabUtility.RecordPrefabInstancePropertyModifications(targetTransform);
+        EditorUtility.SetDirty(targetTransform);
+
+        SceneView.RepaintAll();
+        Repaint();
     }
 
     // ── 标尺面板 ──
@@ -326,9 +498,26 @@ public class MeasureTool : EditorWindow
 
         EditorGUILayout.HelpBox(
             "Click in Scene to place start point → click again to place end point.\n" +
+            "Move near a mesh vertex to snap automatically.\n" +
             "Drag arrow handles to adjust  |  Hold V: Unity vertex snapping\n" +
             "Esc: cancel / clear measurement",
             MessageType.Info);
+
+        EditorGUILayout.Space(4);
+
+        EditorGUI.BeginChangeCheck();
+        _rulerVertexSnap = EditorGUILayout.ToggleLeft(
+            Content("Auto Vertex Snap", "自动将标尺点吸附到鼠标附近可见网格的顶点"),
+            _rulerVertexSnap);
+        if (_rulerVertexSnap)
+        {
+            EditorGUI.indentLevel++;
+            _rulerSnapPixelRadius = EditorGUILayout.Slider(
+                Content("Snap Radius", "顶点吸附的检测半径，单位为 Scene 视图像素"),
+                _rulerSnapPixelRadius, 6f, 30f);
+            EditorGUI.indentLevel--;
+        }
+        if (EditorGUI.EndChangeCheck()) SceneView.RepaintAll();
 
         EditorGUILayout.Space(4);
 
@@ -352,7 +541,7 @@ public class MeasureTool : EditorWindow
         EditorGUILayout.Space(4);
         if (GUILayout.Button(Content("Clear Ruler", "清除标尺测量"), GUILayout.Height(24)))
         {
-            _rulerA = null; _rulerB = null; _previewPoint = null;
+            _rulerA = null; _rulerB = null; _previewPoint = null; _previewSnapped = false;
             SceneView.RepaintAll();
         }
 
@@ -375,12 +564,15 @@ public class MeasureTool : EditorWindow
     private void DrawBoundingBoxScene()
     {
         if (_targetObjects.Count == 0) return;
-        if (!TryGetCombinedBounds(_targetObjects, _includeChildren, out Bounds bounds)) return;
+        if (!TryGetCombinedBounds(_targetObjects, _includeChildren, out OrientedMeasurementBounds measurement)) return;
 
         Color prevColor = Handles.color;
+        Matrix4x4 prevMatrix = Handles.matrix;
+        Bounds bounds = measurement.LocalBounds;
 
         if (_showWireframe)
         {
+            Handles.matrix = Matrix4x4.TRS(measurement.Origin, measurement.Rotation, Vector3.one);
             Handles.color = _lineColor;
             Handles.DrawWireCube(bounds.center, bounds.size);
 
@@ -398,12 +590,15 @@ public class MeasureTool : EditorWindow
                 fill, Color.clear);
         }
 
+        Handles.matrix = prevMatrix;
+
         if (_showDimLabels)
         {
             Handles.color = _lineColor;
-            float labelH = bounds.max.y + HandleUtility.GetHandleSize(bounds.center) * 0.15f;
-            Vector3 topCenter = new Vector3(bounds.center.x, bounds.max.y, bounds.center.z);
-            Vector3 labelPos = new Vector3(bounds.center.x, labelH, bounds.center.z);
+            Vector3 topCenter = measurement.ToWorld(
+                new Vector3(bounds.center.x, bounds.max.y, bounds.center.z));
+            float labelOffset = HandleUtility.GetHandleSize(topCenter) * 0.15f;
+            Vector3 labelPos = topCenter + measurement.Rotation * Vector3.up * labelOffset;
 
             string dimText = $"{FormatValue(bounds.size.x)} × {FormatValue(bounds.size.y)} × {FormatValue(bounds.size.z)}";
             DrawSceneLabel(labelPos, dimText);
@@ -413,6 +608,7 @@ public class MeasureTool : EditorWindow
         }
 
         Handles.color = prevColor;
+        Handles.matrix = prevMatrix;
     }
 
     // ── 标尺 Scene 绘制 ──
@@ -434,6 +630,7 @@ public class MeasureTool : EditorWindow
             _rulerA = null;
             _rulerB = null;
             _previewPoint = null;
+            _previewSnapped = false;
             e.Use();
             Repaint();
             return;
@@ -444,7 +641,7 @@ public class MeasureTool : EditorWindow
         {
             if (_rulerA.HasValue && !_rulerB.HasValue)
             {
-                _previewPoint = RaycastPlacementPoint(e.mousePosition, _rulerA.Value.y);
+                _previewPoint = GetRulerPlacementPoint(e.mousePosition, _rulerA.Value.y, out _previewSnapped);
                 SceneView.RepaintAll();
             }
         }
@@ -455,7 +652,7 @@ public class MeasureTool : EditorWindow
             if (HandleUtility.nearestControl == controlId)
             {
                 float planeY = _rulerA.HasValue && !_rulerB.HasValue ? _rulerA.Value.y : 0f;
-                Vector3? hit = RaycastPlacementPoint(e.mousePosition, planeY);
+                Vector3? hit = GetRulerPlacementPoint(e.mousePosition, planeY, out _);
 
                 if (hit.HasValue)
                 {
@@ -465,11 +662,13 @@ public class MeasureTool : EditorWindow
                         _rulerA = hit;
                         _rulerB = null;
                         _previewPoint = null;
+                        _previewSnapped = false;
                     }
                     else if (!_rulerB.HasValue)
                     {
                         _rulerB = hit;
                         _previewPoint = null;
+                        _previewSnapped = false;
                     }
                     e.Use();
                     Repaint();
@@ -490,6 +689,13 @@ public class MeasureTool : EditorWindow
             float previewDist = Vector3.Distance(_rulerA.Value, _previewPoint.Value);
             Vector3 previewLabelPos = _previewPoint.Value + Vector3.up * HandleUtility.GetHandleSize(_previewPoint.Value) * 0.1f;
             DrawSceneLabel(previewLabelPos, FormatValue(previewDist));
+
+            if (_previewSnapped)
+            {
+                Handles.color = Color.cyan;
+                float dotSize = HandleUtility.GetHandleSize(_previewPoint.Value) * 0.06f;
+                Handles.DotHandleCap(0, _previewPoint.Value, Quaternion.identity, dotSize, EventType.Repaint);
+            }
         }
 
         // 测量线
@@ -535,14 +741,26 @@ public class MeasureTool : EditorWindow
         {
             EditorGUI.BeginChangeCheck();
             Vector3 newA = Handles.PositionHandle(_rulerA.Value, Quaternion.identity);
-            if (EditorGUI.EndChangeCheck()) { _rulerA = newA; Repaint(); }
+            if (EditorGUI.EndChangeCheck())
+            {
+                if (_rulerVertexSnap && TryFindNearestVertex(e.mousePosition, out Vector3 snappedA))
+                    newA = snappedA;
+                _rulerA = newA;
+                Repaint();
+            }
         }
 
         if (_rulerB.HasValue)
         {
             EditorGUI.BeginChangeCheck();
             Vector3 newB = Handles.PositionHandle(_rulerB.Value, Quaternion.identity);
-            if (EditorGUI.EndChangeCheck()) { _rulerB = newB; Repaint(); }
+            if (EditorGUI.EndChangeCheck())
+            {
+                if (_rulerVertexSnap && TryFindNearestVertex(e.mousePosition, out Vector3 snappedB))
+                    newB = snappedB;
+                _rulerB = newB;
+                Repaint();
+            }
         }
 
         Handles.color = prevColor;
@@ -557,9 +775,13 @@ public class MeasureTool : EditorWindow
         Handles.BeginGUI();
         string text;
         if (!_rulerA.HasValue)
-            text = "Click in Scene to place start point  |  Hold V for vertex snap";
+            text = _rulerVertexSnap
+                ? "Click in Scene to place start point  |  Auto vertex snap ON"
+                : "Click in Scene to place start point  |  Hold V for vertex snap";
         else if (!_rulerB.HasValue)
-            text = "Click in Scene to place end point  |  Esc to cancel  |  Hold V for vertex snap";
+            text = _previewSnapped
+                ? "Geometry snapped  |  Click to place end point  |  Esc to cancel"
+                : "Click in Scene to place end point  |  Esc to cancel  |  Move near a vertex to snap";
         else
             text = "Measurement complete  |  Click again to restart  |  Esc to clear  |  Drag handles to adjust";
 
@@ -579,15 +801,26 @@ public class MeasureTool : EditorWindow
 
     // ════════════════ 工具函数 ════════════════
 
-    /// <summary>射线检测放置点：优先碰撞体，其次水平面。</summary>
-    private static Vector3? RaycastPlacementPoint(Vector2 mousePos, float planeY)
+    /// <summary>放置标尺点：依次尝试顶点吸附、碰撞体表面和水平面。</summary>
+    private Vector3? GetRulerPlacementPoint(Vector2 mousePos, float planeY, out bool snapped)
     {
+        snapped = false;
+
+        if (_rulerVertexSnap && TryFindNearestVertex(mousePos, out Vector3 vertex))
+        {
+            snapped = true;
+            return vertex;
+        }
+
+        if (HandleUtility.PlaceObject(mousePos, out Vector3 surfacePoint, out _))
+        {
+            snapped = true;
+            return surfacePoint;
+        }
+
         Ray ray = HandleUtility.GUIPointToWorldRay(mousePos);
 
         // 优先检测 Collider
-        if (Physics.Raycast(ray, out RaycastHit hit, 1000f))
-            return hit.point;
-
         // 落到水平面
         Plane plane = new Plane(Vector3.up, new Vector3(0, planeY, 0));
         if (plane.Raycast(ray, out float enter))
@@ -596,13 +829,103 @@ public class MeasureTool : EditorWindow
         return null;
     }
 
-    /// <summary>合并多个物体所有 Renderer 的世界空间包围盒。</summary>
-    private static bool TryGetCombinedBounds(List<GameObject> objects, bool includeChildren, out Bounds bounds)
+    /// <summary>在鼠标附近查找当前可见 Mesh 的最近顶点。</summary>
+    private bool TryFindNearestVertex(Vector2 mousePos, out Vector3 nearestVertex)
     {
-        bounds = default;
+        nearestVertex = default;
+        GameObject picked = HandleUtility.PickGameObject(mousePos, false);
+        if (picked == null) return false;
+
+        float bestDistanceSq = _rulerSnapPixelRadius * _rulerSnapPixelRadius;
+        bool found = false;
+
+        foreach (var filter in picked.GetComponentsInChildren<MeshFilter>())
+        {
+            if (filter.sharedMesh == null) continue;
+            Renderer renderer = filter.GetComponent<Renderer>();
+            if (renderer != null && (!renderer.enabled || !renderer.gameObject.activeInHierarchy)) continue;
+            ConsiderMeshVertices(filter.sharedMesh, filter.transform, mousePos,
+                ref bestDistanceSq, ref nearestVertex, ref found);
+        }
+
+        foreach (var skinned in picked.GetComponentsInChildren<SkinnedMeshRenderer>())
+        {
+            if (skinned.sharedMesh == null || !skinned.enabled || !skinned.gameObject.activeInHierarchy) continue;
+            ConsiderMeshVertices(skinned.sharedMesh, skinned.transform, mousePos,
+                ref bestDistanceSq, ref nearestVertex, ref found);
+        }
+
+        return found;
+    }
+
+    private void ConsiderMeshVertices(
+        Mesh mesh,
+        Transform meshTransform,
+        Vector2 mousePos,
+        ref float bestDistanceSq,
+        ref Vector3 nearestVertex,
+        ref bool found)
+    {
+        _snapVertexBuffer.Clear();
+        try
+        {
+            mesh.GetVertices(_snapVertexBuffer);
+        }
+        catch (UnityException)
+        {
+            return;
+        }
+
+        for (int i = 0; i < _snapVertexBuffer.Count; i++)
+        {
+            Vector3 worldPoint = meshTransform.TransformPoint(_snapVertexBuffer[i]);
+            Vector3 guiPoint = HandleUtility.WorldToGUIPointWithDepth(worldPoint);
+            if (guiPoint.z <= 0f) continue;
+
+            float distanceSq = ((Vector2)guiPoint - mousePos).sqrMagnitude;
+            if (distanceSq > bestDistanceSq) continue;
+
+            bestDistanceSq = distanceSq;
+            nearestVertex = worldPoint;
+            found = true;
+        }
+    }
+
+    private struct OrientedMeasurementBounds
+    {
+        public Bounds LocalBounds;
+        public Vector3 Origin;
+        public Quaternion Rotation;
+
+        public Vector3 ToWorld(Vector3 localPoint)
+        {
+            return Origin + Rotation * localPoint;
+        }
+    }
+
+    private static bool TryGetCombinedBounds(
+        List<GameObject> objects,
+        bool includeChildren,
+        out OrientedMeasurementBounds measurement)
+    {
+        measurement = default;
         if (objects == null || objects.Count == 0) return false;
 
+        GameObject referenceObject = null;
+        foreach (var go in objects)
+        {
+            if (go == null) continue;
+            referenceObject = go;
+            break;
+        }
+        if (referenceObject == null) return false;
+
+        Vector3 origin = referenceObject.transform.position;
+        Quaternion rotation = referenceObject.transform.rotation;
+        Quaternion inverseRotation = Quaternion.Inverse(rotation);
+        Bounds localBounds = default;
         bool found = false;
+
         foreach (var go in objects)
         {
             if (go == null) continue;
@@ -613,36 +936,82 @@ public class MeasureTool : EditorWindow
 
             foreach (var r in renderers)
             {
-                if (!found)
+                if (r == null) continue;
+
+                Bounds rendererBounds = r.localBounds;
+                Vector3 center = rendererBounds.center;
+                Vector3 extents = rendererBounds.extents;
+
+                for (int corner = 0; corner < 8; corner++)
                 {
-                    bounds = r.bounds;
-                    found = true;
-                }
-                else
-                {
-                    bounds.Encapsulate(r.bounds);
+                    Vector3 localCorner = center + new Vector3(
+                        (corner & 1) == 0 ? -extents.x : extents.x,
+                        (corner & 2) == 0 ? -extents.y : extents.y,
+                        (corner & 4) == 0 ? -extents.z : extents.z);
+                    Vector3 worldCorner = r.transform.TransformPoint(localCorner);
+                    Vector3 measurementPoint = inverseRotation * (worldCorner - origin);
+
+                    if (!found)
+                    {
+                        localBounds = new Bounds(measurementPoint, Vector3.zero);
+                        found = true;
+                    }
+                    else
+                    {
+                        localBounds.Encapsulate(measurementPoint);
+                    }
                 }
             }
         }
+
+        if (found)
+        {
+            measurement = new OrientedMeasurementBounds
+            {
+                LocalBounds = localBounds,
+                Origin = origin,
+                Rotation = rotation,
+            };
+        }
+
         return found;
     }
 
-    /// <summary>根据当前单位格式化距离值。</summary>
-    private string FormatValue(float meters)
+    private float ConvertFromMeters(float meters)
     {
-        float converted = _unit switch
+        return _unit switch
         {
             DisplayUnit.Centimeters => meters * 100f,
             DisplayUnit.Millimeters => meters * 1000f,
             _ => meters,
         };
+    }
 
-        string suffix = _unit switch
+    private float ConvertToMeters(float value)
+    {
+        return _unit switch
         {
-            DisplayUnit.Centimeters => " cm",
-            DisplayUnit.Millimeters => " mm",
-            _ => " m",
+            DisplayUnit.Centimeters => value / 100f,
+            DisplayUnit.Millimeters => value / 1000f,
+            _ => value,
         };
+    }
+
+    private string GetUnitLabel()
+    {
+        return _unit switch
+        {
+            DisplayUnit.Centimeters => "cm",
+            DisplayUnit.Millimeters => "mm",
+            _ => "m",
+        };
+    }
+
+    /// <summary>根据当前单位格式化距离值。</summary>
+    private string FormatValue(float meters)
+    {
+        float converted = ConvertFromMeters(meters);
+        string suffix = $" {GetUnitLabel()}";
 
         // 小数值多显示几位小数
         float abs = Mathf.Abs(converted);
