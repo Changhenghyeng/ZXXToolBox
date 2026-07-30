@@ -47,7 +47,7 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.4.0
 | **SLGMapTileCutter** | 沙盘地图地块切割，支持内描边渲染 | 工具箱面板 |
 | **SLGTerrainBaker** | 沙盘地形烘焙，合成贴图生成 | 工具箱面板 |
 | **ShadowBakerTool** | 阴影贴图烘焙 + 贴花生成，含 Blur/Silhouette Shader | 工具箱面板 |
-| **ShadowCastOffTool** | 批量关闭选中物体的阴影投射 | 工具箱面板 / `GameObject/Cast Shadows OFF` |
+| **ShadowCastOffTool** | 批量关闭选中物体的阴影投射 | 工具箱面板 |
 | **TransparentScreenshot** | 透明背景截图 + 粒子序列渲染 | 工具箱面板 / `Ctrl+Shift+X` |
 
 ### 🏃 运行时组件
