@@ -107,15 +107,15 @@ internal sealed class BuildingCardAtlasPanel
         EditorGUILayout.BeginHorizontal();
         GUI.enabled = prefabs.Count > 0;
         if (GUILayout.Button(new GUIContent("Build / Update Atlas", "仅合并当前槽中的 Prefab；已有同名图集会原地更新。"), GUILayout.Height(24f)))
-            Build(outputFolder);
+            EditorApplication.delayCall += () => Build(outputFolder);
         GUI.enabled = true;
         EditorGUILayout.EndHorizontal();
         EditorGUILayout.BeginHorizontal();
         GUI.enabled = prefabs.Count > 0;
         if (GUILayout.Button(new GUIContent("Use Existing Atlas", "直接切换到已经生成的图集材质，不重新生成图集。"), GUILayout.Height(22f)))
-            UseExistingAtlas(outputFolder);
+            EditorApplication.delayCall += () => UseExistingAtlas(outputFolder);
         if (GUILayout.Button(new GUIContent("Restore Standalone", "把当前槽中的 Prefab 恢复为各自原始材质和 UV0。"), GUILayout.Height(24f)))
-            Restore();
+            EditorApplication.delayCall += Restore;
         GUI.enabled = true;
         EditorGUILayout.EndHorizontal();
         EditorGUILayout.EndVertical();

@@ -10,6 +10,7 @@ Shader "Custom/ToonOutline"
         [NoScaleOffset] _MetallicGlossMap ("Metallic Gloss Map (R = Metallic, A = Smoothness)", 2D) = "white" {}
         _Metallic ("Metallic Scale", Range(0, 1)) = 1
         _Smoothness ("Smoothness Scale", Range(0, 1)) = 1
+        [Toggle] _KeepMetallic ("Keep Metallic In Toon", Float) = 0
 
         [Header(Toon Diffuse)]
         _MiddleColor ("Middle Color (A = Intensity)", Color) = (1,1,1,0.75)
@@ -95,6 +96,7 @@ Shader "Custom/ToonOutline"
                 half _NormalScale;
                 half _Metallic;
                 half _Smoothness;
+                half _KeepMetallic;
                 half4 _MiddleColor;
                 half _MiddleRange;
                 half _MiddleEdge;
@@ -351,27 +353,50 @@ Shader "Custom/ToonOutline"
                 return color;
             }
 
-            half ToonSpecularMask(half highlight)
+            void GetSmoothnessAdjustedToonSpecular(
+                half smoothness,
+                out half specularToonStrength,
+                out half specularRange)
             {
-                half threshold = 1.0h - saturate(_SpecularThreshold);
+                half smoothnessFactor = saturate(smoothness);
+                specularToonStrength = saturate(_SpecularToon) * smoothnessFactor;
+                specularRange = lerp(1.0h, saturate(_SpecularThreshold), smoothnessFactor);
+            }
+
+            half ToonSpecularMask(half highlight, half specularRange)
+            {
+                half threshold = 1.0h - saturate(specularRange);
                 half edge = max(_SpecularEdge, 0.001h);
                 return smoothstep(threshold - edge * 0.5h, threshold + edge * 0.5h, saturate(highlight));
             }
 
-            half3 EvaluatePBRToonSpecular(half3 pbrSpecular)
+            half3 EvaluatePBRToonSpecular(half3 pbrSpecular, half smoothness)
             {
+                half specularToonStrength;
+                half specularRange;
+                GetSmoothnessAdjustedToonSpecular(smoothness, specularToonStrength, specularRange);
+
                 half luma = max(max(pbrSpecular.r, pbrSpecular.g), pbrSpecular.b);
-                half mask = ToonSpecularMask(luma);
+                half mask = ToonSpecularMask(luma, specularRange);
                 half3 toonSpecular = pbrSpecular * mask;
-                return lerp(pbrSpecular, toonSpecular, saturate(_SpecularToon));
+                return lerp(pbrSpecular, toonSpecular, specularToonStrength);
             }
 
-            half3 EvaluatePureToonSpecular(half3 normalWS, half3 viewDirectionWS, half3 lightDirectionWS, half3 albedo)
+            half3 EvaluatePureToonSpecular(
+                half3 normalWS,
+                half3 viewDirectionWS,
+                half3 lightDirectionWS,
+                half3 albedo,
+                half smoothness)
             {
+                half specularToonStrength;
+                half specularRange;
+                GetSmoothnessAdjustedToonSpecular(smoothness, specularToonStrength, specularRange);
+
                 half3 halfDir = SafeNormalize(lightDirectionWS + viewDirectionWS);
                 half spec = saturate(dot(normalWS, halfDir));
                 spec = pow(spec, 32.0h);
-                return albedo * ToonSpecularMask(spec) * saturate(_SpecularToon);
+                return albedo * ToonSpecularMask(spec, specularRange) * specularToonStrength;
             }
 
             half4 frag(Varyings IN) : SV_Target
@@ -402,15 +427,30 @@ Shader "Custom/ToonOutline"
 
                 // PBR-toon path keeps the BRDF diffuse/specular split; fake env is added after banding so middle/dark colors do not cover it.
                 half3 toonBase = ApplyToonLayers(lighting.diffuse, surfaceData.albedo, lighting.ndlRaw, metallic) + fakeEnv;
-                half3 toonSpec = EvaluatePBRToonSpecular(lighting.specular);
+                half3 toonSpec = EvaluatePBRToonSpecular(lighting.specular, smoothness);
                 half3 pbrToonColor = toonBase + toonSpec + surfaceData.emission;
 
-                // Pure-toon path drops PBR metallic/specular/reflection and uses albedo-based lighting plus stylized specular.
+                // Pure-toon path uses albedo-based bands; metallic mode can retain the physical reflection response.
+                half keepMetallic = saturate(_KeepMetallic);
                 half3 pureDiffuse = surfaceData.albedo;
                 half3 additionalToonFill = lighting.additionalToonFill * saturate(_AdditionalLightToonFill);
-                half3 pureToonBase = ApplyToonLayers(pureDiffuse, surfaceData.albedo, lighting.ndlRaw, 0.0h) + fakeEnv + additionalToonFill;
-                half3 pureToonSpec = EvaluatePureToonSpecular(normalWS, viewDirWS, lighting.mainLightDirection, surfaceData.albedo);
-                half3 pureToonColor = pureToonBase + pureToonSpec + surfaceData.emission;
+                half3 pureToonDiffuse = ApplyToonLayers(pureDiffuse, surfaceData.albedo, lighting.ndlRaw, 0.0h) + additionalToonFill;
+
+                // In metallic mode, keep the toon bands but reduce their diffuse contribution
+                // using the metallic workflow. Metallic surfaces get their color primarily from reflections.
+                half toonDiffuseWeight = lerp(1.0h, 1.0h - metallic, keepMetallic);
+                half3 pureToonBase = pureToonDiffuse * toonDiffuseWeight + fakeEnv;
+                half3 pureToonSpec = EvaluatePureToonSpecular(
+                    normalWS,
+                    viewDirWS,
+                    lighting.mainLightDirection,
+                    surfaceData.albedo,
+                    smoothness);
+
+                // PBR specular already contains the metallic/smoothness response from the packed map,
+                // so it must not be multiplied by metallic a second time.
+                half3 pureSpecular = lerp(pureToonSpec, lighting.specular, keepMetallic);
+                half3 pureToonColor = pureToonBase + pureSpecular + surfaceData.emission;
 
                 half pbrToToon = saturate(_ToonStrength * 2.0h);
                 half toonToPure = saturate((_ToonStrength - 0.5h) * 2.0h);
@@ -454,6 +494,7 @@ Shader "Custom/ToonOutline"
                 half _NormalScale;
                 half _Metallic;
                 half _Smoothness;
+                half _KeepMetallic;
                 half4 _MiddleColor;
                 half _MiddleRange;
                 half _MiddleEdge;
@@ -549,6 +590,7 @@ Shader "Custom/ToonOutline"
                 half _NormalScale;
                 half _Metallic;
                 half _Smoothness;
+                half _KeepMetallic;
                 half4 _MiddleColor;
                 half _MiddleRange;
                 half _MiddleEdge;
@@ -625,6 +667,7 @@ Shader "Custom/ToonOutline"
                 half _NormalScale;
                 half _Metallic;
                 half _Smoothness;
+                half _KeepMetallic;
                 half4 _MiddleColor;
                 half _MiddleRange;
                 half _MiddleEdge;
@@ -707,6 +750,7 @@ Shader "Custom/ToonOutline"
                 half _NormalScale;
                 half _Metallic;
                 half _Smoothness;
+                half _KeepMetallic;
                 half4 _MiddleColor;
                 half _MiddleRange;
                 half _MiddleEdge;

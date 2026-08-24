@@ -14,12 +14,14 @@ using FogOfWarTool.Editor;
 using DayChangeTransitionTool.Editor;
 using SLGTerrainBakerTool.Editor;
 using SLGMapTileCutter.Editor;
+using ZXXTools.FBXMeshEditor;
 
 public class ZXXToolBox : EditorWindow
 {
     // ── Tool registry ──
     private static readonly (string id, string defaultDesc, string category, Action action)[] _registry =
     {
+        ("FBX Mesh Editor",      "在 Unity 场景中直接选择并移动静态模型顶点，支持 Undo；当前为 V1 第一阶段", "资源制作", FBXMeshEditorWindow.Open),
         ("SLG Map Tile Cutter", "根据线框在模型表面生成可编辑的独立 SLG 地块 Mesh", "场景搭建", SLGMapTileCutterWindow.Open),
         ("ProcGen",              "在模型表面按规则散布预制体",                       "场景搭建",   ProcGenWindow.Open),
         ("Path Builder",         "沿路径生成墙体、山脉散布和可变宽河流",              "场景搭建",   PathBuilderWindow.ShowWindow),
@@ -31,6 +33,8 @@ public class ZXXToolBox : EditorWindow
         ("Fog Of War Tool",      "战争迷雾 RGBA Mask：R 探索 / G 选中 / B 溶解边缘", "场景搭建",   FogOfWarToolWindow.Open),
         ("Day Change Transition","SLG 跨天短夜晚过渡：一键创建 Night Volume + 主光过渡控制", "场景搭建",   DayChangeTransitionToolWindow.Open),
         ("Outline",              "Mesh 外描边：平滑法线烘焙 + Outline Shader",    "视觉烘焙",   OutlineToolWindow.Open),
+        ("Toon Material Converter", "ToonOutline 普通/打包 Shader 双向转换，自动输出 BC 与 N_M_R 贴图", "资源制作", ToonMaterialConverterWindow.Open),
+        ("Generated Assets Manager", "按工具、生命周期和资源类型整理、审计并安全清理 Generated 文件", "检查与输出", OpenGeneratedAssetsManager),
         ("Light Cookie Scroller","灯光 Cookie 纹理滚动动画：云影/焦散/斑驳光影流动",  "视觉烘焙",   AddLightCookieScrollerToSelected),
         ("Batch Replacer",                "在 Hierarchy 中批量替换场景物体",         "批量操作",   PrefabBatchReplacer.ShowWindow),
         ("Batch Rename Tool",             "批量重命名工具",                         "批量操作",   BatchRenameTool.Open),
@@ -87,6 +91,24 @@ public class ZXXToolBox : EditorWindow
     {
         return TypeCache.GetTypesDerivedFrom<MonoBehaviour>()
             .FirstOrDefault(type => type.Name == "LightCookieScroller");
+    }
+
+    private static void OpenGeneratedAssetsManager()
+    {
+        Type type = TypeCache.GetTypesDerivedFrom<EditorWindow>()
+            .FirstOrDefault(candidate => candidate.FullName
+                == "ZXXTools.GeneratedAssets.GeneratedAssetsManagerWindow");
+        MethodInfo openMethod = type?.GetMethod(
+            "Open", BindingFlags.Public | BindingFlags.Static);
+        if (openMethod != null)
+        {
+            openMethod.Invoke(null, null);
+            return;
+        }
+        EditorUtility.DisplayDialog(
+            "Generated Assets Manager",
+            "管理器脚本尚未完成编译，请等待 Unity 编译结束后重试。",
+            "确定");
     }
 
     /// <summary>

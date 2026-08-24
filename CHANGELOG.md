@@ -1,5 +1,28 @@
 # Changelog
 
+## [v0.5.0] — 2026-08-24
+
+### 新增工具
+
+- **FBXMeshEditor**：FBX 网格编辑器，场景中直接选择并移动静态模型顶点，支持 Undo（V1 第一阶段）
+- **ToonMaterialConverter**：ToonOutline 普通/打包 Shader 双向转换，自动输出 BC 与 N_M_R 贴图
+- **GeneratedAssetsManager**：按工具、生命周期和资源类型整理、审计并清理 Assets/Generated 产物
+
+### 新增 Shader
+
+- **ToonOutline_URP_Packed**：卡通描边打包版（BC + N_M_R 合并贴图）
+- **ToonTextureConversion**：ToonOutline 贴图转换（Hidden 辅助 Shader）
+
+### 变更
+
+- **ToonOutline_URP**：从 OutlineTool 移至通用 Shaders/ 目录
+- **PathBuilder**：新增山脉/河流生成与贴花系统（MountainDecalSet、PathBuilderAuthoringStorage），Spline 系统重构
+- **BuildingCardTool**：引入 Spine 骨骼动画支持与预览，图集构建改为延迟调用
+- **SLGMapTileCutter**：产物输出目录结构优化（分类到 Models/Materials/Textures/Settings 子目录）
+- **ZXXToolBox**：面板注册 3 个新工具
+
+---
+
 ## [v0.4.0] — 2026-07-30
 
 ### 新增

@@ -11,12 +11,101 @@ namespace ZXXTools.PathBuilder
         River
     }
 
+    public enum PathTangentMode
+    {
+        Continuous,
+        Mirrored,
+        Broken,
+        Auto,
+        Linear
+    }
+
+    public enum RiverHeightMode
+    {
+        SplineHeight,
+        FollowSurface
+    }
+
+    public enum MountainHeightMode
+    {
+        SplineHeight,
+        FollowSurface
+    }
+
+    public enum RibbonPathPreset
+    {
+        River,
+        NaturalRoad,
+        RegularRoad
+    }
+
+    public enum PathOutputType
+    {
+        Scatter,
+        ProfileExtrude,
+        MeshDeform,
+        PrefabPlace
+    }
+
+    public enum PathForwardAxis
+    {
+        X,
+        Z
+    }
+
+    public enum PathPivotAlignment
+    {
+        SourcePivot,
+        BoundsCenter,
+        BoundsBottomCenter
+    }
+
+    public enum PathMeshPartMode
+    {
+        Deform,
+        Place,
+        Ignore
+    }
+
+    public enum PathCornerHandling
+    {
+        Off,
+        CompressInner
+    }
+
+    public enum MountainSourceType
+    {
+        Prefab,
+        SpriteCard,
+        TextureCard
+    }
+
+    public enum MountainCardPivot
+    {
+        BottomCenter,
+        SpritePivot
+    }
+
+    public enum MountainCardSortingMode
+    {
+        AccurateBackToFront,
+        FastByTexture
+    }
+
+    public enum MountainBakeOutput
+    {
+        GroundDecal,
+        CameraFacingCards
+    }
+
     [Serializable]
     public sealed class PathKnot
     {
         public Vector3 position;
         public Vector3 tangentIn = Vector3.left * 2f;
         public Vector3 tangentOut = Vector3.right * 2f;
+        public PathTangentMode tangentMode = PathTangentMode.Continuous;
+        [HideInInspector]
         public bool brokenTangents;
         [Min(0.01f)] public float width = 4f;
 
@@ -36,6 +125,7 @@ namespace ZXXTools.PathBuilder
                 position = position,
                 tangentIn = tangentIn,
                 tangentOut = tangentOut,
+                tangentMode = tangentMode,
                 brokenTangents = brokenTangents,
                 width = width
             };
@@ -43,16 +133,88 @@ namespace ZXXTools.PathBuilder
     }
 
     [Serializable]
+    public sealed class MountainSourceEntry
+    {
+        public MountainSourceType sourceType = MountainSourceType.Prefab;
+        public GameObject prefab;
+        public Sprite sprite;
+        public Texture2D texture;
+        [Min(0f)] public float weight = 1f;
+    }
+
+    // Kept only so scenes created before the unified source list can migrate
+    // their serialized prefab entries without losing data.
+    [Serializable]
     public sealed class MountainPrefabEntry
     {
         public GameObject prefab;
         [Min(0f)] public float weight = 1f;
     }
 
+    [Serializable]
+    public sealed class PathEdgePrefabEntry
+    {
+        public GameObject prefab;
+        [Min(0f)] public float weight = 1f;
+    }
+
+    [Serializable]
+    public sealed class PathMeshPartSetting
+    {
+        public string transformPath;
+        public PathMeshPartMode mode = PathMeshPartMode.Deform;
+        [Range(1, 32)] public int segments = 1;
+    }
+
+    [Serializable]
+    public sealed class PathOutputLayer
+    {
+        public string name = "Output";
+        public bool enabled = true;
+        public PathOutputType type = PathOutputType.ProfileExtrude;
+
+        [Header("Mesh Deform")]
+        public GameObject sourcePrefab;
+        [HideInInspector] public string sourceSceneObjectGlobalId;
+        public PathForwardAxis forwardAxis = PathForwardAxis.Z;
+        [HideInInspector] public string segmentMeshPath;
+        public List<PathMeshPartSetting> meshParts =
+            new List<PathMeshPartSetting>();
+        [Min(0f)] public float startSegmentOffset;
+        [Min(0f)] public float endSegmentOffset;
+        public bool repeat = true;
+        public bool fitLastSegment = true;
+        public float spacing;
+        public PathCornerHandling cornerHandling =
+            PathCornerHandling.CompressInner;
+        [Range(0.5f, 0.95f)] public float cornerSafety = 0.85f;
+        public bool useRootPosition;
+        public PathPivotAlignment pivotAlignment =
+            PathPivotAlignment.BoundsBottomCenter;
+        public Vector3 positionOffset;
+        public Vector3 rotationOffset;
+        public Vector3 scale = Vector3.one;
+        public bool updateCollider = true;
+    }
+
     public sealed class PathSpline : ScriptableObject
     {
-        [SerializeField, HideInInspector]
+        public const string DefaultGeneratedAssetFolder =
+            "Assets/Generated/PathBuilder/Baked/Models";
+        public const string DefaultPrefabOutputFolder =
+            "Assets/Generated/PathBuilder/Baked/Prefabs";
+
+        [NonSerialized]
         private Transform anchor;
+
+        [NonSerialized]
+        private Camera mountainFacingCamera;
+
+        [SerializeField, HideInInspector]
+        private string sessionId;
+
+        [SerializeField, HideInInspector]
+        private string mountainFacingCameraGlobalId;
 
         [Header("Spline")]
         public PathBuildMode mode = PathBuildMode.Mountain;
@@ -61,6 +223,10 @@ namespace ZXXTools.PathBuilder
         [Range(4, 64)] public int samplesPerCurve = 24;
         public List<PathKnot> knots = new List<PathKnot>();
 
+        [Header("Outputs")]
+        public List<PathOutputLayer> outputs = new List<PathOutputLayer>();
+        [SerializeField, HideInInspector] private int outputStackVersion;
+
         [Header("Surface")]
         public bool projectToSurface;
         public LayerMask surfaceMask = ~0;
@@ -68,25 +234,102 @@ namespace ZXXTools.PathBuilder
         public float surfaceOffset = 0.02f;
 
         [Header("Mountain")]
-        public List<MountainPrefabEntry> mountainPrefabs = new List<MountainPrefabEntry>();
+        public MountainDecalSet mountainDecalSet;
+        public List<MountainSourceEntry> mountainSources =
+            new List<MountainSourceEntry>();
+        [SerializeField, HideInInspector]
+        private List<MountainPrefabEntry> mountainPrefabs =
+            new List<MountainPrefabEntry>();
         public int randomSeed = 12345;
+        [Min(0.05f)] public float mountainSpacing = 3f;
+        [Range(0f, 1f)] public float mountainDistributionUniformity = 0f;
+        [SerializeField, HideInInspector]
+        private float mountainDistributionRandomness = 1f;
+        [SerializeField, HideInInspector]
+        private int mountainDistributionVersion;
+        [HideInInspector]
         public Vector2 spacingRange = new Vector2(2f, 4f);
         [Min(0f)] public float brushWidth = 2f;
-        [Range(0f, 1f)] public float density = 1f;
+        [HideInInspector, Range(0f, 1f)] public float density = 1f;
+        public bool uniformScale = true;
+        public Vector2 uniformScaleRange = new Vector2(0.85f, 1.15f);
         public Vector2 horizontalScaleRange = new Vector2(0.85f, 1.15f);
         public Vector2 verticalScaleRange = new Vector2(0.85f, 1.15f);
         public Vector2 yawRange = new Vector2(0f, 360f);
         public bool alignToSpline;
+        public bool useSplineWidth = true;
+        public MountainHeightMode mountainHeightMode =
+            MountainHeightMode.SplineHeight;
+
+        [Header("Mountain Cards")]
+        public Material mountainCardMaterial;
+        [Min(0.01f)] public float mountainCardHeight = 8f;
+        public MountainCardPivot mountainCardPivot =
+            MountainCardPivot.BottomCenter;
+        public bool mountainCardRandomFlip = true;
+        public Color mountainCardColor = Color.white;
+        public MountainCardSortingMode mountainCardSortingMode =
+            MountainCardSortingMode.AccurateBackToFront;
+        public int mountainCardSortingLayerId;
+        public int mountainCardSortingOrder;
+        public int mountainCardRenderQueue = 3000;
+
+        [Header("Mountain Bake")]
+        public MountainBakeOutput mountainBakeOutput =
+            MountainBakeOutput.GroundDecal;
+        public bool keepMountainAuthoringAfterBake = true;
+        public LayerMask mountainDecalSurfaceMask = ~0;
+        [Min(0.1f)] public float mountainDecalProjectionDistance = 2000f;
+        [HideInInspector, Min(0.1f)]
+        public float mountainDecalCellSize = 2f;
+        [Min(0f)] public float mountainDecalSurfaceOffset = 0.02f;
+
+        [Header("Output Paths")]
+        public string generatedAssetOutputFolder =
+            DefaultGeneratedAssetFolder;
+        public string prefabOutputFolder = DefaultPrefabOutputFolder;
 
         [Header("River")]
+        public RibbonPathPreset ribbonPreset = RibbonPathPreset.River;
         public Material riverMaterial;
+        public RiverHeightMode riverHeightMode = RiverHeightMode.SplineHeight;
         [Min(0.05f)] public float riverSegmentLength = 0.75f;
+        [Min(0.01f)] public float riverUvLength = 1f;
         [FormerlySerializedAs("uvMetersPerTile")]
+        [HideInInspector]
         [Min(0.01f)] public float riverUvRepeatLength = 4f;
         public bool generateCollider;
 
-        [SerializeField, HideInInspector]
+        [Header("Ribbon Edge Shape")]
+        public bool edgeNoiseEnabled;
+        public int edgeNoiseSeed = 24680;
+        [Min(0f)] public float leftEdgeNoiseAmplitude = 0.25f;
+        [Min(0f)] public float rightEdgeNoiseAmplitude = 0.25f;
+        [Min(0.1f)] public float edgeNoiseWavelength = 8f;
+
+        [Header("Ribbon Edge Objects")]
+        public bool generateEdgeObjects;
+        public bool generateLeftEdge = true;
+        public bool generateRightEdge = true;
+        public List<PathEdgePrefabEntry> edgePrefabs =
+            new List<PathEdgePrefabEntry>();
+        public int edgeObjectSeed = 13579;
+        public Vector2 edgeObjectSpacingRange = new Vector2(2f, 4f);
+        [Range(0f, 1f)] public float edgeObjectDensity = 1f;
+        public Vector2 edgeObjectScaleRange = new Vector2(0.85f, 1.15f);
+        public Vector2 edgeObjectYawRange = new Vector2(-20f, 20f);
+        public float edgeObjectOutwardOffset;
+        public float edgeObjectHeightOffset;
+        public bool edgeObjectsAlignToPath = true;
+        public bool edgeObjectsProjectToSurface = true;
+
+        [NonSerialized]
         private Transform generatedRoot;
+
+        public string SessionId
+        {
+            get { return sessionId; }
+        }
 
         public Transform GeneratedRoot
         {
@@ -98,6 +341,25 @@ namespace ZXXTools.PathBuilder
         {
             get { return anchor; }
             set { anchor = value; }
+        }
+
+        public Camera MountainFacingCamera
+        {
+            get { return mountainFacingCamera; }
+            set { mountainFacingCamera = value; }
+        }
+
+        public string MountainFacingCameraGlobalId
+        {
+            get { return mountainFacingCameraGlobalId; }
+            set { mountainFacingCameraGlobalId = value; }
+        }
+
+        public string EnsureSessionId()
+        {
+            if (string.IsNullOrEmpty(sessionId))
+                sessionId = Guid.NewGuid().ToString("N");
+            return sessionId;
         }
 
         public int SegmentCount
@@ -115,28 +377,231 @@ namespace ZXXTools.PathBuilder
             samplesPerCurve = Mathf.Clamp(samplesPerCurve, 4, 64);
             rayHeight = Mathf.Max(0.1f, rayHeight);
             riverSegmentLength = Mathf.Max(0.05f, riverSegmentLength);
+            riverUvLength = Mathf.Max(0.01f, riverUvLength);
             riverUvRepeatLength = Mathf.Max(0.01f, riverUvRepeatLength);
+            leftEdgeNoiseAmplitude = Mathf.Max(0f, leftEdgeNoiseAmplitude);
+            rightEdgeNoiseAmplitude = Mathf.Max(0f, rightEdgeNoiseAmplitude);
+            edgeNoiseWavelength = Mathf.Max(0.1f, edgeNoiseWavelength);
+            edgeObjectDensity = Mathf.Clamp01(edgeObjectDensity);
+            edgeObjectSpacingRange =
+                OrderedPositiveRange(edgeObjectSpacingRange, 0.05f);
+            edgeObjectScaleRange =
+                OrderedPositiveRange(edgeObjectScaleRange, 0.01f);
+            mountainCardHeight = Mathf.Max(0.01f, mountainCardHeight);
+            mountainCardSortingOrder = Mathf.Clamp(
+                mountainCardSortingOrder,
+                short.MinValue,
+                short.MaxValue);
+            mountainCardRenderQueue = Mathf.Clamp(
+                mountainCardRenderQueue,
+                2501,
+                3999);
+            mountainDecalProjectionDistance = Mathf.Max(
+                0.1f,
+                mountainDecalProjectionDistance);
+            mountainDecalCellSize = Mathf.Max(
+                0.1f,
+                mountainDecalCellSize);
+            mountainDecalSurfaceOffset = Mathf.Max(
+                0f,
+                mountainDecalSurfaceOffset);
             brushWidth = Mathf.Max(0f, brushWidth);
             density = Mathf.Clamp01(density);
             spacingRange = OrderedPositiveRange(spacingRange, 0.05f);
+            MigrateMountainDistribution();
+            mountainSpacing = Mathf.Max(0.05f, mountainSpacing);
+            mountainDistributionUniformity = Mathf.Clamp01(
+                mountainDistributionUniformity);
+            uniformScaleRange = OrderedPositiveRange(uniformScaleRange, 0.01f);
             horizontalScaleRange = OrderedPositiveRange(horizontalScaleRange, 0.01f);
             verticalScaleRange = OrderedPositiveRange(verticalScaleRange, 0.01f);
 
             if (knots == null)
                 knots = new List<PathKnot>();
+            if (edgePrefabs == null)
+                edgePrefabs = new List<PathEdgePrefabEntry>();
+            if (mountainSources == null)
+                mountainSources = new List<MountainSourceEntry>();
+            EnsureOutputStack();
+            MigrateLegacyMountainSources();
 
             for (int i = 0; i < knots.Count; i++)
             {
                 if (knots[i] == null)
                     knots[i] = new PathKnot();
+                MigrateLegacyTangentMode(knots[i]);
                 knots[i].width = Mathf.Max(0.01f, knots[i].width);
             }
         }
 
         public void EnsureDefaults()
         {
+            if (string.IsNullOrWhiteSpace(generatedAssetOutputFolder))
+            {
+                generatedAssetOutputFolder = DefaultGeneratedAssetFolder;
+            }
+            if (string.IsNullOrWhiteSpace(prefabOutputFolder))
+                prefabOutputFolder = DefaultPrefabOutputFolder;
             if (knots == null)
                 knots = new List<PathKnot>();
+            if (edgePrefabs == null)
+                edgePrefabs = new List<PathEdgePrefabEntry>();
+            if (mountainSources == null)
+                mountainSources = new List<MountainSourceEntry>();
+            EnsureOutputStack();
+            MigrateLegacyMountainSources();
+            spacingRange = OrderedPositiveRange(spacingRange, 0.05f);
+            MigrateMountainDistribution();
+            mountainSpacing = Mathf.Max(0.05f, mountainSpacing);
+            mountainDistributionUniformity = Mathf.Clamp01(
+                mountainDistributionUniformity);
+            for (int i = 0; i < knots.Count; i++)
+            {
+                if (knots[i] == null)
+                    knots[i] = new PathKnot();
+                MigrateLegacyTangentMode(knots[i]);
+            }
+            riverUvLength = Mathf.Max(0.01f, riverUvLength);
+            edgeNoiseWavelength = Mathf.Max(0.1f, edgeNoiseWavelength);
+            edgeObjectSpacingRange =
+                OrderedPositiveRange(edgeObjectSpacingRange, 0.05f);
+            edgeObjectScaleRange =
+                OrderedPositiveRange(edgeObjectScaleRange, 0.01f);
+            mountainDecalProjectionDistance = Mathf.Max(
+                0.1f,
+                mountainDecalProjectionDistance);
+            mountainDecalCellSize = Mathf.Max(
+                0.1f,
+                mountainDecalCellSize);
+            mountainDecalSurfaceOffset = Mathf.Max(
+                0f,
+                mountainDecalSurfaceOffset);
+        }
+
+        public void EnsureOutputStack()
+        {
+            if (outputs == null)
+                outputs = new List<PathOutputLayer>();
+            if (outputStackVersion <= 0 && outputs.Count == 0)
+            {
+                outputs.Add(new PathOutputLayer
+                {
+                    name = mode == PathBuildMode.Mountain
+                        ? "Mountain Scatter"
+                        : "River / Road Surface",
+                    type = mode == PathBuildMode.Mountain
+                        ? PathOutputType.Scatter
+                        : PathOutputType.ProfileExtrude
+                });
+            }
+            for (int i = 0; i < outputs.Count; i++)
+            {
+                if (outputs[i] == null)
+                    outputs[i] = new PathOutputLayer();
+                if (outputs[i].meshParts == null)
+                {
+                    outputs[i].meshParts =
+                        new List<PathMeshPartSetting>();
+                }
+                for (int partIndex = 0;
+                    partIndex < outputs[i].meshParts.Count;
+                    partIndex++)
+                {
+                    PathMeshPartSetting part = outputs[i].meshParts[partIndex];
+                    if (part != null)
+                        part.segments = Mathf.Clamp(part.segments, 1, 32);
+                }
+                if (outputStackVersion < 3
+                    && outputs[i].type == PathOutputType.MeshDeform)
+                {
+                    outputs[i].pivotAlignment =
+                        PathPivotAlignment.BoundsBottomCenter;
+                }
+                if (outputStackVersion < 4
+                    && outputs[i].type == PathOutputType.MeshDeform)
+                {
+                    outputs[i].cornerHandling =
+                        PathCornerHandling.CompressInner;
+                    outputs[i].cornerSafety = 0.85f;
+                }
+                outputs[i].startSegmentOffset = Mathf.Max(
+                    0f, outputs[i].startSegmentOffset);
+                outputs[i].endSegmentOffset = Mathf.Max(
+                    0f, outputs[i].endSegmentOffset);
+                outputs[i].cornerSafety = Mathf.Clamp(
+                    outputs[i].cornerSafety, 0.5f, 0.95f);
+                outputs[i].scale.x = Mathf.Max(0.0001f, outputs[i].scale.x);
+                outputs[i].scale.y = Mathf.Max(0.0001f, outputs[i].scale.y);
+                outputs[i].scale.z = Mathf.Max(0.0001f, outputs[i].scale.z);
+            }
+            outputStackVersion = 4;
+        }
+
+        private void MigrateMountainDistribution()
+        {
+            if (mountainDistributionVersion >= 2)
+                return;
+
+            if (mountainDistributionVersion < 1)
+            {
+                float minimum = Mathf.Max(0.05f, spacingRange.x);
+                float maximum = Mathf.Max(minimum, spacingRange.y);
+                float average = (minimum + maximum) * 0.5f;
+                float legacyDensity = Mathf.Clamp(density, 0.01f, 1f);
+                mountainSpacing = average / legacyDensity;
+                mountainDistributionRandomness = Mathf.Clamp01(
+                    (maximum - minimum) / Mathf.Max(0.05f, average));
+            }
+
+            mountainDistributionUniformity =
+                1f - Mathf.Clamp01(mountainDistributionRandomness);
+            mountainDistributionVersion = 2;
+        }
+
+        private void MigrateLegacyMountainSources()
+        {
+            if (mountainPrefabs == null || mountainPrefabs.Count == 0)
+                return;
+
+            for (int i = 0; i < mountainPrefabs.Count; i++)
+            {
+                MountainPrefabEntry legacy = mountainPrefabs[i];
+                if (legacy == null || legacy.prefab == null)
+                    continue;
+
+                mountainSources.Add(new MountainSourceEntry
+                {
+                    sourceType = MountainSourceType.Prefab,
+                    prefab = legacy.prefab,
+                    weight = legacy.weight
+                });
+            }
+
+            mountainPrefabs.Clear();
+        }
+
+        public void ApplyRibbonPreset()
+        {
+            switch (ribbonPreset)
+            {
+                case RibbonPathPreset.NaturalRoad:
+                    edgeNoiseEnabled = true;
+                    leftEdgeNoiseAmplitude = 0.15f;
+                    rightEdgeNoiseAmplitude = 0.15f;
+                    edgeNoiseWavelength = 6f;
+                    break;
+                case RibbonPathPreset.RegularRoad:
+                    edgeNoiseEnabled = false;
+                    leftEdgeNoiseAmplitude = 0f;
+                    rightEdgeNoiseAmplitude = 0f;
+                    break;
+                default:
+                    edgeNoiseEnabled = true;
+                    leftEdgeNoiseAmplitude = 0.25f;
+                    rightEdgeNoiseAmplitude = 0.25f;
+                    edgeNoiseWavelength = 8f;
+                    break;
+            }
         }
 
         public int AppendKnot(Vector3 localPosition)
@@ -154,13 +619,31 @@ namespace ZXXTools.PathBuilder
                 {
                     Vector3 tangent = direction.normalized * Mathf.Max(0.25f, length / 3f);
                     previous.tangentOut = tangent;
-                    if (!previous.brokenTangents)
-                        previous.tangentIn = -tangent;
+                    ApplyOppositeTangent(previous, false);
                     knot.tangentIn = -tangent;
                     knot.tangentOut = tangent;
+                    knot.tangentMode = PathTangentMode.Mirrored;
                 }
                 knot.width = previous.width;
             }
+
+            knots.Add(knot);
+            return knots.Count - 1;
+        }
+
+        public int AppendPenKnot(Vector3 localPosition)
+        {
+            if (knots == null)
+                knots = new List<PathKnot>();
+
+            PathKnot knot = new PathKnot(localPosition)
+            {
+                tangentIn = Vector3.zero,
+                tangentOut = Vector3.zero,
+                tangentMode = PathTangentMode.Linear
+            };
+            if (knots.Count > 0)
+                knot.width = knots[knots.Count - 1].width;
 
             knots.Add(knot);
             return knots.Count - 1;
@@ -186,19 +669,60 @@ namespace ZXXTools.PathBuilder
                 nextIndex = 0;
             }
 
-            PathKnot current = knots[index];
-            PathKnot next = knots[nextIndex];
-            Vector3 position = PathSplineUtility.EvaluatePosition(current, next, 0.5f);
+            return InsertKnotOnSegment(index, 0.5f);
+        }
+
+        public int InsertKnotOnSegment(int segmentIndex, float t)
+        {
+            EnsureDefaults();
+            if (SegmentCount == 0)
+                return AppendKnot(Vector3.zero);
+
+            segmentIndex = Mathf.Clamp(segmentIndex, 0, SegmentCount - 1);
+            int nextIndex = (segmentIndex + 1) % knots.Count;
+            t = Mathf.Clamp(t, 0.001f, 0.999f);
+
+            PathKnot start = knots[segmentIndex];
+            PathKnot end = knots[nextIndex];
+            Vector3 p0 = start.position;
+            Vector3 p1 = start.position + start.tangentOut;
+            Vector3 p2 = end.position + end.tangentIn;
+            Vector3 p3 = end.position;
+
+            // De Casteljau split keeps both resulting Beziers exactly on the
+            // original curve, so inserting a point never changes its shape.
+            Vector3 q0 = Vector3.Lerp(p0, p1, t);
+            Vector3 q1 = Vector3.Lerp(p1, p2, t);
+            Vector3 q2 = Vector3.Lerp(p2, p3, t);
+            Vector3 r0 = Vector3.Lerp(q0, q1, t);
+            Vector3 r1 = Vector3.Lerp(q1, q2, t);
+            Vector3 position = Vector3.Lerp(r0, r1, t);
+
+            Vector3 tangentIn = r0 - position;
+            Vector3 tangentOut = r1 - position;
             PathKnot inserted = new PathKnot(position)
             {
-                width = Mathf.Lerp(current.width, next.width, 0.5f)
+                tangentIn = tangentIn,
+                tangentOut = tangentOut,
+                tangentMode = PathTangentMode.Continuous,
+                width = PathSplineUtility.EvaluateWidth(start, end, t)
             };
 
-            int insertIndex = index + 1;
+            start.tangentOut = q0 - p0;
+            end.tangentIn = q2 - p3;
+            if (start.tangentMode == PathTangentMode.Auto
+                || start.tangentMode == PathTangentMode.Mirrored)
+            {
+                start.tangentMode = PathTangentMode.Continuous;
+            }
+            if (end.tangentMode == PathTangentMode.Auto
+                || end.tangentMode == PathTangentMode.Mirrored)
+            {
+                end.tangentMode = PathTangentMode.Continuous;
+            }
+
+            int insertIndex = segmentIndex + 1;
             knots.Insert(insertIndex, inserted);
-            SmoothKnot(insertIndex);
-            SmoothKnot(index);
-            SmoothKnot((insertIndex + 1) % knots.Count);
             return insertIndex;
         }
 
@@ -229,6 +753,88 @@ namespace ZXXTools.PathBuilder
         {
             if (knots == null || knots.Count < 2 || index < 0 || index >= knots.Count)
                 return;
+
+            CalculateAutoTangents(index);
+            knots[index].tangentMode = PathTangentMode.Auto;
+            knots[index].brokenTangents = false;
+        }
+
+        public void RefreshAutoTangents()
+        {
+            if (knots == null || knots.Count < 2)
+                return;
+            for (int index = 0; index < knots.Count; index++)
+            {
+                if (knots[index].tangentMode == PathTangentMode.Auto)
+                    CalculateAutoTangents(index);
+            }
+        }
+
+        public void SetTangentMode(int index, PathTangentMode mode)
+        {
+            if (knots == null || index < 0 || index >= knots.Count)
+                return;
+
+            PathKnot knot = knots[index];
+            knot.tangentMode = mode;
+            knot.brokenTangents = false;
+            if (mode == PathTangentMode.Linear)
+            {
+                knot.tangentIn = Vector3.zero;
+                knot.tangentOut = Vector3.zero;
+                return;
+            }
+            if (mode == PathTangentMode.Auto)
+            {
+                CalculateAutoTangents(index);
+                return;
+            }
+            if (knot.tangentOut.sqrMagnitude < 0.000001f
+                && knot.tangentIn.sqrMagnitude < 0.000001f)
+            {
+                CalculateAutoTangents(index);
+            }
+
+            if (mode == PathTangentMode.Mirrored)
+            {
+                Vector3 main = knot.tangentOut.sqrMagnitude > 0.000001f
+                    ? knot.tangentOut
+                    : -knot.tangentIn;
+                knot.tangentOut = main;
+                knot.tangentIn = -main;
+            }
+            else if (mode == PathTangentMode.Continuous)
+            {
+                ApplyOppositeTangent(knot, false);
+            }
+        }
+
+        public void SetTangent(int index, bool incoming, Vector3 value)
+        {
+            if (knots == null || index < 0 || index >= knots.Count)
+                return;
+
+            PathKnot knot = knots[index];
+            if (knot.tangentMode == PathTangentMode.Auto
+                || knot.tangentMode == PathTangentMode.Linear)
+            {
+                return;
+            }
+
+            if (incoming)
+                knot.tangentIn = value;
+            else
+                knot.tangentOut = value;
+            ApplyOppositeTangent(knot, incoming);
+        }
+
+        private void CalculateAutoTangents(int index)
+        {
+            if (knots == null || knots.Count < 2
+                || index < 0 || index >= knots.Count)
+            {
+                return;
+            }
 
             int previousIndex = index - 1;
             int nextIndex = index + 1;
@@ -261,6 +867,47 @@ namespace ZXXTools.PathBuilder
 
             knot.tangentIn = -direction * Mathf.Max(0.25f, previousDelta.magnitude / 3f);
             knot.tangentOut = direction * Mathf.Max(0.25f, nextDelta.magnitude / 3f);
+        }
+
+        private static void ApplyOppositeTangent(
+            PathKnot knot,
+            bool incomingChanged)
+        {
+            if (knot.tangentMode == PathTangentMode.Broken)
+                return;
+            if (knot.tangentMode == PathTangentMode.Mirrored)
+            {
+                if (incomingChanged)
+                    knot.tangentOut = -knot.tangentIn;
+                else
+                    knot.tangentIn = -knot.tangentOut;
+                return;
+            }
+            if (knot.tangentMode != PathTangentMode.Continuous)
+                return;
+
+            Vector3 changed = incomingChanged
+                ? knot.tangentIn
+                : knot.tangentOut;
+            if (changed.sqrMagnitude < 0.000001f)
+                return;
+            if (incomingChanged)
+            {
+                float length = knot.tangentOut.magnitude;
+                knot.tangentOut = -changed.normalized * length;
+            }
+            else
+            {
+                float length = knot.tangentIn.magnitude;
+                knot.tangentIn = -changed.normalized * length;
+            }
+        }
+
+        private static void MigrateLegacyTangentMode(PathKnot knot)
+        {
+            if (!knot.brokenTangents)
+                return;
+            knot.tangentMode = PathTangentMode.Broken;
             knot.brokenTangents = false;
         }
 

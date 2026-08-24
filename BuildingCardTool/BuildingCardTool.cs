@@ -3,7 +3,10 @@ using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
+using Spine.Unity;
+using Spine.Unity.Editor;
 
 /// <summary>
 /// SLG 建筑面片预制体生成工具：从透明底正交渲染图一键生成带碰撞体的面片预制体。
@@ -57,6 +60,16 @@ public sealed class BuildingCardTool : EditorWindow
         public string referenceCameraGlobalId;
         public int referenceCameraInstanceId;
         public int previewIndex = -1;
+        public string spineDataGuid;
+        public string spineAnimation;
+        public bool spineLoop = true;
+        public int spineGridWidth = 1;
+        public int spineGridDepth = 1;
+        public bool spineUseManualGroundPoints;
+        public Vector2 spineManualNearPoint;
+        public Vector2 spineManualLeftPoint;
+        public Vector2 spineManualRightPoint;
+        public Vector2 spineManualFarPoint;
         public List<SavedEntry> entries = new List<SavedEntry>();
     }
 
@@ -139,7 +152,30 @@ public sealed class BuildingCardTool : EditorWindow
     private readonly BuildingCardAtlasPanel atlasPanel = new BuildingCardAtlasPanel();
 
     private Camera referenceCamera;
+    private SkeletonDataAsset spineDataAsset;
+    private string spineAnimation = string.Empty;
+    private bool spineLoop = true;
+    private int spineGridWidth = 1;
+    private int spineGridDepth = 1;
+    private Texture2D spinePreviewTexture;
+    private Entry spinePreviewEntry;
+    private bool spinePreviewActive;
+    private SkeletonAnimation spinePreviewSkeleton;
+    private PreviewRenderUtility spinePreviewUtility;
+    private Texture spinePreviewRenderedFrame;
+    private Vector2 spinePreviewViewCenter;
+    private float spinePreviewViewWidth;
+    private float spinePreviewViewHeight;
+    private double spinePreviewLastFrameTime;
+    private bool spinePreviewPlaying;
+    private bool spinePreviewRefreshPending;
+    private bool spineUseManualGroundPoints;
+    private Vector2 spineManualNearPoint;
+    private Vector2 spineManualLeftPoint;
+    private Vector2 spineManualRightPoint;
+    private Vector2 spineManualFarPoint;
     private Vector2 scroll;
+    private Vector2 leftPanelScroll;
     private float leftPanelRatio = 0.54f;
     private bool draggingPanelSplitter;
     private bool useUnityPreview;
@@ -163,16 +199,23 @@ public sealed class BuildingCardTool : EditorWindow
 
     private void OnEnable()
     {
+        EditorApplication.update += UpdateSpinePreviewAnimation;
         LoadSettings();
         LoadWorkspaceState();
         leftPanelRatio = Mathf.Clamp(EditorPrefs.GetFloat(PanelRatioPrefsKey, leftPanelRatio), 0.2f, 0.8f);
         useUnityPreview = EditorPrefs.GetBool(UnityPreviewPrefsKey, true);
         if (entries.Count > 0 && referenceCamera != null)
             ScheduleAnalysis(null, true, 0.05f);
+        if (spineDataAsset != null)
+            ScheduleSpinePreviewRefresh();
     }
 
     private void OnDisable()
     {
+        EditorApplication.update -= UpdateSpinePreviewAnimation;
+        EditorApplication.delayCall -= ProcessScheduledSpinePreviewRefresh;
+        spinePreviewRefreshPending = false;
+        ClearSpinePreview();
         SaveSettings();
         SaveWorkspaceState();
         EditorPrefs.SetFloat(PanelRatioPrefsKey, leftPanelRatio);
@@ -195,11 +238,14 @@ public sealed class BuildingCardTool : EditorWindow
         var previewPanelWidth = panelsWidth - leftPanelWidth;
         EditorGUILayout.BeginHorizontal();
         EditorGUILayout.BeginVertical(GUILayout.Width(leftPanelWidth));
+        leftPanelScroll = EditorGUILayout.BeginScrollView(leftPanelScroll, false, false);
         DrawSettings();
         EditorGUILayout.Space(4);
         DrawInputToolbar();
         DrawEntries();
+        DrawSpineInput();
         atlasPanel.Draw(settings.outputFolder);
+        EditorGUILayout.EndScrollView();
         EditorGUILayout.EndVertical();
 
         var splitterRect = GUILayoutUtility.GetRect(SplitterWidth, 0f, GUILayout.Width(SplitterWidth), GUILayout.ExpandHeight(true));
@@ -355,6 +401,10 @@ public sealed class BuildingCardTool : EditorWindow
             SaveSettings();
             if (referenceCamera != previousCamera) SaveWorkspaceState();
             ScheduleAnalysis(null, true);
+            if (spineDataAsset != null)
+                ScheduleSpinePreviewRefresh();
+            else if (spinePreviewActive)
+                ClearSpinePreview();
         }
     }
 
@@ -461,6 +511,7 @@ public sealed class BuildingCardTool : EditorWindow
             }
             if (GUILayout.Button(Content("Preview", "查看分析结果；可直接拖动四个角点或红色中心点，松开鼠标后会立即保存并重新计算。"), GUILayout.Width(60)))
             {
+                ClearSpinePreview();
                 previewIndex = i;
                 atlasPanel.HidePreview();
                 SaveWorkspaceState();
@@ -508,6 +559,300 @@ public sealed class BuildingCardTool : EditorWindow
         EditorGUILayout.EndScrollView();
     }
 
+    private void DrawSpineInput()
+    {
+        EditorGUILayout.Space(3f);
+        EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+        EditorGUILayout.LabelField("Spine Building Prefab", EditorStyles.boldLabel);
+
+        EditorGUI.BeginChangeCheck();
+        var replacement = (SkeletonDataAsset)EditorGUILayout.ObjectField(
+            Content("Skeleton Data", "拖入 Spine 生成的 SkeletonDataAsset。工具会创建 SkeletonAnimation 建筑预制体。"),
+            spineDataAsset, typeof(SkeletonDataAsset), false);
+        if (replacement != spineDataAsset)
+        {
+            spineDataAsset = replacement;
+            var replacementAnimationNames = GetSpineAnimationNames(spineDataAsset);
+            spineAnimation = replacementAnimationNames.Count > 0 ? replacementAnimationNames[0] : string.Empty;
+        }
+
+        var animationNames = GetSpineAnimationNames(spineDataAsset);
+        if (animationNames.Count > 0)
+        {
+            var currentIndex = Mathf.Max(0, animationNames.IndexOf(spineAnimation));
+            var selectedIndex = EditorGUILayout.Popup(
+                Content("Animation", "预制体启用时默认播放的 Spine 动画。"), currentIndex, animationNames.ToArray());
+            spineAnimation = animationNames[Mathf.Clamp(selectedIndex, 0, animationNames.Count - 1)];
+        }
+        else
+        {
+            using (new EditorGUI.DisabledScope(true))
+                EditorGUILayout.TextField(Content("Animation", "当前 SkeletonDataAsset 没有可用动画。"), "No animations");
+        }
+
+        spineLoop = EditorGUILayout.Toggle(Content("Loop", "默认动画是否循环播放。"), spineLoop);
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.LabelField(Content("Grid", "Spine 建筑占用的地面格子数量：宽 × 深。"), GUILayout.Width(EditorGUIUtility.labelWidth));
+        spineGridWidth = Mathf.Max(1, EditorGUILayout.IntField(spineGridWidth, GUILayout.Width(48f)));
+        EditorGUILayout.LabelField("×", GUILayout.Width(14f));
+        spineGridDepth = Mathf.Max(1, EditorGUILayout.IntField(spineGridDepth, GUILayout.Width(48f)));
+        EditorGUILayout.LabelField("cells", EditorStyles.miniLabel);
+        EditorGUILayout.EndHorizontal();
+        EditorGUILayout.HelpBox(
+            "自动分析 Scale、地脚位置和 BoxCollider；也可在右侧直接拖动黄/绿/青控制点调整大小，拖动红点整体平移。",
+            MessageType.None);
+
+        if (EditorGUI.EndChangeCheck())
+        {
+            SaveWorkspaceState();
+            if (spineDataAsset != null)
+                ScheduleSpinePreviewRefresh();
+            else
+                ClearSpinePreview();
+        }
+
+        using (new EditorGUI.DisabledScope(spineDataAsset == null))
+        {
+            GUI.backgroundColor = new Color(0.65f, 0.85f, 1f);
+            if (GUILayout.Button(Content("Generate Spine Prefab", "生成带 SkeletonAnimation 和 BoxCollider 的建筑预制体。"), GUILayout.Height(28f)))
+                EditorApplication.delayCall += GenerateSpinePrefab;
+            GUI.backgroundColor = Color.white;
+        }
+        EditorGUILayout.EndVertical();
+    }
+
+    private void RefreshSpinePreview()
+    {
+        ClearSpinePreview();
+        if (spineDataAsset == null) return;
+
+        try
+        {
+            spinePreviewSkeleton = EditorInstantiation.InstantiateSkeletonAnimation(
+                spineDataAsset, "", useObjectFactory: false);
+            if (spinePreviewSkeleton == null) throw new InvalidOperationException("SkeletonAnimation 初始化失败。 ");
+            spinePreviewSkeleton.gameObject.hideFlags = HideFlags.HideAndDontSave;
+            spinePreviewSkeleton.UpdateTiming = Spine.Unity.UpdateTiming.ManualUpdate;
+            spinePreviewSkeleton.AnimationName = spineAnimation;
+            spinePreviewSkeleton.loop = spineLoop;
+            spinePreviewSkeleton.Initialize(true);
+            if (!string.IsNullOrEmpty(spineAnimation) && spinePreviewSkeleton.valid)
+                spinePreviewSkeleton.AnimationState.SetAnimation(0, spineAnimation, spineLoop);
+            spinePreviewSkeleton.Update(0f);
+            spinePreviewSkeleton.LateUpdate();
+
+            var previewRenderer = spinePreviewSkeleton.GetComponent<Renderer>();
+            if (previewRenderer == null || previewRenderer.bounds.size.x <= 0.0001f ||
+                previewRenderer.bounds.size.y <= 0.0001f)
+                throw new InvalidOperationException("Spine 当前动画没有可预览的可见内容。 ");
+            var previewBounds = previewRenderer.bounds;
+            spinePreviewViewCenter = new Vector2(previewBounds.center.x, previewBounds.center.y);
+            var previewAspect = Mathf.Max(0.01f, previewBounds.size.x / previewBounds.size.y);
+            spinePreviewViewHeight = previewBounds.size.y * 1.1f;
+            spinePreviewViewWidth = spinePreviewViewHeight * previewAspect;
+
+            spinePreviewUtility = new PreviewRenderUtility(true);
+            var previewCamera = spinePreviewUtility.camera;
+            previewCamera.orthographic = true;
+            previewCamera.nearClipPlane = 0.01f;
+            previewCamera.farClipPlane = 100f;
+            previewCamera.clearFlags = CameraClearFlags.SolidColor;
+            previewCamera.backgroundColor = Color.clear;
+            previewCamera.transform.position = new Vector3(
+                spinePreviewViewCenter.x, spinePreviewViewCenter.y, -10f);
+            previewCamera.transform.rotation = Quaternion.identity;
+            previewCamera.orthographicSize = spinePreviewViewHeight * 0.5f;
+            if (referenceCamera != null && referenceCamera.orthographic)
+            {
+                try
+                {
+                    spinePreviewTexture = RenderSpineAnalysisTexture(spinePreviewSkeleton,
+                        out _, out _, out _);
+                    spinePreviewEntry = new Entry
+                    {
+                        texture = spinePreviewTexture,
+                        gridWidth = spineGridWidth,
+                        gridDepth = spineGridDepth,
+                        useManualGroundPoints = spineUseManualGroundPoints,
+                        manualNearPoint = spineManualNearPoint,
+                        manualLeftPoint = spineManualLeftPoint,
+                        manualRightPoint = spineManualRightPoint,
+                        manualFarPoint = spineManualFarPoint
+                    };
+                    spinePreviewEntry.result = Analyze(spinePreviewEntry);
+                }
+                catch (Exception analysisException)
+                {
+                    spinePreviewEntry = new Entry
+                    {
+                        gridWidth = spineGridWidth,
+                        gridDepth = spineGridDepth,
+                        result = new AnalysisResult
+                        {
+                            success = false,
+                            message = "分析标记暂不可用：" + analysisException.Message
+                        }
+                    };
+                    Debug.LogWarning("[BuildingCardTool] Spine 预览分析跳过：" + analysisException.Message);
+                }
+            }
+            else
+            {
+                spinePreviewEntry = new Entry
+                {
+                    gridWidth = spineGridWidth,
+                    gridDepth = spineGridDepth,
+                    result = new AnalysisResult
+                    {
+                        success = false,
+                        message = "动画可以直接预览；拖入正交 Reference Camera 后显示地脚与碰撞分析。"
+                    }
+                };
+            }
+            SetLayerRecursively(spinePreviewSkeleton.gameObject, 30);
+            previewCamera.cullingMask = 1 << 30;
+            spinePreviewUtility.AddSingleGO(spinePreviewSkeleton.gameObject);
+            spinePreviewActive = true;
+            spinePreviewPlaying = false;
+            spinePreviewLastFrameTime = EditorApplication.timeSinceStartup;
+            previewIndex = -1;
+            atlasPanel.HidePreview();
+            Repaint();
+        }
+        catch (Exception exception)
+        {
+            ClearSpinePreview();
+            Debug.LogError("[BuildingCardTool] Spine 预览失败：" + exception);
+            EditorUtility.DisplayDialog("Building Card", "Spine 预览失败：\n" + exception.Message, "确定");
+        }
+    }
+
+    private void ScheduleSpinePreviewRefresh()
+    {
+        if (spinePreviewRefreshPending) return;
+        spinePreviewRefreshPending = true;
+        EditorApplication.delayCall += ProcessScheduledSpinePreviewRefresh;
+    }
+
+    private void ProcessScheduledSpinePreviewRefresh()
+    {
+        EditorApplication.delayCall -= ProcessScheduledSpinePreviewRefresh;
+        spinePreviewRefreshPending = false;
+        if (this == null) return;
+        RefreshSpinePreview();
+    }
+
+    private void ClearSpinePreview()
+    {
+        spinePreviewActive = false;
+        spinePreviewPlaying = false;
+        spinePreviewEntry = null;
+        if (spinePreviewTexture != null)
+        {
+            DestroyImmediate(spinePreviewTexture);
+            spinePreviewTexture = null;
+        }
+        if (spinePreviewSkeleton != null)
+        {
+            DestroyImmediate(spinePreviewSkeleton.gameObject);
+            spinePreviewSkeleton = null;
+        }
+        if (spinePreviewUtility != null)
+        {
+            spinePreviewUtility.Cleanup();
+            spinePreviewUtility = null;
+        }
+        spinePreviewRenderedFrame = null;
+    }
+
+    private void UpdateSpinePreviewAnimation()
+    {
+        if (!spinePreviewActive || !spinePreviewPlaying || spinePreviewSkeleton == null) return;
+        var now = EditorApplication.timeSinceStartup;
+        var delta = now - spinePreviewLastFrameTime;
+        if (delta < 1.0 / 20.0) return;
+        spinePreviewLastFrameTime = now;
+
+        try
+        {
+            spinePreviewSkeleton.Update(Mathf.Min(0.1f, (float)delta));
+            spinePreviewSkeleton.LateUpdate();
+            Repaint();
+        }
+        catch (Exception exception)
+        {
+            spinePreviewPlaying = false;
+            Debug.LogWarning("[BuildingCardTool] Spine 动画预览已暂停：" + exception.Message);
+        }
+    }
+
+    private void DrawSpinePreview(float previewPanelWidth)
+    {
+        DrawPreviewHeader();
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.LabelField("Spine Animation Preview", EditorStyles.boldLabel);
+        GUILayout.FlexibleSpace();
+        var playbackIcon = EditorGUIUtility.IconContent(spinePreviewPlaying ? "PauseButton" : "PlayButton");
+        var playbackTooltip = spinePreviewPlaying ? "暂停动画预览。" : "播放动画预览。";
+        if (playbackIcon.image == null)
+            playbackIcon = new GUIContent(spinePreviewPlaying ? "||" : ">", playbackTooltip);
+        else
+            playbackIcon.tooltip = playbackTooltip;
+        if (GUILayout.Button(playbackIcon, GUILayout.Width(34f), GUILayout.Height(22f)))
+        {
+            spinePreviewPlaying = !spinePreviewPlaying;
+            spinePreviewLastFrameTime = EditorApplication.timeSinceStartup;
+        }
+        EditorGUILayout.EndHorizontal();
+        if (spinePreviewUtility == null || spinePreviewSkeleton == null)
+        {
+            EditorGUILayout.HelpBox("Spine 预览尚未生成。", MessageType.Info);
+            return;
+        }
+
+        var result = spinePreviewEntry?.result;
+        var previewMaxHeight = Mathf.Max(120f, position.height - 145f);
+        var rect = GUILayoutUtility.GetAspectRect(
+            Mathf.Max(0.01f, spinePreviewViewWidth / spinePreviewViewHeight),
+            GUILayout.ExpandWidth(true), GUILayout.MaxHeight(previewMaxHeight));
+        if (Event.current.type == EventType.Repaint && spinePreviewUtility != null)
+        {
+            spinePreviewUtility.BeginPreview(rect, GUIStyle.none);
+            spinePreviewUtility.camera.Render();
+            spinePreviewRenderedFrame = spinePreviewUtility.EndPreview();
+        }
+        if (spinePreviewRenderedFrame != null)
+            GUI.DrawTexture(rect, spinePreviewRenderedFrame, ScaleMode.StretchToFill, true);
+        else if (spinePreviewTexture != null && useUnityPreview)
+            DrawUnityStyleTexturePreview(rect, spinePreviewTexture);
+        else if (spinePreviewTexture != null)
+            EditorGUI.DrawPreviewTexture(rect, spinePreviewTexture, null, ScaleMode.ScaleToFit);
+
+        if (spinePreviewTexture == null || spinePreviewEntry == null || result == null || !result.success)
+        {
+            if (result != null && !string.IsNullOrEmpty(result.message))
+                EditorGUILayout.HelpBox(result.message, MessageType.Warning);
+            return;
+        }
+
+        GetPreviewGroundPoints(spinePreviewEntry, result, out var nearPoint, out var leftPoint,
+            out var rightPoint, out var farPoint);
+        DrawMarker(rect, spinePreviewTexture, nearPoint, Color.yellow);
+        DrawMarker(rect, spinePreviewTexture, leftPoint, Color.cyan);
+        DrawMarker(rect, spinePreviewTexture, rightPoint, Color.cyan);
+        DrawMarker(rect, spinePreviewTexture, farPoint, Color.green);
+        DrawFootprintOverlay(rect, spinePreviewTexture, nearPoint, leftPoint, farPoint, rightPoint);
+        var centerPoint = GetPreviewFootprintCenter(spinePreviewEntry, result, nearPoint, leftPoint,
+            rightPoint, farPoint);
+        DrawMarker(rect, spinePreviewTexture, centerPoint, Color.red);
+        HandleSpinePreviewPointEditing(rect);
+        GUILayout.Label(
+            "Spine Analysis · Click Height: " + result.clickHeight.ToString("0.##") +
+            " m · Collider Fit: " + result.clickFitScore.ToString("0.00") +
+            " · Ground Fit: " + result.groundFitQuality.ToString("0.00"),
+            EditorStyles.wordWrappedMiniLabel);
+    }
+
     private void DrawActions()
     {
         var canGenerate = entries.Exists(e => e.enabled);
@@ -515,13 +860,18 @@ public sealed class BuildingCardTool : EditorWindow
         {
             GUI.backgroundColor = new Color(0.65f, 1f, 0.65f);
             if (GUILayout.Button(Content("Generate", "为勾选项生成预制体、材质和 Mesh；如启用 Place In Scene，也会实例化到当前场景。"), GUILayout.Height(34)))
-                GenerateAll();
+                EditorApplication.delayCall += GenerateAll;
             GUI.backgroundColor = Color.white;
         }
     }
 
     private void DrawPreview(float previewPanelWidth)
     {
+        if (spinePreviewActive)
+        {
+            DrawSpinePreview(previewPanelWidth);
+            return;
+        }
         if (atlasPanel.TryGetPreview(out var atlasTexture, out var atlasPage, out var atlasPageCount))
         {
             DrawAtlasPreview(previewPanelWidth, atlasTexture, atlasPage, atlasPageCount);
@@ -867,6 +1217,28 @@ public sealed class BuildingCardTool : EditorWindow
         }
     }
 
+    private void HandleSpinePreviewPointEditing(Rect imageRect)
+    {
+        if (spinePreviewEntry == null || spinePreviewEntry.texture == null ||
+            spinePreviewEntry.result == null || !spinePreviewEntry.result.success) return;
+
+        const int spineDragIndex = -2;
+        var previousPreviewIndex = previewIndex;
+        var wasDraggingSpine = draggingEntryIndex == spineDragIndex;
+        previewIndex = spineDragIndex;
+        HandlePreviewPointEditing(imageRect, spinePreviewEntry);
+        previewIndex = previousPreviewIndex;
+
+        if (!spinePreviewEntry.useManualGroundPoints) return;
+        spineUseManualGroundPoints = true;
+        spineManualNearPoint = spinePreviewEntry.manualNearPoint;
+        spineManualLeftPoint = spinePreviewEntry.manualLeftPoint;
+        spineManualRightPoint = spinePreviewEntry.manualRightPoint;
+        spineManualFarPoint = spinePreviewEntry.manualFarPoint;
+        if (wasDraggingSpine && draggingEntryIndex != spineDragIndex)
+            SaveWorkspaceState();
+    }
+
     private static void TrySelectPoint(Vector2 mouse, Vector2 point, PreviewPoint candidate, ref PreviewPoint nearest, ref float nearestDistance)
     {
         var distance = (mouse - point).sqrMagnitude;
@@ -969,6 +1341,11 @@ public sealed class BuildingCardTool : EditorWindow
         var hasAtlasOutput = false;
         foreach (var obj in DragAndDrop.objectReferences)
         {
+            if (obj is SkeletonDataAsset)
+            {
+                hasBuildingSource = true;
+                continue;
+            }
             var texture = GetTextureFromObject(obj);
             if (texture == null) continue;
             if (BuildingCardAtlasBuilder.IsGeneratedAtlasTexture(texture)) hasAtlasOutput = true;
@@ -988,7 +1365,36 @@ public sealed class BuildingCardTool : EditorWindow
     private void AddObject(UnityEngine.Object obj)
     {
         if (obj == null) return;
+        if (obj is SkeletonDataAsset skeletonData)
+        {
+            spineDataAsset = skeletonData;
+            spineUseManualGroundPoints = false;
+            var names = GetSpineAnimationNames(spineDataAsset);
+            spineAnimation = names.Count > 0 ? names[0] : string.Empty;
+            SaveWorkspaceState();
+            ScheduleSpinePreviewRefresh();
+            Repaint();
+            return;
+        }
         AddTexture(GetTextureFromObject(obj));
+    }
+
+    private static List<string> GetSpineAnimationNames(SkeletonDataAsset skeletonData)
+    {
+        var names = new List<string>();
+        if (skeletonData == null) return names;
+        try
+        {
+            var data = skeletonData.GetSkeletonData(true);
+            if (data?.Animations == null) return names;
+            foreach (var animation in data.Animations)
+                if (animation != null && !string.IsNullOrEmpty(animation.Name)) names.Add(animation.Name);
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning("[BuildingCardTool] 无法读取 Spine 动画：" + exception.Message);
+        }
+        return names;
     }
 
     private static Texture2D GetTextureFromObject(UnityEngine.Object obj)
@@ -1009,6 +1415,7 @@ public sealed class BuildingCardTool : EditorWindow
             return;
         }
         var entry = new Entry { texture = texture };
+        ClearSpinePreview();
         entries.Add(entry);
         entry.result = Analyze(entry);
         previewIndex = entries.Count - 1;
@@ -1703,6 +2110,264 @@ public sealed class BuildingCardTool : EditorWindow
         }
     }
 
+    private void GenerateSpinePrefab()
+    {
+        if (spineDataAsset == null) return;
+        if (!ValidateInputs(true)) return;
+
+        EnsureAssetFolder(settings.outputFolder);
+        GameObject prefabAsset = null;
+        try
+        {
+            prefabAsset = CreateSpinePrefab();
+            if (settings.placePrefabsInScene)
+            {
+                var previewRoot = GetOrCreateScenePreviewRoot();
+                var sceneObject = PlaceOrReplaceScenePreview(prefabAsset, previewRoot);
+                ArrangeScenePreviews(previewRoot);
+                if (sceneObject != null) Selection.activeGameObject = sceneObject;
+            }
+            else
+            {
+                Selection.activeObject = prefabAsset;
+                EditorGUIUtility.PingObject(prefabAsset);
+            }
+            AssetDatabase.SaveAssets();
+            EditorUtility.DisplayDialog("Building Card", "Spine 建筑预制体已生成：\n" + AssetDatabase.GetAssetPath(prefabAsset), "确定");
+        }
+        catch (Exception exception)
+        {
+            Debug.LogError("[BuildingCardTool] Spine 预制体生成失败：" + exception);
+            EditorUtility.DisplayDialog("Building Card", "Spine 预制体生成失败：\n" + exception.Message, "确定");
+        }
+    }
+
+    private GameObject CreateSpinePrefab()
+    {
+        var cleanName = SanitizeAssetName(spineDataAsset.name);
+        const string skeletonDataSuffix = "_SkeletonData";
+        if (cleanName.EndsWith(skeletonDataSuffix, StringComparison.OrdinalIgnoreCase))
+            cleanName = cleanName.Substring(0, cleanName.Length - skeletonDataSuffix.Length);
+        var prefabPath = settings.outputFolder.TrimEnd('/') + "/B_" + cleanName + ".prefab";
+
+        var root = new GameObject("B_" + cleanName);
+        GameObject prefabAsset = null;
+        try
+        {
+            root.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+            var skeletonAnimation = EditorInstantiation.InstantiateSkeletonAnimation(
+                spineDataAsset, "", useObjectFactory: false);
+            if (skeletonAnimation == null)
+                throw new InvalidOperationException("SkeletonAnimation 初始化失败，请检查 SkeletonDataAsset 与 Atlas。 ");
+
+            var visual = skeletonAnimation.gameObject;
+            visual.name = "Visual";
+            visual.hideFlags = HideFlags.None;
+            visual.transform.SetParent(root.transform, false);
+            skeletonAnimation.skeletonDataAsset = spineDataAsset;
+            skeletonAnimation.AnimationName = spineAnimation;
+            skeletonAnimation.loop = spineLoop;
+            skeletonAnimation.Initialize(true);
+            if (!string.IsNullOrEmpty(spineAnimation) && skeletonAnimation.valid)
+                skeletonAnimation.AnimationState.SetAnimation(0, spineAnimation, spineLoop);
+            skeletonAnimation.LateUpdate();
+
+            var renderer = visual.GetComponent<Renderer>();
+            if (renderer == null)
+                throw new InvalidOperationException("生成的 SkeletonAnimation 缺少 Renderer。 ");
+            renderer.shadowCastingMode = ShadowCastingMode.Off;
+
+            var renderedTexture = RenderSpineAnalysisTexture(skeletonAnimation, out var viewCenter,
+                out var viewWidth, out var viewHeight);
+            try
+            {
+                var analysisEntry = new Entry
+                {
+                    texture = renderedTexture,
+                    gridWidth = spineGridWidth,
+                    gridDepth = spineGridDepth,
+                    useManualGroundPoints = spineUseManualGroundPoints,
+                    manualNearPoint = spineManualNearPoint,
+                    manualLeftPoint = spineManualLeftPoint,
+                    manualRightPoint = spineManualRightPoint,
+                    manualFarPoint = spineManualFarPoint
+                };
+                var result = Analyze(analysisEntry);
+                if (result == null || !result.success)
+                    throw new InvalidOperationException("Spine 自动分析失败：" + (result?.message ?? "无分析结果"));
+                if (!TryGetOutputGeometry(analysisEntry, out var outputGeometry, out var geometryError))
+                    throw new InvalidOperationException(geometryError);
+
+                var pixelsPerLocalUnit = renderedTexture.width / viewWidth;
+                var uniformScale = result.worldPerSourcePixel * pixelsPerLocalUnit * outputGeometry.scaleFactor;
+                var nearLocal = new Vector3(
+                    viewCenter.x - viewWidth * 0.5f + (result.nearCorner.x + 0.5f) / renderedTexture.width * viewWidth,
+                    viewCenter.y - viewHeight * 0.5f + (result.nearCorner.y + 0.5f) / renderedTexture.height * viewHeight,
+                    0f);
+                var rotation = GetVisualRotation();
+                visual.transform.localRotation = rotation;
+                visual.transform.localScale = Vector3.one * uniformScale;
+                visual.transform.localPosition = -result.colliderCenterFromRoot * outputGeometry.scaleFactor -
+                                                 rotation * (nearLocal * uniformScale) +
+                                                 Vector3.up * (result.visualGroundLift * outputGeometry.scaleFactor);
+
+                var collider = root.AddComponent<BoxCollider>();
+                collider.center = new Vector3(0f, result.clickCenterY, 0f);
+                collider.size = new Vector3(outputGeometry.colliderWidth, result.clickHeight,
+                    outputGeometry.colliderDepth);
+
+                CreateBuildingCardQueueMaterials(renderer, cleanName);
+
+                // A regular card has a fixed quad, so Unity's transparent distance sorting uses a
+                // stable Renderer bounds centre. Spine rebuilds its mesh (and bounds) every frame.
+                // Sort the animated renderer from the building root on the ground instead, otherwise
+                // its order against regular cards changes with the current animation pose.
+                var sortingGroup = root.AddComponent<SortingGroup>();
+                sortingGroup.sortingLayerID = renderer.sortingLayerID;
+                sortingGroup.sortingOrder = renderer.sortingOrder;
+                sortingGroup.sortAtRoot = true;
+
+                prefabAsset = PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
+                if (prefabAsset == null) throw new InvalidOperationException("Prefab 保存失败：" + prefabPath);
+                Debug.Log("[BuildingCardTool] " + spineDataAsset.name + " → " + prefabPath +
+                          " | Animation " + (string.IsNullOrEmpty(spineAnimation) ? "<none>" : spineAnimation) +
+                          " | 自动比例 " + uniformScale.ToString("F4") +
+                          " | 点击盒 " + collider.size.ToString("F2"));
+            }
+            finally
+            {
+                DestroyImmediate(renderedTexture);
+            }
+        }
+        finally
+        {
+            DestroyImmediate(root);
+        }
+        return prefabAsset;
+    }
+
+    private static Texture2D RenderSpineAnalysisTexture(SkeletonAnimation skeletonAnimation,
+        out Vector2 viewCenter, out float viewWidth, out float viewHeight, bool useFixedView = false,
+        Vector2 fixedViewCenter = default, float fixedViewWidth = 0f, float fixedViewHeight = 0f)
+    {
+        const int analysisLayer = 31;
+        const int maxSize = 1024;
+        var renderer = skeletonAnimation.GetComponent<Renderer>();
+        if (renderer == null || renderer.bounds.size.x <= 0.0001f || renderer.bounds.size.y <= 0.0001f)
+            throw new InvalidOperationException("Spine 当前动画没有可分析的可见内容。 ");
+
+        var bounds = renderer.bounds;
+        viewCenter = useFixedView ? fixedViewCenter : new Vector2(bounds.center.x, bounds.center.y);
+        var sourceAspect = Mathf.Max(0.01f,
+            useFixedView ? fixedViewWidth / fixedViewHeight : bounds.size.x / bounds.size.y);
+        var width = sourceAspect >= 1f ? maxSize : Mathf.Max(64, Mathf.RoundToInt(maxSize * sourceAspect));
+        var height = sourceAspect >= 1f ? Mathf.Max(64, Mathf.RoundToInt(maxSize / sourceAspect)) : maxSize;
+        var cameraAspect = width / (float)height;
+        if (useFixedView)
+        {
+            viewWidth = fixedViewWidth;
+            viewHeight = fixedViewHeight;
+        }
+        else
+        {
+            viewHeight = Mathf.Max(bounds.size.y * 1.02f, bounds.size.x * 1.02f / cameraAspect);
+            viewWidth = viewHeight * cameraAspect;
+        }
+
+        var oldLayer = skeletonAnimation.gameObject.layer;
+        var cameraObject = new GameObject("Building Card Spine Analysis Camera") { hideFlags = HideFlags.HideAndDontSave };
+        if (skeletonAnimation.gameObject.scene.IsValid() && skeletonAnimation.gameObject.scene.isLoaded)
+            SceneManager.MoveGameObjectToScene(cameraObject, skeletonAnimation.gameObject.scene);
+        var camera = cameraObject.AddComponent<Camera>();
+        var renderTexture = RenderTexture.GetTemporary(width, height, 24, RenderTextureFormat.ARGB32,
+            RenderTextureReadWrite.Linear);
+        var previousActive = RenderTexture.active;
+        try
+        {
+            skeletonAnimation.gameObject.layer = analysisLayer;
+            camera.orthographic = true;
+            camera.orthographicSize = viewHeight * 0.5f;
+            camera.aspect = cameraAspect;
+            camera.nearClipPlane = 0.01f;
+            camera.farClipPlane = 100f;
+            camera.clearFlags = CameraClearFlags.SolidColor;
+            camera.backgroundColor = Color.clear;
+            camera.cullingMask = 1 << analysisLayer;
+            camera.allowHDR = false;
+            camera.allowMSAA = false;
+            camera.transform.position = new Vector3(viewCenter.x, viewCenter.y, -10f);
+            camera.transform.rotation = Quaternion.identity;
+            camera.targetTexture = renderTexture;
+            camera.Render();
+
+            RenderTexture.active = renderTexture;
+            var texture = new Texture2D(width, height, TextureFormat.RGBA32, false, true)
+            {
+                name = skeletonAnimation.skeletonDataAsset.name + "_Analysis"
+            };
+            texture.ReadPixels(new Rect(0f, 0f, width, height), 0, 0, false);
+            texture.Apply(false, false);
+            return texture;
+        }
+        finally
+        {
+            skeletonAnimation.gameObject.layer = oldLayer;
+            camera.targetTexture = null;
+            RenderTexture.active = previousActive;
+            RenderTexture.ReleaseTemporary(renderTexture);
+            DestroyImmediate(cameraObject);
+        }
+    }
+
+    private static void SetLayerRecursively(GameObject gameObject, int layer)
+    {
+        gameObject.layer = layer;
+        var transform = gameObject.transform;
+        for (var i = 0; i < transform.childCount; i++)
+            SetLayerRecursively(transform.GetChild(i).gameObject, layer);
+    }
+
+    private Material[] CreateBuildingCardQueueMaterials(Renderer renderer, string cleanName)
+    {
+        EnsureAssetFolder(settings.outputFolder + "/Materials");
+        var sources = renderer.sharedMaterials;
+        var replacements = new Material[sources.Length];
+        for (var i = 0; i < sources.Length; i++)
+        {
+            var source = sources[i];
+            if (source == null) continue;
+            var suffix = sources.Length > 1 ? "_" + i : string.Empty;
+            var path = settings.outputFolder + "/Materials/M_" + cleanName + "_Spine" + suffix + ".mat";
+            var material = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (material == null)
+            {
+                material = new Material(source);
+                AssetDatabase.CreateAsset(material, path);
+            }
+            else
+            {
+                EditorUtility.CopySerialized(source, material);
+            }
+            // Spine keeps its own atlas/material pipeline. The Building Card shader is only for
+            // static card quads and does not consume Spine vertex tint data.
+            if (material.shader != null &&
+                (material.shader.name == "Custom/Building Card URP" ||
+                 material.shader.name == "ZXX/Building Card URP"))
+            {
+                var spineShader = Shader.Find("Spine/Skeleton");
+                if (spineShader == null)
+                    throw new InvalidOperationException("Spine/Skeleton Shader 未找到。请检查 spine-unity Runtime Shaders。");
+                material.shader = spineShader;
+            }
+            material.name = Path.GetFileNameWithoutExtension(path);
+            material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            EditorUtility.SetDirty(material);
+            replacements[i] = material;
+        }
+        renderer.sharedMaterials = replacements;
+        return replacements;
+    }
+
     private void GenerateAll()
     {
         CancelScheduledAnalysis();
@@ -1943,6 +2608,7 @@ public sealed class BuildingCardTool : EditorWindow
             filter.sharedMesh = mesh;
             var renderer = visual.AddComponent<MeshRenderer>();
             renderer.sharedMaterial = material;
+            renderer.shadowCastingMode = ShadowCastingMode.Off;
 
             // Transparent MeshRenderers are sorted from Renderer.bounds.center. Keep the soft
             // alpha edge, but make that comparison point the building's ground Root instead of
@@ -2099,6 +2765,21 @@ public sealed class BuildingCardTool : EditorWindow
             if (referenceCamera == null && saved.referenceCameraInstanceId != 0)
                 referenceCamera = EditorUtility.InstanceIDToObject(saved.referenceCameraInstanceId) as Camera;
 
+            if (!string.IsNullOrEmpty(saved.spineDataGuid))
+            {
+                var spinePath = AssetDatabase.GUIDToAssetPath(saved.spineDataGuid);
+                spineDataAsset = AssetDatabase.LoadAssetAtPath<SkeletonDataAsset>(spinePath);
+            }
+            spineAnimation = saved.spineAnimation ?? string.Empty;
+            spineLoop = saved.spineLoop;
+            spineGridWidth = Mathf.Max(1, saved.spineGridWidth);
+            spineGridDepth = Mathf.Max(1, saved.spineGridDepth);
+            spineUseManualGroundPoints = saved.spineUseManualGroundPoints;
+            spineManualNearPoint = saved.spineManualNearPoint;
+            spineManualLeftPoint = saved.spineManualLeftPoint;
+            spineManualRightPoint = saved.spineManualRightPoint;
+            spineManualFarPoint = saved.spineManualFarPoint;
+
             if (saved.entries != null)
             {
                 for (var i = 0; i < saved.entries.Count; i++)
@@ -2132,7 +2813,21 @@ public sealed class BuildingCardTool : EditorWindow
 
     private void SaveWorkspaceState()
     {
-        var saved = new WorkspaceState { previewIndex = previewIndex };
+        var saved = new WorkspaceState
+        {
+            previewIndex = previewIndex,
+            spineAnimation = spineAnimation,
+            spineLoop = spineLoop,
+            spineGridWidth = spineGridWidth,
+            spineGridDepth = spineGridDepth,
+            spineUseManualGroundPoints = spineUseManualGroundPoints,
+            spineManualNearPoint = spineManualNearPoint,
+            spineManualLeftPoint = spineManualLeftPoint,
+            spineManualRightPoint = spineManualRightPoint,
+            spineManualFarPoint = spineManualFarPoint
+        };
+        if (spineDataAsset != null)
+            saved.spineDataGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(spineDataAsset));
         if (referenceCamera != null)
         {
             saved.referenceCameraInstanceId = referenceCamera.GetInstanceID();

@@ -1,10 +1,17 @@
 using UnityEngine;
 using UnityEditor;
+using UnityEditor.Overlays;
 using System.Collections.Generic;
 using ZXXTools.PathBuilder;
 
 public class PathBuilderWindow : EditorWindow
 {
+    internal static PathBuilderWindow ActiveSceneOverlayWindow { get; private set; }
+
+    private static readonly int PenToolControlHash =
+        "PathBuilder.PenTool".GetHashCode();
+    private const float PenDragThreshold = 3f;
+
     private enum BuilderTab { Wall, Mountain, River }
     private enum BuildMode { Enclosure, LShape, Corridor, Line }
 
@@ -45,14 +52,14 @@ public class PathBuilderWindow : EditorWindow
 
     public static void ShowWindow()
     {
-        var w = GetWindow<PathBuilderWindow>("Path Builder");
+        var w = GetWindow<PathBuilderWindow>("路径构建");
         w.minSize = new Vector2(420, 560);
         w.Show();
     }
 
     public static PathBuilderWindow Open(PathBuildMode mode)
     {
-        PathBuilderWindow window = GetWindow<PathBuilderWindow>("Path Builder");
+        PathBuilderWindow window = GetWindow<PathBuilderWindow>("路径构建");
         window.minSize = new Vector2(420, 560);
         window.SelectSplineMode(mode);
         window.Show();
@@ -61,16 +68,48 @@ public class PathBuilderWindow : EditorWindow
 
     private void OnEnable()
     {
+        ActiveSceneOverlayWindow = this;
         RecalcWallSegments();
+        RestoreWindowSession();
         EnableSplineUI();
     }
 
     private void OnDisable()
     {
+        ResetPenDrag();
+        EditorApplication.delayCall -= RestoreDeferredSession;
+        _restoreScheduled = false;
+        if (!EditorApplication.isCompiling
+            && !EditorApplication.isUpdating)
+        {
+            SaveCurrentSession();
+        }
         DisableSplineUI();
+        if (ActiveSceneOverlayWindow == this)
+            ActiveSceneOverlayWindow = null;
     }
 
-    private static GUIContent Content(string label, string tooltip) => new GUIContent(label, tooltip);
+    private void OnSelectionChange()
+    {
+        if (activeTab == BuilderTab.Wall)
+            return;
+
+        if (PathBuilderAuthoringStorage.TryRestoreSelected(
+                CurrentSplineMode,
+                out PathSpline selectedBuilder)
+            && selectedBuilder != _builder)
+        {
+            SaveCurrentSession();
+            ActivateSession(selectedBuilder);
+        }
+    }
+
+    private static GUIContent Content(
+        string englishLabel,
+        string chineseTooltip)
+    {
+        return new GUIContent(englishLabel, chineseTooltip);
+    }
 
     // ════════════════ GUI ════════════════
 
@@ -115,7 +154,10 @@ public class PathBuilderWindow : EditorWindow
 
         EditorGUILayout.Space(8f);
         EditorGUILayout.LabelField("Wall", EditorStyles.boldLabel);
-        buildMode = (BuildMode)EditorGUILayout.EnumPopup(Content("Build Mode", "生成模式"), buildMode);
+        buildMode = (BuildMode)EditorGUILayout.Popup(
+            Content("Build Mode", "选择封闭围墙、L 形围墙、双排通道或直线队列"),
+            (int)buildMode,
+            new[] { "Enclosure", "L Shape", "Corridor", "Line" });
         EditorGUILayout.Space(4);
 
         DrawPrefabSection(isLine);
@@ -150,30 +192,34 @@ public class PathBuilderWindow : EditorWindow
 
     private void DrawPrefabSection(bool isLine)
     {
-        EditorGUILayout.LabelField(isLine ? Content("Object", "物体") : Content("Wall Segments", "墙段"), EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(
+            isLine
+                ? Content("Object", "设置直线队列使用的物体")
+                : Content("Wall Segments", "设置围墙使用的墙段和转角预制体"),
+            EditorStyles.boldLabel);
         using (new EditorGUILayout.VerticalScope("box"))
         {
             if (isLine)
             {
-                useDifferentFirst = EditorGUILayout.Toggle(Content("Use Different First Prefab", "首项使用不同 Prefab"), useDifferentFirst);
+                useDifferentFirst = EditorGUILayout.Toggle(Content("Use Different First Prefab", "让队列中的第一个物体使用单独的预制体"), useDifferentFirst);
                 if (useDifferentFirst)
                 {
-                    firstPrefab = (GameObject)EditorGUILayout.ObjectField(Content("First Prefab", "首个 Prefab"), firstPrefab, typeof(GameObject), true);
-                    wallPrefab = (GameObject)EditorGUILayout.ObjectField(Content("Rest Prefab", "其余 Prefab"), wallPrefab, typeof(GameObject), true);
+                    firstPrefab = (GameObject)EditorGUILayout.ObjectField(Content("First Prefab", "拖入队列第一个位置使用的预制体"), firstPrefab, typeof(GameObject), true);
+                    wallPrefab = (GameObject)EditorGUILayout.ObjectField(Content("Rest Prefab", "拖入队列其余位置使用的预制体"), wallPrefab, typeof(GameObject), true);
                 }
                 else
                 {
-                    wallPrefab = (GameObject)EditorGUILayout.ObjectField(Content("Object Prefab", "物体 Prefab"), wallPrefab, typeof(GameObject), true);
+                    wallPrefab = (GameObject)EditorGUILayout.ObjectField(Content("Object Prefab", "拖入直线队列重复使用的预制体"), wallPrefab, typeof(GameObject), true);
                 }
             }
             else
             {
                 EditorGUI.BeginChangeCheck();
-                wallPrefab = (GameObject)EditorGUILayout.ObjectField(Content("Wall Segment Prefab", "墙段 Prefab"), wallPrefab, typeof(GameObject), true);
+                wallPrefab = (GameObject)EditorGUILayout.ObjectField(Content("Wall Segment Prefab", "拖入沿围墙边缘重复使用的墙段预制体"), wallPrefab, typeof(GameObject), true);
                 if (EditorGUI.EndChangeCheck()) RecalcWallSegments();
 
                 if (buildMode == BuildMode.Enclosure)
-                    cornerPrefab = (GameObject)EditorGUILayout.ObjectField(Content("Corner Prefab (Optional)", "转角 Prefab（可选）"), cornerPrefab, typeof(GameObject), true);
+                    cornerPrefab = (GameObject)EditorGUILayout.ObjectField(Content("Corner Prefab (Optional)", "可选：拖入封闭围墙四个转角使用的预制体"), cornerPrefab, typeof(GameObject), true);
             }
         }
     }
@@ -186,29 +232,31 @@ public class PathBuilderWindow : EditorWindow
         using (new EditorGUILayout.VerticalScope("box"))
         {
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField(Content("Count", "数量"), GUILayout.Width(70));
+            EditorGUILayout.LabelField(Content("Count", "设置直线队列生成的物体数量"), GUILayout.Width(70));
             lineCount = EditorGUILayout.IntField(lineCount);
             if (lineCount < 1) lineCount = 1;
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField(Content("Spacing", "间距"), GUILayout.Width(70));
+            EditorGUILayout.LabelField(Content("Spacing", "设置相邻物体中心之间的距离"), GUILayout.Width(70));
             lineSpacing = EditorGUILayout.FloatField(lineSpacing);
             if (lineSpacing < 0.01f) lineSpacing = 0.01f;
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField(Content("Axis", "轴向"), GUILayout.Width(70));
-            if (GUILayout.Toggle(lineAxis == 0, "X", "Button", GUILayout.Width(30))) lineAxis = 0;
-            if (GUILayout.Toggle(lineAxis == 1, "Y", "Button", GUILayout.Width(30))) lineAxis = 1;
-            if (GUILayout.Toggle(lineAxis == 2, "Z", "Button", GUILayout.Width(30))) lineAxis = 2;
+            EditorGUILayout.LabelField(Content("Axis", "选择直线队列延伸的世界轴向"), GUILayout.Width(70));
+            if (GUILayout.Toggle(lineAxis == 0, new GUIContent("X", "沿世界 X 轴排列"), "Button", GUILayout.Width(30))) lineAxis = 0;
+            if (GUILayout.Toggle(lineAxis == 1, new GUIContent("Y", "沿世界 Y 轴排列"), "Button", GUILayout.Width(30))) lineAxis = 1;
+            if (GUILayout.Toggle(lineAxis == 2, new GUIContent("Z", "沿世界 Z 轴排列"), "Button", GUILayout.Width(30))) lineAxis = 2;
             GUILayout.Space(10);
-            EditorGUILayout.LabelField(Content("Dir", "朝向"), GUILayout.Width(30));
+            EditorGUILayout.LabelField(Content("Dir", "切换所选轴向的正方向或负方向"), GUILayout.Width(30));
             linePositive = EditorGUILayout.Toggle(linePositive, GUILayout.Width(20));
             EditorGUILayout.LabelField(linePositive ? "+" : "−", GUILayout.Width(15));
             EditorGUILayout.EndHorizontal();
 
-            EditorGUILayout.LabelField($"Total Length: {lineSpacing * (lineCount - 1):F2}m", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField(
+                $"Total Length: {lineSpacing * (lineCount - 1):F2}m",
+                EditorStyles.miniLabel);
         }
     }
 
@@ -225,14 +273,14 @@ public class PathBuilderWindow : EditorWindow
         {
             EditorGUI.BeginChangeCheck();
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField(Content("Length (X)", "长边 (X)"), GUILayout.Width(70));
+            EditorGUILayout.LabelField(Content("Length (X)", "设置围墙沿世界 X 轴的总长度"), GUILayout.Width(70));
             wallLength = EditorGUILayout.FloatField(wallLength);
             EditorGUILayout.EndHorizontal();
 
             if (!isCorridor)
             {
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField(Content("Depth (Z)", "宽边 (Z)"), GUILayout.Width(70));
+                EditorGUILayout.LabelField(Content("Depth (Z)", "设置围墙沿世界 Z 轴的总深度"), GUILayout.Width(70));
                 wallDepth = EditorGUILayout.FloatField(wallDepth);
                 EditorGUILayout.EndHorizontal();
             }
@@ -249,12 +297,12 @@ public class PathBuilderWindow : EditorWindow
         using (new EditorGUILayout.VerticalScope("box"))
         {
             EditorGUI.BeginChangeCheck();
-            autoSegment = EditorGUILayout.Toggle(Content("Auto Calculate Segments", "自动计算段数"), autoSegment);
+            autoSegment = EditorGUILayout.Toggle(Content("Auto Calculate Segments", "根据围墙尺寸和目标墙段长度自动计算段数"), autoSegment);
 
             if (autoSegment)
             {
                 EditorGUI.indentLevel++;
-                segLength = EditorGUILayout.FloatField(Content("Segment Length", "每段墙长度"), segLength);
+                segLength = EditorGUILayout.FloatField(Content("Segment Length", "用于自动计算段数的目标墙段长度"), segLength);
                 if (segLength < 0.01f) segLength = 0.01f;
                 if (EditorGUI.EndChangeCheck()) RecalcWallSegments();
                 EditorGUI.indentLevel--;
@@ -277,9 +325,9 @@ public class PathBuilderWindow : EditorWindow
             else
             {
                 EditorGUI.indentLevel++;
-                segsLong = EditorGUILayout.IntField(Content("Long Side Segments", "长边段数"), segsLong);
+                segsLong = EditorGUILayout.IntField(Content("Long Side Segments", "手动设置每条长边使用的墙段数量"), segsLong);
                 if (!isCorridor)
-                    segsShort = EditorGUILayout.IntField(Content("Short Side Segments", "宽边段数"), segsShort);
+                    segsShort = EditorGUILayout.IntField(Content("Short Side Segments", "手动设置每条短边使用的墙段数量"), segsShort);
                 if (segsLong  < 1) segsLong  = 1;
                 if (segsShort < 1) segsShort = 1;
                 EditorGUI.indentLevel--;
@@ -294,23 +342,23 @@ public class PathBuilderWindow : EditorWindow
         EditorGUILayout.LabelField(Content("Options", "选项"), EditorStyles.boldLabel);
         using (new EditorGUILayout.VerticalScope("box"))
         {
-            objectScale = EditorGUILayout.Vector3Field(Content("Scale", "缩放"), objectScale);
+            objectScale = EditorGUILayout.Vector3Field(Content("Scale", "设置所有生成物体使用的缩放"), objectScale);
 
             if (isLine)
             {
-                lineRotation = EditorGUILayout.Vector3Field(Content("Rotation", "旋转"), lineRotation);
+                lineRotation = EditorGUILayout.Vector3Field(Content("Rotation", "设置直线队列中所有物体的旋转"), lineRotation);
             }
             else
             {
                 EditorGUILayout.BeginHorizontal();
-                faceInward = EditorGUILayout.Toggle(Content("Face Inward", "墙面朝内"), faceInward);
+                faceInward = EditorGUILayout.Toggle(Content("Face Inward", "让围墙墙段朝向围墙内部"), faceInward);
                 if (buildMode == BuildMode.Enclosure)
-                    useCorners = EditorGUILayout.Toggle(Content("Use Corners", "使用转角"), useCorners);
+                    useCorners = EditorGUILayout.Toggle(Content("Use Corners", "在封闭围墙四角生成转角预制体"), useCorners);
                 EditorGUILayout.EndHorizontal();
             }
 
-            centerPos = EditorGUILayout.Vector3Field(Content("Center", "中心点"), centerPos);
-            rootName  = EditorGUILayout.TextField(Content("Root Name", "根节点名"), rootName);
+            centerPos = EditorGUILayout.Vector3Field(Content("Center", "设置生成结果的世界中心位置"), centerPos);
+            rootName  = EditorGUILayout.TextField(Content("Root Name", "设置生成结果根节点的名称"), rootName);
         }
     }
 
@@ -329,7 +377,11 @@ public class PathBuilderWindow : EditorWindow
         using (new EditorGUI.DisabledScope(!canBuild))
         {
             GUI.backgroundColor = new Color(0.5f, 0.85f, 0.5f);
-            if (GUILayout.Button(isLine ? Content("Build Queue", "生成队列") : Content("Build Walls", "生成围墙"), GUILayout.Height(42)))
+            if (GUILayout.Button(
+                isLine
+                    ? Content("Build Queue", "按当前数量、间距和轴向生成物体队列")
+                    : Content("Build Walls", "按当前尺寸、墙段和选项生成围墙"),
+                GUILayout.Height(42)))
                 Build();
             GUI.backgroundColor = Color.white;
         }
@@ -347,8 +399,12 @@ public class PathBuilderWindow : EditorWindow
                 BuildMode.Corridor  => $"{segsLong}×2",
                 _ => ""
             };
-        string extra = (!isLine && useCorners && cornerPrefab && buildMode == BuildMode.Enclosure) ? " + 4 corners" : "";
-        EditorGUILayout.LabelField($"Total: {total} objects  ({detail}{extra})", EditorStyles.centeredGreyMiniLabel);
+        string extra = (!isLine && useCorners && cornerPrefab && buildMode == BuildMode.Enclosure)
+            ? " + 4 corners"
+            : "";
+        EditorGUILayout.LabelField(
+            $"Total: {total} objects  ({detail}{extra})",
+            EditorStyles.centeredGreyMiniLabel);
     }
 
     // ════════════════ Wall Calc ════════════════
@@ -504,11 +560,19 @@ public class PathBuilderWindow : EditorWindow
     [SerializeField] private PathSpline _builder;
     [SerializeField] private Vector2 _scroll;
     [SerializeField] private bool _isDrawing;
+    [SerializeField] private bool _drawingChanged;
     [SerializeField] private SplineStage _splineStage;
     private PathSplineEditor _builderEditor;
     private Vector3 _hoverWorldPosition;
     private bool _hasHoverPosition;
     private bool _splineUIEnabled;
+    private bool _restoreScheduled;
+    private bool _penDragging;
+    private bool _penHandleDragged;
+    private int _penDragControlId;
+    private int _penDragKnotIndex = -1;
+    private Vector2 _penDragStartGui;
+    private Vector3 _penDragAnchorWorld;
 
     private void EnableSplineUI()
     {
@@ -533,11 +597,17 @@ public class PathBuilderWindow : EditorWindow
         if (!_builder || !_builder.Anchor)
         {
             GUILayout.FlexibleSpace();
+            string chineseModeName = CurrentSplineMode
+                == PathBuildMode.Mountain
+                    ? "山脉"
+                    : "河流 / 道路";
             EditorGUILayout.HelpBox(
-                $"当前没有 {CurrentSplineModeName} 路径。",
+                $"当前没有{chineseModeName}路径。",
                 MessageType.Info);
             if (GUILayout.Button(
-                $"Create {CurrentSplineModeName} Path",
+                new GUIContent(
+                    $"Create {CurrentSplineModeName} Path",
+                    $"新建一条可编辑的{chineseModeName}样条路径"),
                 GUILayout.Height(36f)))
             {
                 CreateSession(CurrentSplineMode);
@@ -573,7 +643,7 @@ public class PathBuilderWindow : EditorWindow
     private string CurrentSplineModeName =>
         CurrentSplineMode == PathBuildMode.Mountain
             ? "Mountain"
-            : "River";
+            : "River / Road";
 
     private void DrawStageTabs()
     {
@@ -618,15 +688,21 @@ public class PathBuilderWindow : EditorWindow
             using (new EditorGUILayout.HorizontalScope())
             {
                 string previewState = _builder.GeneratedRoot
-                    ? "Preview ready"
+                    ? (_builder.GeneratedRoot.gameObject.activeSelf
+                        ? "Preview ready"
+                        : "Preview retained · hidden")
                     : "Preview empty";
                 EditorGUILayout.LabelField(
                     $"{_builder.knots.Count} points · {previewState}",
                     EditorStyles.miniLabel);
                 GUILayout.FlexibleSpace();
-                if (GUILayout.Button("New Path", GUILayout.Width(76f)))
+                if (GUILayout.Button(
+                    new GUIContent("New Path", "创建一条新的路径"),
+                    GUILayout.Width(76f)))
                     CreateSession(_builder.mode);
-                if (GUILayout.Button("Discard", GUILayout.Width(66f)))
+                if (GUILayout.Button(
+                    new GUIContent("Discard", "删除当前未烘焙的路径和预览"),
+                    GUILayout.Width(66f)))
                     DiscardSession();
             }
 
@@ -635,22 +711,35 @@ public class PathBuilderWindow : EditorWindow
 
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("Redraw", GUILayout.Height(30f)))
+                if (GUILayout.Button(
+                    new GUIContent("Redraw", "清空控制点并重新绘制样条"),
+                    GUILayout.Height(30f)))
                     BeginDrawing(true);
 
                 using (new EditorGUI.DisabledScope(
                     _isDrawing || _builder.knots.Count < 2))
                 {
                     GUI.backgroundColor = new Color(0.5f, 0.85f, 0.5f);
-                    if (GUILayout.Button("Preview", GUILayout.Height(30f)))
+                    if (GUILayout.Button(
+                        new GUIContent("Preview", "根据当前样条和参数更新实时预览"),
+                        GUILayout.Height(30f)))
                         PathBuilderGenerator.Rebuild(_builder);
                     GUI.backgroundColor = Color.white;
 
-                    if (GUILayout.Button("Clear", GUILayout.Height(30f)))
+                    if (GUILayout.Button(
+                        new GUIContent("Clear", "仅清除生成结果，保留样条和参数"),
+                        GUILayout.Height(30f)))
                         PathBuilderGenerator.ClearGenerated(_builder);
 
                     GUI.backgroundColor = new Color(0.55f, 0.75f, 1f);
-                    if (GUILayout.Button("Bake", GUILayout.Height(30f)))
+                    string bakeTooltip = _builder.mode == PathBuildMode.Mountain
+                        ? (_builder.keepMountainAuthoringAfterBake
+                            ? "生成并连接山脉 Prefab，同时保留样条线和设置"
+                            : "生成并连接山脉 Prefab，然后结束当前样条编辑")
+                        : "保留当前结果并结束该路径的编辑状态";
+                    if (GUILayout.Button(
+                        new GUIContent("Bake", bakeTooltip),
+                        GUILayout.Height(30f)))
                         BakeCurrentSession();
                     GUI.backgroundColor = Color.white;
                 }
@@ -662,16 +751,16 @@ public class PathBuilderWindow : EditorWindow
     {
         string modeName = _builder.mode == PathBuildMode.Mountain
             ? "Mountain"
-            : "River";
+            : GetRibbonModeName(_builder.ribbonPreset);
 
         EditorGUILayout.Space(8f);
         EditorGUILayout.LabelField(
             $"{modeName} · Draw Spline",
             EditorStyles.boldLabel);
         EditorGUILayout.HelpBox(
-            "在 Scene 视图中直接左键连续落点。\n"
-            + "Enter 或右键完成；Backspace 删除上一个点。"
-            + "点击第一个点可直接闭合并完成。",
+            "单击生成直线角点；左键按住并拖动可拉出贝塞尔手柄。\n"
+            + "拖动时会实时调整进入和离开该点的曲线。\n"
+            + "回车键或右键完成；退格键删除上一个点；点击首点闭合。",
             MessageType.Info);
 
         using (new EditorGUILayout.VerticalScope("box"))
@@ -679,7 +768,9 @@ public class PathBuilderWindow : EditorWindow
             EditorGUILayout.LabelField(
                 $"Control Points: {_builder.knots.Count}");
             _builder.projectToSurface = EditorGUILayout.Toggle(
-                "Project To Surface",
+                new GUIContent(
+                    "Place Points On Surface",
+                    "绘制时通过射线把新增控制点放到指定地表上"),
                 _builder.projectToSurface);
             if (_builder.projectToSurface)
             {
@@ -687,7 +778,7 @@ public class PathBuilderWindow : EditorWindow
                     "Surface Layer",
                     _builder.surfaceMask);
                 _builder.surfaceOffset = EditorGUILayout.FloatField(
-                    "Height Offset",
+                    new GUIContent("Height Offset", "控制点相对命中地表的垂直偏移"),
                     _builder.surfaceOffset);
             }
         }
@@ -697,14 +788,18 @@ public class PathBuilderWindow : EditorWindow
             using (new EditorGUI.DisabledScope(
                 _builder.knots.Count == 0))
             {
-                if (GUILayout.Button("Undo Last Point", GUILayout.Height(30f)))
+                if (GUILayout.Button(
+                    new GUIContent("Undo Last Point", "删除最后绘制的控制点"),
+                    GUILayout.Height(30f)))
                     RemoveLastDrawingPoint();
             }
 
             using (new EditorGUI.DisabledScope(
                 _builder.knots.Count < 2))
             {
-                if (GUILayout.Button("Finish & Preview", GUILayout.Height(30f)))
+                if (GUILayout.Button(
+                    new GUIContent("Finish & Preview", "结束绘制并生成实时预览"),
+                    GUILayout.Height(30f)))
                     FinishDrawing();
             }
         }
@@ -725,12 +820,21 @@ public class PathBuilderWindow : EditorWindow
             return;
         }
 
-        if (CreateSession(mode))
-            activeTab = requestedTab;
-        else if (_builder && _builder.Anchor)
-            activeTab = _builder.mode == PathBuildMode.Mountain
-                ? BuilderTab.Mountain
-                : BuilderTab.River;
+        SaveCurrentSession();
+        DestroyEditor();
+        _builder = null;
+        _isDrawing = false;
+        _hasHoverPosition = false;
+
+        if (PathBuilderAuthoringStorage.TryRestore(
+                mode,
+                out PathSpline restored))
+        {
+            ActivateSession(restored);
+            return;
+        }
+
+        CreateSession(mode);
     }
 
     private bool CreateSession(PathBuildMode mode)
@@ -738,7 +842,7 @@ public class PathBuilderWindow : EditorWindow
         if (_builder && _builder.Anchor)
         {
             bool replace = EditorUtility.DisplayDialog(
-                "Path Builder",
+                "路径构建",
                 "当前有未烘焙的样条。是否丢弃并创建新的样条？",
                 "创建新的",
                 "取消");
@@ -747,9 +851,7 @@ public class PathBuilderWindow : EditorWindow
             DiscardSession();
         }
 
-        _builder = CreateInstance<PathSpline>();
-        _builder.hideFlags = HideFlags.DontSaveInBuild;
-        _builder.mode = mode;
+        _builder = PathBuilderAuthoringStorage.Create(mode);
         _builder.projectToSurface = true;
         _builder.EnsureDefaults();
 
@@ -766,7 +868,7 @@ public class PathBuilderWindow : EditorWindow
         else if (SceneView.lastActiveSceneView)
             position = SceneView.lastActiveSceneView.pivot;
         anchor.transform.position = position;
-        _builder.Anchor = anchor.transform;
+        PathBuilderAuthoringStorage.Bind(_builder, anchor.transform);
 
         if (mode == PathBuildMode.Mountain)
             LoadDefaultMountains();
@@ -787,23 +889,109 @@ public class PathBuilderWindow : EditorWindow
         return true;
     }
 
+    private void RestoreWindowSession()
+    {
+        if (_builder && PathBuilderAuthoringStorage.TryRebind(_builder))
+            return;
+
+        _builder = null;
+        if (activeTab == BuilderTab.Wall)
+            return;
+
+        ScheduleDeferredRestore();
+    }
+
+    private void ScheduleDeferredRestore()
+    {
+        if (_restoreScheduled)
+            return;
+        _restoreScheduled = true;
+        EditorApplication.delayCall += RestoreDeferredSession;
+    }
+
+    private void RestoreDeferredSession()
+    {
+        EditorApplication.delayCall -= RestoreDeferredSession;
+        _restoreScheduled = false;
+        if (!this || activeTab == BuilderTab.Wall
+            || (_builder && _builder.Anchor))
+        {
+            return;
+        }
+
+        if (EditorApplication.isCompiling
+            || EditorApplication.isUpdating)
+        {
+            ScheduleDeferredRestore();
+            return;
+        }
+
+        if (PathBuilderAuthoringStorage.TryRestore(
+                CurrentSplineMode,
+                out PathSpline restored))
+        {
+            ActivateSession(restored);
+        }
+    }
+
+    private void ActivateSession(PathSpline builder)
+    {
+        if (!builder || !PathBuilderAuthoringStorage.TryRebind(builder))
+            return;
+
+        DestroyEditor();
+        _builder = builder;
+        _builder.EnsureDefaults();
+        activeTab = builder.mode == PathBuildMode.Mountain
+            ? BuilderTab.Mountain
+            : BuilderTab.River;
+        _isDrawing = false;
+        _hasHoverPosition = false;
+        _splineStage = builder.knots.Count >= 2
+            ? SplineStage.Adjust
+            : SplineStage.Draw;
+        RecreateEditor();
+
+        if (!_builder.GeneratedRoot
+            && _builder.autoRebuild
+            && _builder.knots.Count >= 2)
+        {
+            PathBuilderGenerator.Rebuild(_builder, false);
+        }
+
+        Repaint();
+        SceneView.RepaintAll();
+    }
+
+    private void SaveCurrentSession()
+    {
+        if (_builder && _builder.Anchor)
+            PathBuilderAuthoringStorage.Save(_builder);
+    }
+
     private void BeginDrawing(bool resetPath)
     {
         if (!_builder || !_builder.Anchor)
             return;
 
-        PathBuilderGenerator.ClearGenerated(_builder);
+        ResetPenDrag();
+
         if (resetPath)
         {
+            PathBuilderGenerator.ClearGenerated(_builder);
             Undo.RecordObject(_builder, "Redraw Path Builder");
             _builder.knots.Clear();
             _builder.closed = false;
+            _drawingChanged = true;
+        }
+        else
+        {
+            _drawingChanged = false;
         }
 
         _isDrawing = true;
         _splineStage = SplineStage.Draw;
         _hasHoverPosition = false;
-        EditorUtility.SetDirty(_builder);
         SceneView.RepaintAll();
         Repaint();
     }
@@ -816,30 +1004,55 @@ public class PathBuilderWindow : EditorWindow
             return;
         }
 
-        Undo.RecordObject(_builder, "Finish Path Builder");
-        if (closeLoop && _builder.knots.Count >= 3)
+        bool closeChanged = closeLoop
+            && _builder.knots.Count >= 3
+            && !_builder.closed;
+        bool rebuild = _drawingChanged || closeChanged;
+        if (rebuild)
+        {
+            Undo.RecordObject(_builder, "Finish Path Builder");
+        }
+        if (closeChanged)
             _builder.closed = true;
 
-        for (int i = 0; i < _builder.knots.Count; i++)
-            _builder.SmoothKnot(i);
-
+        ResetPenDrag();
         _isDrawing = false;
+        _drawingChanged = false;
         _splineStage = SplineStage.Adjust;
         _hasHoverPosition = false;
-        EditorUtility.SetDirty(_builder);
-        PathBuilderGenerator.Rebuild(_builder, true);
+        if (rebuild)
+        {
+            EditorUtility.SetDirty(_builder);
+            PathBuilderGenerator.Rebuild(_builder, true);
+        }
         SceneView.RepaintAll();
         Repaint();
     }
 
     private void BakeCurrentSession()
     {
-        if (!_builder || !PathBuilderGenerator.Bake(_builder))
+        PathSpline completedBuilder = _builder;
+        if (!completedBuilder
+            || !PathBuilderGenerator.Bake(completedBuilder))
             return;
 
+        bool keepAuthoring = completedBuilder.mode == PathBuildMode.Mountain
+            && completedBuilder.keepMountainAuthoringAfterBake;
+        if (keepAuthoring)
+        {
+            PathBuilderAuthoringStorage.Save(completedBuilder);
+            _isDrawing = false;
+            _splineStage = SplineStage.Adjust;
+            _hasHoverPosition = false;
+            ShowNotification(new GUIContent("Prefab 已生成，样条与设置已保留"));
+            SceneView.RepaintAll();
+            Repaint();
+            return;
+        }
+
         DestroyEditor();
-        DestroyImmediate(_builder);
         _builder = null;
+        PathBuilderAuthoringStorage.Delete(completedBuilder);
         _isDrawing = false;
         _splineStage = SplineStage.Output;
         _hasHoverPosition = false;
@@ -850,14 +1063,16 @@ public class PathBuilderWindow : EditorWindow
     private void DiscardSession()
     {
         DestroyEditor();
-        if (_builder)
-        {
-            PathBuilderGenerator.ClearGenerated(_builder);
-            if (_builder.Anchor)
-                Undo.DestroyObjectImmediate(_builder.Anchor.gameObject);
-            DestroyImmediate(_builder);
-        }
+        PathSpline discardedBuilder = _builder;
         _builder = null;
+        if (discardedBuilder)
+        {
+            PathBuilderGenerator.ClearGenerated(discardedBuilder);
+            if (discardedBuilder.Anchor)
+                Undo.DestroyObjectImmediate(
+                    discardedBuilder.Anchor.gameObject);
+            PathBuilderAuthoringStorage.Delete(discardedBuilder);
+        }
         _isDrawing = false;
         _hasHoverPosition = false;
         SceneView.RepaintAll();
@@ -866,7 +1081,7 @@ public class PathBuilderWindow : EditorWindow
 
     private void LoadDefaultMountains()
     {
-        _builder.mountainPrefabs.Clear();
+        _builder.mountainSources.Clear();
         for (int i = 0; i < DefaultMountainPaths.Length; i++)
         {
             GameObject prefab =
@@ -874,8 +1089,9 @@ public class PathBuilderWindow : EditorWindow
                     DefaultMountainPaths[i]);
             if (!prefab)
                 continue;
-            _builder.mountainPrefabs.Add(new MountainPrefabEntry
+            _builder.mountainSources.Add(new MountainSourceEntry
             {
+                sourceType = MountainSourceType.Prefab,
                 prefab = prefab,
                 weight = 1f
             });
@@ -904,7 +1120,11 @@ public class PathBuilderWindow : EditorWindow
             || !_builder || !_builder.Anchor)
             return;
 
-        DrawSceneWorkspaceOverlay(sceneView);
+        // Once the user selects another scene object, stop registering spline
+        // controls so Unity's native W/E/R transform handles remain available.
+        if (HasExternalSceneSelection())
+            return;
+
         if (_isDrawing)
             DrawSplinePlacement(sceneView);
         else if (_builderEditor
@@ -915,11 +1135,11 @@ public class PathBuilderWindow : EditorWindow
     private void DrawSplinePlacement(SceneView sceneView)
     {
         Event current = Event.current;
+        int penControlId = GUIUtility.GetControlID(
+            PenToolControlHash,
+            FocusType.Passive);
         if (current.type == EventType.Layout)
-        {
-            HandleUtility.AddDefaultControl(
-                GUIUtility.GetControlID(FocusType.Passive));
-        }
+            HandleUtility.AddDefaultControl(penControlId);
 
         Ray ray = HandleUtility.GUIPointToWorldRay(current.mousePosition);
         _hasHoverPosition = TryGetPlacementPosition(
@@ -928,8 +1148,48 @@ public class PathBuilderWindow : EditorWindow
 
         DrawDraftSpline();
 
+        if (_penDragging
+            && GUIUtility.hotControl == _penDragControlId)
+        {
+            if (current.type == EventType.MouseDrag
+                || (current.type == EventType.MouseUp
+                    && current.button == 0))
+            {
+                UpdatePenDrag(current.mousePosition);
+                EditorUtility.SetDirty(_builder);
+                sceneView.Repaint();
+                Repaint();
+            }
+
+            if (current.type == EventType.MouseUp
+                && current.button == 0)
+            {
+                GUIUtility.hotControl = 0;
+                ResetPenDrag();
+            }
+
+            if (current.type == EventType.MouseDrag
+                || current.type == EventType.MouseUp)
+            {
+                current.Use();
+                return;
+            }
+        }
+
         if (current.alt)
             return;
+
+        if (current.type == EventType.MouseDown
+            && current.button == 0
+            && (current.control || current.command))
+        {
+            PathBuilderSplineUI.PickSceneObject(
+                current.mousePosition,
+                current.shift);
+            current.Use();
+            sceneView.Repaint();
+            return;
+        }
 
         if (current.type == EventType.MouseDown
             && current.button == 0)
@@ -944,11 +1204,19 @@ public class PathBuilderWindow : EditorWindow
             if (_hasHoverPosition)
             {
                 Undo.RecordObject(_builder, "Add Spline Point");
-                _builder.AppendKnot(
+                MarkDrawingChanged();
+                _penDragKnotIndex = _builder.AppendPenKnot(
                     _builder.Anchor.InverseTransformPoint(
                         _hoverWorldPosition));
+                _penDragging = true;
+                _penHandleDragged = false;
+                _penDragControlId = penControlId;
+                _penDragStartGui = current.mousePosition;
+                _penDragAnchorWorld = _hoverWorldPosition;
+                GUIUtility.hotControl = penControlId;
                 EditorUtility.SetDirty(_builder);
                 current.Use();
+                sceneView.Repaint();
                 Repaint();
             }
         }
@@ -1041,62 +1309,173 @@ public class PathBuilderWindow : EditorWindow
                 Vector3.up,
                 HandleUtility.GetHandleSize(_hoverWorldPosition) * 0.08f);
         }
+
+        DrawActivePenTangents();
     }
 
-    private void DrawSceneWorkspaceOverlay(SceneView sceneView)
+    private void DrawActivePenTangents()
     {
-        Handles.BeginGUI();
-        Rect area = new Rect(12f, 12f, 360f, 88f);
-        GUILayout.BeginArea(area, EditorStyles.helpBox);
-        GUILayout.Label(
-            $"{CurrentSplineModeName} · {_splineStage}",
-            EditorStyles.miniBoldLabel);
-        using (new EditorGUILayout.HorizontalScope())
+        if (!_penDragging
+            || _penDragKnotIndex < 0
+            || _penDragKnotIndex >= _builder.knots.Count)
         {
-            bool drawSelected = GUILayout.Toggle(
-                _splineStage == SplineStage.Draw,
-                "Draw",
-                EditorStyles.miniButtonLeft);
-            if (drawSelected && _splineStage != SplineStage.Draw)
-            {
-                BeginDrawing(false);
-            }
-
-            using (new EditorGUI.DisabledScope(
-                _builder.knots.Count < 2))
-            {
-                bool adjustSelected = GUILayout.Toggle(
-                    _splineStage == SplineStage.Adjust,
-                    "Adjust",
-                    EditorStyles.miniButtonMid);
-                if (adjustSelected
-                    && _splineStage != SplineStage.Adjust)
-                {
-                    ChangeSplineStage(SplineStage.Adjust);
-                }
-
-                bool outputSelected = GUILayout.Toggle(
-                    _splineStage == SplineStage.Output,
-                    "Output",
-                    EditorStyles.miniButtonRight);
-                if (outputSelected
-                    && _splineStage != SplineStage.Output)
-                {
-                    ChangeSplineStage(SplineStage.Output);
-                }
-            }
-
-            if (GUILayout.Button("Preview", EditorStyles.miniButton))
-                PathBuilderGenerator.Rebuild(_builder, false);
+            return;
         }
 
-        GUILayout.Label(
-            _isDrawing
-                ? "左键落点 · Enter/右键完成 · Backspace 撤点 · 点击首点闭合"
-                : "拖动控制点、黄色切线；河流可拖动两侧宽度手柄",
-            EditorStyles.wordWrappedMiniLabel);
-        GUILayout.EndArea();
-        Handles.EndGUI();
+        PathKnot knot = _builder.knots[_penDragKnotIndex];
+        Vector3 point = _builder.Anchor.TransformPoint(knot.position);
+        Vector3 tangentIn = _builder.Anchor.TransformPoint(
+            knot.position + knot.tangentIn);
+        Vector3 tangentOut = _builder.Anchor.TransformPoint(
+            knot.position + knot.tangentOut);
+        float size = HandleUtility.GetHandleSize(point) * 0.055f;
+
+        Color previousColor = Handles.color;
+        Handles.color = new Color(1f, 0.72f, 0.08f, 1f);
+        Handles.DrawLine(tangentIn, tangentOut);
+        Handles.CubeHandleCap(
+            0,
+            tangentIn,
+            Quaternion.identity,
+            size,
+            EventType.Repaint);
+        Handles.CubeHandleCap(
+            0,
+            tangentOut,
+            Quaternion.identity,
+            size,
+            EventType.Repaint);
+        Handles.color = previousColor;
+    }
+
+    private void UpdatePenDrag(Vector2 mousePosition)
+    {
+        if (_penDragKnotIndex < 0
+            || _penDragKnotIndex >= _builder.knots.Count)
+        {
+            return;
+        }
+
+        if (!_penHandleDragged
+            && Vector2.Distance(_penDragStartGui, mousePosition)
+                < PenDragThreshold)
+        {
+            return;
+        }
+
+        Ray ray = HandleUtility.GUIPointToWorldRay(mousePosition);
+        if (!TryGetPlacementPosition(ray, out Vector3 handleWorld))
+            return;
+
+        _penHandleDragged = true;
+        Vector3 worldTangent = handleWorld - _penDragAnchorWorld;
+        Vector3 localTangent =
+            _builder.Anchor.InverseTransformVector(worldTangent);
+        PathKnot knot = _builder.knots[_penDragKnotIndex];
+        knot.tangentIn = -localTangent;
+        knot.tangentOut = localTangent;
+        knot.tangentMode = PathTangentMode.Mirrored;
+        knot.brokenTangents = false;
+    }
+
+    private void ResetPenDrag()
+    {
+        _penDragging = false;
+        _penHandleDragged = false;
+        _penDragControlId = 0;
+        _penDragKnotIndex = -1;
+    }
+
+    internal bool IsSceneOverlayVisible =>
+        activeTab != BuilderTab.Wall
+        && _builder
+        && _builder.Anchor;
+
+    private bool HasExternalSceneSelection()
+    {
+        Transform active = Selection.activeTransform;
+        return active && active != _builder.Anchor;
+    }
+
+    private void ResumeSplineEditing()
+    {
+        if (!_builder || !_builder.Anchor)
+            return;
+
+        Selection.activeGameObject = _builder.Anchor.gameObject;
+        SceneView.RepaintAll();
+        Repaint();
+    }
+
+    internal void DrawSceneWorkspaceOverlayContent()
+    {
+        using (new EditorGUILayout.VerticalScope(GUILayout.Width(340f)))
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                bool drawSelected = GUILayout.Toggle(
+                    _splineStage == SplineStage.Draw,
+                    new GUIContent("Draw", "进入样条绘制模式"),
+                    EditorStyles.miniButtonLeft);
+                if (drawSelected && _splineStage != SplineStage.Draw)
+                {
+                    BeginDrawing(false);
+                }
+
+                using (new EditorGUI.DisabledScope(
+                    _builder.knots.Count < 2))
+                {
+                    bool adjustSelected = GUILayout.Toggle(
+                        _splineStage == SplineStage.Adjust,
+                        new GUIContent("Adjust", "调整样条控制点和生成参数"),
+                        EditorStyles.miniButtonMid);
+                    if (adjustSelected
+                        && _splineStage != SplineStage.Adjust)
+                    {
+                        ChangeSplineStage(SplineStage.Adjust);
+                    }
+
+                    bool outputSelected = GUILayout.Toggle(
+                        _splineStage == SplineStage.Output,
+                        new GUIContent("Output", "查看摘要并烘焙最终结果"),
+                        EditorStyles.miniButtonRight);
+                    if (outputSelected
+                        && _splineStage != SplineStage.Output)
+                    {
+                        ChangeSplineStage(SplineStage.Output);
+                    }
+                }
+
+                if (GUILayout.Button(
+                    new GUIContent("Preview", "立即重建实时预览"),
+                    EditorStyles.miniButton))
+                    PathBuilderGenerator.Rebuild(_builder, false);
+            }
+
+            if (HasExternalSceneSelection())
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    GUILayout.Label(
+                        "外部物体操作中，W/E/R 使用 Unity 原生手柄",
+                        EditorStyles.wordWrappedMiniLabel);
+                    if (GUILayout.Button(
+                        new GUIContent("Resume Path", "重新选择路径并继续编辑"),
+                        EditorStyles.miniButton,
+                        GUILayout.Width(86f)))
+                    {
+                        ResumeSplineEditing();
+                    }
+                }
+                return;
+            }
+
+            GUILayout.Label(
+                _isDrawing
+                    ? "单击直线点 · 按住拖动创建曲线手柄 · Ctrl+左键选择模型 · Enter/右键完成"
+                    : "双击曲线插点 · 单击/框选控制点 · W/E/R 调整 · Shift+S 平滑",
+                EditorStyles.wordWrappedMiniLabel);
+        }
     }
 
     private bool TryGetPlacementPosition(
@@ -1127,6 +1506,19 @@ public class PathBuilderWindow : EditorWindow
         return false;
     }
 
+    private static string GetRibbonModeName(RibbonPathPreset preset)
+    {
+        switch (preset)
+        {
+            case RibbonPathPreset.NaturalRoad:
+                return "Natural Road";
+            case RibbonPathPreset.RegularRoad:
+                return "Regular Road";
+            default:
+                return "River";
+        }
+    }
+
     private bool CanCloseAtFirstPoint(Vector2 mousePosition)
     {
         if (_builder.knots.Count < 3)
@@ -1144,10 +1536,20 @@ public class PathBuilderWindow : EditorWindow
             return;
 
         Undo.RecordObject(_builder, "Remove Spline Point");
+        MarkDrawingChanged();
         _builder.knots.RemoveAt(_builder.knots.Count - 1);
         EditorUtility.SetDirty(_builder);
         SceneView.RepaintAll();
         Repaint();
+    }
+
+    private void MarkDrawingChanged()
+    {
+        if (_drawingChanged)
+            return;
+
+        _drawingChanged = true;
+        PathBuilderGenerator.ClearGenerated(_builder);
     }
 
     private static LayerMask LayerMaskField(
@@ -1177,5 +1579,33 @@ public class PathBuilderWindow : EditorWindow
         }
         selected.value = mask;
         return selected;
+    }
+}
+
+[Overlay(
+    typeof(SceneView),
+    "ZXXTools.PathBuilder.SceneWorkspace",
+    "路径构建",
+    true)]
+internal sealed class PathBuilderSceneOverlay : IMGUIOverlay, ITransientOverlay
+{
+    public bool visible
+    {
+        get
+        {
+            PathBuilderWindow window =
+                PathBuilderWindow.ActiveSceneOverlayWindow;
+            return window && window.IsSceneOverlayVisible;
+        }
+    }
+
+    public override void OnGUI()
+    {
+        PathBuilderWindow window =
+            PathBuilderWindow.ActiveSceneOverlayWindow;
+        if (!window || !window.IsSceneOverlayVisible)
+            return;
+
+        window.DrawSceneWorkspaceOverlayContent();
     }
 }

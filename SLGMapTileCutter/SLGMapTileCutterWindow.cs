@@ -13,7 +13,7 @@ namespace SLGMapTileCutter.Editor
     /// </summary>
     public sealed class SLGMapTileCutterWindow : EditorWindow
     {
-        private const string DefaultOutputFolder = "Assets/Generated/SLGMapTiles";
+        private const string DefaultOutputFolder = "Assets/Generated/SLGMapTileCutter";
         private const string PreviewColliderName = "__SLGMapTileCutterPreviewCollider";
         [SerializeField] private SLGMapTileMapAsset _configuration;
         [SerializeField] private Texture2D _lineTexture;
@@ -4486,12 +4486,20 @@ namespace SLGMapTileCutter.Editor
 
             string folder = NormalizeAssetFolder(_outputFolder);
             EnsureAssetFolder(folder);
+            string modelFolder = folder + "/Models";
+            string materialFolder = folder + "/Materials";
+            string textureFolder = folder + "/Textures";
+            string settingFolder = folder + "/Settings";
+            EnsureAssetFolder(modelFolder);
+            EnsureAssetFolder(materialFolder);
+            EnsureAssetFolder(textureFolder);
+            EnsureAssetFolder(settingFolder);
             MeshRenderer sourceRenderer = _target.GetComponent<MeshRenderer>();
             Material[] sourceMaterials = sourceRenderer != null
                 ? sourceRenderer.sharedMaterials
                 : Array.Empty<Material>();
             Texture2D outlineDistanceMap = CreateOutlineDistanceMap(
-                folder, _target.name);
+                textureFolder, _target.name);
 
             string generatedRootName = "SLGTileMap_" + _target.name;
             RemovePreviousGeneratedRoot(generatedRootName, _target.transform.parent);
@@ -4532,7 +4540,7 @@ namespace SLGMapTileCutter.Editor
                 mesh.RecalculateBounds();
 
                 string meshPath = AssetDatabase.GenerateUniqueAssetPath(
-                    folder + "/" + mesh.name + ".asset");
+                    modelFolder + "/" + mesh.name + ".asset");
                 AssetDatabase.CreateAsset(mesh, meshPath);
 
                 GameObject tileObject = new GameObject(mesh.name);
@@ -4541,7 +4549,7 @@ namespace SLGMapTileCutter.Editor
                 MeshFilter filter = tileObject.AddComponent<MeshFilter>();
                 filter.sharedMesh = mesh;
                 MeshRenderer renderer = tileObject.AddComponent<MeshRenderer>();
-                renderer.sharedMaterials = CreateTileMaterials(folder, mesh.name, mesh.subMeshCount,
+                renderer.sharedMaterials = CreateTileMaterials(materialFolder, mesh.name, mesh.subMeshCount,
                     sourceMaterials, label, outlineDistanceMap);
             }
 
@@ -4580,7 +4588,7 @@ namespace SLGMapTileCutter.Editor
             mapAsset.manualSegments.AddRange(_manualSegments);
             mapAsset.manualEraseSegments.AddRange(_manualEraseSegments);
             string configPath = AssetDatabase.GenerateUniqueAssetPath(
-                folder + "/" + mapAsset.name + ".asset");
+                settingFolder + "/" + mapAsset.name + ".asset");
             AssetDatabase.CreateAsset(mapAsset, configPath);
 
             if (_hideSourceOnGenerate && sourceRenderer != null)

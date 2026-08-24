@@ -13,7 +13,7 @@ git clone https://github.com/Changhenghyeng/ZXXToolBox.git Assets/ZXXToolBox
 或通过 Unity Package Manager 以 git URL 导入：
 
 ```
-https://github.com/Changhenghyeng/ZXXToolBox.git#v0.4.0
+https://github.com/Changhenghyeng/ZXXToolBox.git#v0.5.0
 ```
 
 ---
@@ -30,7 +30,9 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.4.0
 | **BuildingCardTool** | 建筑面片预制体批量生成，用于快速搭建主城建筑白模 | 工具箱面板 |
 | **ConvertVariantToNormalPrefab** | 将 Prefab Variant 转换为普通 Prefab | 工具箱面板 |
 | **DayChangeTransitionTool** | 昼夜切换材质过渡编辑与预览 | 工具箱面板 |
+| **FBXMeshEditor** | 场景中直接选择并移动静态模型顶点，支持 Undo | 工具箱面板 |
 | **FogOfWarTool** | 战争迷雾系统设置与生成 | 工具箱面板 |
+| **GeneratedAssetsManager** | 整理、审计并清理 Assets/Generated 工具产物 | 工具箱面板 |
 | **GitPathNavigator** | 在 Unity 内快速跳转到 Git 仓库路径 | 工具箱面板 / `Ctrl+G` |
 | **LabelTool** | 场景视图名称标签（Billboard 模式），含竹简气泡框样式 | 工具箱面板 |
 | **LightCookieScroller** | 灯光 Cookie 纹理滚动动画（云影/焦散/斑驳光影） | 工具箱面板 |
@@ -48,6 +50,7 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.4.0
 | **SLGTerrainBaker** | 沙盘地形烘焙，合成贴图生成 | 工具箱面板 |
 | **ShadowBakerTool** | 阴影贴图烘焙 + 贴花生成，含 Blur/Silhouette Shader | 工具箱面板 |
 | **ShadowCastOffTool** | 批量关闭选中物体的阴影投射 | 工具箱面板 |
+| **ToonMaterialConverter** | ToonOutline 普通/打包 Shader 双向转换，输出 BC 与 N_M_R 贴图 | 工具箱面板 |
 | **TransparentScreenshot** | 透明背景截图 + 粒子序列渲染 | 工具箱面板 / `Ctrl+Shift+X` |
 
 ### 🏃 运行时组件
@@ -66,6 +69,7 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.4.0
 | **SimpleLit_BottomFade_Wave** | 植被 | SimpleLit 光照 + 根部渐隐 + 风力波动 + 深度预写 |
 | **StylizedRiver** | 水面 | 双层法线混合 + 焦散 + 泡沫 + 速度线 + 深浅渐变 |
 | **ToonOutline_URP** | 描边 | 卡通风格外描边 |
+| **ToonOutline_URP_Packed** | 描边 | 卡通描边打包版（BC + N_M_R 合并贴图） |
 | **SelfShadowBaker** | 阴影 | SDF 自阴影投射 |
 | **SLGMapTileInnerOutline** | 描边 | 沙盘地块内描边 |
 | **SLG_TerrainComposite_Baker** | 地形 | 地形合成烘焙 |
