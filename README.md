@@ -63,6 +63,8 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.5.0
 
 ### 🎨 Shader
 
+#### 最终效果 Shader（运行时渲染，赋给最终材质）
+
 | Shader | 类型 | 说明 |
 |--------|------|------|
 | **ShadowDecal_Gradient_URP** | 阴影/贴花 | 渐变方向/角度/Lp-norm 距离/SkyTint 天空着色 |
@@ -70,16 +72,23 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.5.0
 | **StylizedRiver** | 水面 | 双层法线混合 + 焦散 + 泡沫 + 速度线 + 深浅渐变 |
 | **ToonOutline_URP** | 描边 | 卡通风格外描边 |
 | **ToonOutline_URP_Packed** | 描边 | 卡通描边打包版（BC + N_M_R 合并贴图） |
-| **SelfShadowBaker** | 阴影 | SDF 自阴影投射 |
 | **SLGMapTileInnerOutline** | 描边 | 沙盘地块内描边 |
-| **SLG_TerrainComposite_Baker** | 地形 | 地形合成烘焙 |
 | **SLG_TerrainBlend_Lite** | 地形 | SLG 地形混合（轻量版） |
 | **SLG_TerrainBlend_Mobile** | 地形 | SLG 地形混合（移动版） |
 | **BuildingCard_URP** | 建筑 | 建筑面片图集 URP |
-| **Blur_URP** | 后处理 | 模糊 |
-| **Silhouette_URP** | 剪影 | 剪影效果 |
 | **Fog Of War** | 迷雾 | 网格战争迷雾 |
 | **LightCookieScroller** | 光照 | Light Cookie UV 滚动 |
+
+#### 工具过程 Shader（Hidden，配合工具工作的中间产物，非最终效果）
+
+| Shader | 所属工具 | 说明 |
+|--------|----------|------|
+| **SelfShadowBaker** | SelfShadowBaker | SDF 自阴影烘焙，生成阴影遮罩贴图 |
+| **SLG_TerrainComposite_Baker** | SLGTerrainBaker | 地形合成贴图烘焙 |
+| **Blur_URP** | ShadowBakerTool | 阴影贴图模糊 |
+| **Silhouette_URP** | ShadowBakerTool | 阴影剪影生成 |
+| **FogGridDebugOverlay** | FogOfWarTool | 迷雾网格调试覆盖层 |
+| **ToonTextureConversion** | ToonMaterialConverter | ToonOutline 贴图转换（BC/N_M_R） |
 
 ---
 
