@@ -89,6 +89,7 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.5.0
 |------|------|
 | Unity | 2022.3+ |
 | Render Pipeline | URP 14.x |
+| Spine (spine-unity) | 4.2.x |
 
 ---
 
