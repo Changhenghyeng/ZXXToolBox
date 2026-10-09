@@ -10,7 +10,8 @@
 |------|------|
 | `FogGridClickSystem.cs` | 迷雾网格点击交互系统 |
 | `Fog Of War.shader` | 战争迷雾渲染 Shader |
+| `Manual Cloud Fog.shader` | 手动云雾渲染 Shader |
 
 ## 配套 Editor 工具
 
-对应的编辑器工具位于 `../FogOfWarTool/`（Editor 目录），提供迷雾参数配置与调试功能。
+对应的编辑器工具位于 `../../FogOfWarTool/`（Editor 目录），提供迷雾参数配置与调试功能。

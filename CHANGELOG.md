@@ -1,13 +1,59 @@
 # Changelog
 
 
-## [Unreleased] — 2026-10-09
+## [v0.6.0] — 2026-10-09
 
-- 从当前项目同步最新个人工具代码，并沿文件迁移历史补齐工具箱外的运行时脚本与 Shader。
-- 新增 RockTools、SLGCityEditor、CardGroundBaker 及批量处理工具源码。
-- 补齐自定义 Lit 深度透明、建筑面片、河流/瀑布、地形、烘焙光照/植物风动 Shader 及配套 ShaderGUI、HLSL。
-- 保留两个程序集 GUID 元数据及 ToonOutline 的必要 include，新增源码位置索引和操作说明。
-- 排除其他作者工具、模型、贴图、场景、Prefab 和生成配置。
+相对 v0.5.0，新增 6 个编辑器工具、14 个 Shader / Shader Graph，并更新建筑面片、路径生成、程序化摆放、地块切割和战争迷雾等现有功能。
+
+### 新增工具
+
+- **CardGroundBaker（面片落地烘焙）**：沿指定相机方向，将建筑/山脉等面片投影到世界水平面或 Collider 表面；支持临时预览，烘焙输出新 Mesh 和场景物体。
+- **RockTools（岩石生成）**：使用内置形状或选中的 Mesh、FBX、Prefab 作为来源，生成并烘焙岩石；分离 Editor 与 Runtime 程序集。
+- **SLGCityEditor（城市网格编辑）**：网格绘制、擦除、框选填充/擦除和城门设置；提取城市边界，生成模块化城墙及 Quad/Terrain 地面，支持建筑占地中心对齐网格。
+- **RandomMaterial（随机材质）**：批量随机分配材质，可包含子物体并指定材质槽；可选随机位置、旋转和缩放，分别设置 X/Y/Z 范围。
+- **OverlapSpreader（重叠物体散开）**：以父物体的直接子节点或多选场景物体为整体，检测 XZ 占地重叠并围绕各重叠组中心散开；可调占用范围和间距，支持 Undo。
+- **TransparentQueueSorter（半透队列排序）**：按手动树状列表顺序设置透明材质 Render Queue，可按根节点共用队列或手动指定；临时材质预览，烘焙为独立材质。
+
+### 新增 Shader / Shader Graph（14 个）
+
+- **BakedLightMap.shadergraph**：使用烘焙光照贴图的材质。
+- **BakedLightMap_PlantWind.shader**：烘焙阴影、AO 与补光材质增加植物风动；支持上下/左右四种风力渐变方向，光照、阴影和深度 Pass 使用一致的顶点变形。
+- **BuildingCard_FogDepth_URP.shader**：建筑面片的雾与深度处理版本。
+- **Character Color Adjustment.shadergraph**：角色材质的颜色、色相与饱和度调整。
+- **LitTransparentDepth.shader**：保留 Lit 材质功能的透明深度版本，附带专用 ShaderGUI、Input 与 ForwardPass HLSL。
+- **SLG_TerrainBlend_Mobile_Transparent.shader**：移动版地形混合的透明版本。
+- **SimpleLit_BottomFade.shader**：SimpleLit 根部渐隐版本。
+- **SimpleLit_BottomFade_Shadow.shader**：根部渐隐的阴影支持版本。
+- **SimpleTopBlend.shader**：按坡度混合顶部覆盖贴图与法线，支持世界空间平铺和上下投影方向。
+- **StylizedRiverIntersection.shader**：风格化河流，支持深浅水、岸边/交界泡沫、坡面流纹、顶点波浪和 UV 边缘透明渐变。
+- **StylizedWaterfall.shader**：风格化瀑布，支持双色渐变、双层流纹与法线、底部及交界泡沫。
+- **TerrainBlender.shadergraph**：地形混合与边缘渐隐，X/Y 渐隐宽度和硬度分别控制。
+- **WallWorldVariation_URP.shader**：城墙材质增加世界空间花纹及法线，分别控制 X/Y/Z 投影方向、平铺和强度；附带 ShaderGUI。
+- **Manual Cloud Fog.shader**：战争迷雾配套的手动云雾材质，位于 `Runtime/FogOfWar/`。
+
+### 已有工具改进
+
+- **BuildingCardTool**：增加现有 Prefab 编辑与批量重构，兼容图片面片和 Spine；按现有 BoxCollider 的 X/Z 尺寸重算 Visual 缩放与底面位置，保留碰撞盒、Mesh、材质、UV、骨骼及动画；补充编辑数据保存、底面拟合和源贴图信息修复。
+- **PathBuilder**：增加山脉面片批量烘焙和压平预览，可按相机方向落到世界水平面或 Collider；支持场景物体组输出与共享生成材质；增加 X/Y 翻转、单实例位置/缩放覆盖、场景编辑，并为复制的工作区分离预览资源。
+- **ProcGen**：增加独立的原点物体组预览、确认/取消流程及随机/固定翻转、分轴缩放；整个 Prefab 列表支持批量拖入；摆放避让纳入现有 Renderer/Collider，可读网格按三角形范围登记占用。
+- **SLGMapTileCutter**：增加只提取封闭区域的选项，排除触及图像边界的区域；读取原始线稿像素用于识别，改善轮廓提取精度。
+- **SelfShadowBaker**：将额外遮挡物与烘焙目标分别管理，多个目标共同参与遮挡；批量输出名称去重。
+- **FogGridClickSystem / Fog Of War.shader**：增加区域显露、重置与恢复调试，以及世界原点和可见目标设置接口；调整迷雾边缘渐变宽度与透明度控制。
+- **LightCookieScroller**：增加 Cookie 显示开关；脚本、Shader 和说明统一移到 `Runtime/LightCookieScroller/`。
+- **ZXXToolBox**：注册上述 6 个新工具入口。
+
+### 已有 Shader 改进
+
+- **SLG_TerrainBlend_Mobile**：四类地形分别控制色相与饱和度，增加默认关闭的 Unlit 模式。
+- **SimpleLit_BottomFade_Wave**：移除独立深度预写 Pass，改为 Forward Pass 写入深度，并调整风动计算。
+- **ToonOutline_URP / ToonOutline_URP_Packed**：增加死亡灰化与渐隐支持，补齐所需的 `MiniGameDeathFade.hlsl`。
+
+### 仓库整理与验证范围
+
+- 根据全项目 Git 作者与文件迁移历史同步源码，补齐移动到 ZXXTools 目录外的个人工具及配套文件；原项目路径记录在 [SOURCE_INDEX.md](SOURCE_INDEX.md)，操作说明见 [工具使用说明](Docs/工具使用说明.md)。
+- RockTools 运行时类型归入 `Runtime/RockTools/`，Editor 程序集按名称引用 Runtime；保持 `.meta` 不入库，并补齐运行时目录 README。
+- 本次上传工具、Shader 和必要依赖源码，不包含模型、贴图、场景、Prefab 或生成资产。
+- 已检查源码对应关系、必要 include、程序集引用和目录规则；本次同步未进行 Unity 编译及场景效果验证。
 
 ## [v0.5.0] — 2026-08-24
 
@@ -122,4 +168,3 @@
 - **21 个编辑器工具**：ZXXToolBox（主面板）及全套工具集
 - **9 个 Shader**：阴影、植被、水面、描边、模糊、剪影、迷雾、Light Cookie 等
 - **2 个运行时组件**：DayChangeTransitionController、FogGridClickSystem
-

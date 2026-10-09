@@ -48,9 +48,6 @@ Packages/
 **/ProcGenSettings.asset
 **/ProcGenSettings.asset.meta
 
-# 保留程序集 GUID 引用需要的元数据
-!*.asmdef.meta
-!*.asmref.meta
 
 # 不新增项目美术资产或工具生成物
 *.fbx
@@ -72,4 +69,3 @@ Packages/
 *.unity
 *.scene
 *.asset
-

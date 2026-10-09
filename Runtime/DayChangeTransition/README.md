@@ -12,4 +12,4 @@
 
 ## 配套 Editor 工具
 
-对应的编辑器工具位于 `../DayChangeTransitionTool/`（Editor 目录），提供可视化配置界面。
+对应的编辑器工具位于 `../../DayChangeTransitionTool/`（Editor 目录），提供可视化配置界面。

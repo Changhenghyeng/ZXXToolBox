@@ -1,9 +1,9 @@
 # ZXX ToolBox
 
 
-## 2026-10-09 源码同步
+## v0.6.0 — 2026-10-09
 
-本次按全项目 Git 作者和迁移记录同步个人工具、运行时配套脚本及 Shader，包含 RockTools、SLGCityEditor、CardGroundBaker、OverlapSpreader、RandomMaterial、TransparentQueueSorter 等更新。完整目录和原项目路径见 [源码位置索引](SOURCE_INDEX.md)，详细操作见 [工具使用说明](Docs/工具使用说明.md)。不包含模型、贴图或工具生成资产。
+新增 6 个工具（面片落地烘焙、岩石生成、城市网格编辑、随机材质、重叠物体散开、半透队列排序）和 14 个 Shader / Shader Graph；完善建筑面片编辑、PathBuilder 烘焙、ProcGen 组装与避让、地块切割、阴影烘焙和战争迷雾。逐项变化见 [v0.6.0 更新日志](CHANGELOG.md#v060--2026-10-09)，原项目路径见 [源码位置索引](SOURCE_INDEX.md)，操作见 [工具使用说明](Docs/工具使用说明.md)。
 
 Unity 编辑器工具与 Shader 集合，适用于 **Unity 2022.3+ · URP 14+**。
 
@@ -18,7 +18,7 @@ git clone https://github.com/Changhenghyeng/ZXXToolBox.git Assets/ZXXToolBox
 或通过 Unity Package Manager 以 git URL 导入：
 
 ```
-https://github.com/Changhenghyeng/ZXXToolBox.git#v0.5.0
+https://github.com/Changhenghyeng/ZXXToolBox.git#v0.6.0
 ```
 
 ---
@@ -29,6 +29,12 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.5.0
 
 | 工具 | 功能 | 入口 |
 |------|------|------|
+| **CardGroundBaker** | 按相机方向将面片投影至水平面或 Collider，预览并烘焙新 Mesh | 工具箱面板 |
+| **RockTools** | 使用内置形状或自定义 Mesh/FBX/Prefab 生成并烘焙岩石 | 工具箱面板 |
+| **SLGCityEditor** | 网格绘制城市区域、生成城墙和地面、建筑对齐网格 | 工具箱面板 |
+| **RandomMaterial** | 随机分配材质，可选分轴随机位置、旋转和缩放 | 工具箱面板 |
+| **OverlapSpreader** | 将 XZ 占地重叠的场景物体组散开，可调范围和间距 | 工具箱面板 |
+| **TransparentQueueSorter** | 手动树状顺序设置透明队列，临时预览并烘焙独立材质 | 工具箱面板 |
 | **ZXXToolBox** | 工具箱主面板，可自定义工作流串联多个工具 | `ArtTools > BIGBRO ToolBox` |
 | **BatchRenameTool** | 批量重命名 Hierarchy 中的 GameObject，支持查找替换/前缀后缀/正则 | 工具箱面板 |
 | **BoxColliderGenerator** | 根据 Renderer 包围盒自动生成 BoxCollider | 工具箱面板 |
@@ -64,7 +70,8 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.5.0
 |------|------|------|
 | **DayChangeTransitionController** | 昼夜切换运行时过渡（材质属性动画） | `Runtime/DayChangeTransition/` |
 | **FogGridClickSystem** | 战争迷雾点击交互，正方形网格显露/遮蔽 | `Runtime/FogOfWar/` |
-| **LightCookieScroller** | Light Cookie UV 滚动（需 PlayMode） | `LightCookieScroller/` |
+| **LightCookieScroller** | Light Cookie UV 滚动（需 PlayMode） | `Runtime/LightCookieScroller/` |
+| **RockTools** | 岩石生成、逻辑与烘焙运行时类型 | `Runtime/RockTools/` |
 
 ### 🎨 Shader
 
@@ -72,8 +79,20 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.5.0
 
 | Shader | 类型 | 说明 |
 |--------|------|------|
+| **BakedLightMap / BakedLightMap_PlantWind** | 光照/植被 | 烘焙阴影、AO、补光及植物风动 |
+| **BuildingCard_FogDepth_URP** | 建筑 | 建筑面片雾与深度版本 |
+| **Character Color Adjustment** | 角色 | 角色颜色调整 Shader Graph |
+| **LitTransparentDepth** | 光照/透明 | Lit 透明深度版本及专用 Inspector |
+| **SLG_TerrainBlend_Mobile_Transparent** | 地形 | 移动版地形混合透明版本 |
+| **SimpleLit_BottomFade / SimpleLit_BottomFade_Shadow** | 植被 | 根部渐隐及阴影支持版本 |
+| **SimpleTopBlend** | 混合 | 顶部混合材质 |
+| **StylizedRiverIntersection** | 水面 | 深浅水、岸边泡沫、坡面流纹及边缘透明 |
+| **StylizedWaterfall** | 水面 | 双层流纹/法线、底部与交界泡沫 |
+| **TerrainBlender** | 地形 | 地形混合，X/Y 边缘渐隐宽度与硬度分别控制 |
+| **WallWorldVariation_URP** | 建筑 | 世界空间花纹及法线，分轴投影 |
+| **Manual Cloud Fog** | 迷雾 | 战争迷雾配套云雾材质 |
 | **ShadowDecal_Gradient_URP** | 阴影/贴花 | 渐变方向/角度/Lp-norm 距离/SkyTint 天空着色 |
-| **SimpleLit_BottomFade_Wave** | 植被 | SimpleLit 光照 + 根部渐隐 + 风力波动 + 深度预写 |
+| **SimpleLit_BottomFade_Wave** | 植被 | SimpleLit 光照 + 根部渐隐 + 风力波动，Forward Pass 写入深度 |
 | **StylizedRiver** | 水面 | 双层法线混合 + 焦散 + 泡沫 + 速度线 + 深浅渐变 |
 | **ToonOutline_URP** | 描边 | 卡通风格外描边 |
 | **ToonOutline_URP_Packed** | 描边 | 卡通描边打包版（BC + N_M_R 合并贴图） |
@@ -146,6 +165,7 @@ Unity 中 `Editor` 文件夹下的代码**无法在 PlayMode 运行时访问**�
 | DayChangeTransitionController | DayChangeTransitionTool | 昼夜过渡需在运行时驱动材质属性动画 |
 | FogGridClickSystem + Fog Of War.shader | FogOfWarTool | 战争迷雾需运行时响应点击交互和渲染 |
 | LightCookieScroller | LightCookieScroller | Light Cookie UV 滚动需在 PlayMode 下持续更新 |
+| RockTools 运行时部分 | RockTools/Scripts | 与编辑器程序集分离，位于 Runtime/RockTools |
 
 > 每个 Runtime 组件目录下都有 `README.md` 说明其作用和放置路径。
 
@@ -173,4 +193,3 @@ Unity 中 `Editor` 文件夹下的代码**无法在 PlayMode 运行时访问**�
 ## 贡献
 
 个人工具仓库，欢迎提 Issue 反馈 bug 或工具需求。
-

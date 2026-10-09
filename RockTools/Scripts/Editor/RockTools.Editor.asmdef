@@ -2,7 +2,7 @@
     "name": "RockTools.Editor",
     "rootNamespace": "RockTools",
     "references": [
-        "GUID:a6b6f349c7d843b7b7c22b45ea8cb63a"
+        "RockTools.Runtime"
     ],
     "includePlatforms": [
         "Editor"

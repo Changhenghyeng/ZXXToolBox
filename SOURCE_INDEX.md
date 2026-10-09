@@ -2,7 +2,7 @@
 
 2026-10-09：按 X26 项目的全量代码 Git 历史、重命名记录及现有工具仓库整理。
 
-只同步源码和必要的程序集 GUID 元数据，不同步模型、贴图、材质、场景、Prefab 或生成配置。
+只同步源码和说明，不同步 .meta、模型、贴图、材质、场景、Prefab 或生成配置。
 
 仓库按现有工具目录、Runtime 和 Shaders 结构保存。表中的原项目路径相对于 Assets；复制回原路径可保留工具的项目路径约定。
 
@@ -77,8 +77,8 @@
 | ProcGen/ProcGenWindow.cs | Scripts/Editor/ArtTools/ZXXTools/ProcGen/ProcGenWindow.cs | 本人添加；已追踪移动历史 |
 | ProcGen/SpatialHash.cs | Scripts/Editor/ArtTools/ZXXTools/ProcGen/SpatialHash.cs | 本人添加；已追踪移动历史 |
 | README/CaptureHelper.cs | Scripts/Editor/ArtTools/ZXXTools/README/CaptureHelper.cs | 本人添加；已追踪移动历史 |
-| RockTools/Scripts/Attributes/NotifyChangeAttribute.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/Attributes/NotifyChangeAttribute.cs | 本人添加；已追踪移动历史 |
-| RockTools/Scripts/Cell.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/Cell.cs | 本人添加；已追踪移动历史 |
+| Runtime/RockTools/Scripts/Attributes/NotifyChangeAttribute.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/Attributes/NotifyChangeAttribute.cs | 本人添加；已追踪移动历史 |
+| Runtime/RockTools/Scripts/Cell.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/Cell.cs | 本人添加；已追踪移动历史 |
 | RockTools/Scripts/Editor/ContextMenu.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/Editor/ContextMenu.cs | 本人添加；已追踪移动历史 |
 | RockTools/Scripts/Editor/LogicEditorBase.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/Editor/LogicEditorBase.cs | 本人添加；已追踪移动历史 |
 | RockTools/Scripts/Editor/LogicEditorType01.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/Editor/LogicEditorType01.cs | 本人添加；已追踪移动历史 |
@@ -88,19 +88,19 @@
 | RockTools/Scripts/Editor/RockGeneratorWindow.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/Editor/RockGeneratorWindow.cs | 本人添加；已追踪移动历史 |
 | RockTools/Scripts/Editor/RockTools.Editor.asmdef | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/Editor/RockTools.Editor.asmdef | 本人添加；已追踪移动历史 |
 | RockTools/Scripts/Editor/ToolsMenu.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/Editor/ToolsMenu.cs | 本人添加；已追踪移动历史 |
-| RockTools/Scripts/Extensions.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/Extensions.cs | 本人添加；已追踪移动历史 |
-| RockTools/Scripts/LogicBase.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/LogicBase.cs | 本人添加；已追踪移动历史 |
-| RockTools/Scripts/LogicType01.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/LogicType01.cs | 本人添加；已追踪移动历史 |
-| RockTools/Scripts/LogicType02.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/LogicType02.cs | 本人添加；已追踪移动历史 |
-| RockTools/Scripts/LogicType03.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/LogicType03.cs | 本人添加；已追踪移动历史 |
-| RockTools/Scripts/LogicTypeCustom.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/LogicTypeCustom.cs | 本人添加；已追踪移动历史 |
-| RockTools/Scripts/LogicTypeCustomCrystal.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/LogicTypeCustomCrystal.cs | 本人添加；已追踪移动历史 |
-| RockTools/Scripts/MeshBuffer.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/MeshBuffer.cs | 本人添加；已追踪移动历史 |
-| RockTools/Scripts/MeshSplitter.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/MeshSplitter.cs | 本人添加；已追踪移动历史 |
-| RockTools/Scripts/RockBaker.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/RockBaker.cs | 本人添加；已追踪移动历史 |
-| RockTools/Scripts/RockGenerator.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/RockGenerator.cs | 本人添加；已追踪移动历史 |
-| RockTools/Scripts/RockTools.Runtime.asmdef | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/RockTools.Runtime.asmdef | 本人添加；已追踪移动历史 |
-| RockTools/Scripts/RockType.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/RockType.cs | 本人添加；已追踪移动历史 |
+| Runtime/RockTools/Scripts/Extensions.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/Extensions.cs | 本人添加；已追踪移动历史 |
+| Runtime/RockTools/Scripts/LogicBase.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/LogicBase.cs | 本人添加；已追踪移动历史 |
+| Runtime/RockTools/Scripts/LogicType01.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/LogicType01.cs | 本人添加；已追踪移动历史 |
+| Runtime/RockTools/Scripts/LogicType02.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/LogicType02.cs | 本人添加；已追踪移动历史 |
+| Runtime/RockTools/Scripts/LogicType03.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/LogicType03.cs | 本人添加；已追踪移动历史 |
+| Runtime/RockTools/Scripts/LogicTypeCustom.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/LogicTypeCustom.cs | 本人添加；已追踪移动历史 |
+| Runtime/RockTools/Scripts/LogicTypeCustomCrystal.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/LogicTypeCustomCrystal.cs | 本人添加；已追踪移动历史 |
+| Runtime/RockTools/Scripts/MeshBuffer.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/MeshBuffer.cs | 本人添加；已追踪移动历史 |
+| Runtime/RockTools/Scripts/MeshSplitter.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/MeshSplitter.cs | 本人添加；已追踪移动历史 |
+| Runtime/RockTools/Scripts/RockBaker.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/RockBaker.cs | 本人添加；已追踪移动历史 |
+| Runtime/RockTools/Scripts/RockGenerator.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/RockGenerator.cs | 本人添加；已追踪移动历史 |
+| Runtime/RockTools/Scripts/RockTools.Runtime.asmdef | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/RockTools.Runtime.asmdef | 本人添加；已追踪移动历史 |
+| Runtime/RockTools/Scripts/RockType.cs | Scripts/Editor/ArtTools/ZXXTools/RockTools/Scripts/RockType.cs | 本人添加；已追踪移动历史 |
 | SelfShadowBaker/SelfShadowBaker.shader | Scripts/Editor/ArtTools/ZXXTools/SelfShadowBaker/SelfShadowBaker.shader | 本人添加；已追踪移动历史 |
 | SelfShadowBaker/SelfShadowBakerCore.cs | Scripts/Editor/ArtTools/ZXXTools/SelfShadowBaker/SelfShadowBakerCore.cs | 本人添加；已追踪移动历史 |
 | SelfShadowBaker/SelfShadowBakerWindow.cs | Scripts/Editor/ArtTools/ZXXTools/SelfShadowBaker/SelfShadowBakerWindow.cs | 本人添加；已追踪移动历史 |
@@ -137,8 +137,8 @@
 | Runtime/FogOfWar/Fog Of War.shader | Scripts/HotUpdate/ArtCode/Helper/FogOfWar/Fog Of War.shader | 本人添加；已追踪移动历史 |
 | Runtime/FogOfWar/FogGridClickSystem.cs | Scripts/HotUpdate/ArtCode/Helper/FogOfWar/FogGridClickSystem.cs | 本人添加；已追踪移动历史 |
 | Runtime/FogOfWar/Manual Cloud Fog.shader | Scripts/HotUpdate/ArtCode/Helper/FogOfWar/Manual Cloud Fog.shader | 本人添加；已追踪移动历史 |
-| LightCookieScroller/LightCookieScroller.cs | Scripts/HotUpdate/ArtCode/Helper/LightCookieScroller/LightCookieScroller.cs | 本人添加；已追踪移动历史 |
-| LightCookieScroller/LightCookieScroller.shader | Scripts/HotUpdate/ArtCode/Helper/LightCookieScroller/LightCookieScroller.shader | 本人添加；已追踪移动历史 |
+| Runtime/LightCookieScroller/LightCookieScroller.cs | Scripts/HotUpdate/ArtCode/Helper/LightCookieScroller/LightCookieScroller.cs | 本人添加；已追踪移动历史 |
+| Runtime/LightCookieScroller/LightCookieScroller.shader | Scripts/HotUpdate/ArtCode/Helper/LightCookieScroller/LightCookieScroller.shader | 本人添加；已追踪移动历史 |
 
 ## 排除依据
 
@@ -153,5 +153,5 @@
 
 - Unity 2022.3、URP 14；ShaderGraph 文件需要 Shader Graph。
 - BuildingCardTool 依赖 spine-unity；第三方库不随本次源码同步上传。
-- RockTools 的两个 asmdef.meta 随代码保留，使程序集 GUID 引用仍能解析。
+- RockTools.Editor 通过 RockTools.Runtime 程序集名称引用运行时源码；所有 .meta 由各 Unity 项目自行生成，不随仓库分发。编辑器 asmdef 是发布整理时的配置转换，项目原文件保持原样。
 - 本次核对了源码复制、依赖文件及 Git 提交范围，未声称完成其他项目中的 Unity 编译或运行测试。
