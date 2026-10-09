@@ -13,6 +13,8 @@ namespace SelfShadowBakerTool.Editor
     public class SelfShadowBakeSettings
     {
         public List<MeshRenderer> Renderers = new List<MeshRenderer>();
+        // Additional world-space occluders. Only Renderers are unwrapped into this atlas.
+        public List<MeshRenderer> Occluders = new List<MeshRenderer>();
 
         /// <summary>世界空间光照方向（太阳照向地面，Y 一般为负）。</summary>
         public Vector3 LightDirection = new Vector3(0.3f, -1f, 0.2f);
@@ -97,6 +99,21 @@ namespace SelfShadowBakerTool.Editor
 
             Vector3 sun = s.LightDirection.sqrMagnitude < 1e-6f ? Vector3.down : s.LightDirection.normalized;
             float halfDiag = Mathf.Max(wb.extents.magnitude, 1e-3f);
+            float aoMaxDistance = s.AoMaxDistance > 1e-4f ? s.AoMaxDistance : halfDiag * 0.5f;
+            var occluderDraws = new List<MeshDraw>();
+            var seen = new HashSet<MeshRenderer>();
+            // Depth rendering requires geometry, but does not require lightmap UVs.
+            var occluders = new List<MeshRenderer>(s.Renderers);
+            if (s.Occluders != null) occluders.AddRange(s.Occluders);
+            foreach (var r in occluders)
+            {
+                if (r == null || !seen.Add(r)) continue;
+                var mf = r.GetComponent<MeshFilter>();
+                if (mf == null || mf.sharedMesh == null) continue;
+                occluderDraws.Add(new MeshDraw { mesh = mf.sharedMesh, l2w = r.transform.localToWorldMatrix });
+                wb.Encapsulate(r.bounds);
+            }
+            halfDiag = Mathf.Max(wb.extents.magnitude, 1e-3f);
             int n = Mathf.Max(8, s.Resolution);
 
             var camGO = new GameObject("~SelfShadowCam") { hideFlags = HideFlags.HideAndDontSave };
@@ -111,8 +128,8 @@ namespace SelfShadowBakerTool.Editor
                 bool[] cov = null;
                 float shadowedPct = 0f, aoPct = 0f;
 
-                if (s.BakeShadow) shadow = ComputeShadow(cam, mat, draws, wb, halfDiag, sun, s, n, out cov, out shadowedPct);
-                if (s.BakeAO) ao = ComputeAO(cam, mat, draws, wb, halfDiag, sun, s, n, out cov, out aoPct);
+                if (s.BakeShadow) shadow = ComputeShadow(cam, mat, draws, occluderDraws, wb, halfDiag, sun, s, n, out cov, out shadowedPct);
+                if (s.BakeAO) ao = ComputeAO(cam, mat, draws, occluderDraws, wb, halfDiag, aoMaxDistance, sun, s, n, out cov, out aoPct);
                 if (s.BakeFill)
                 {
                     // Fill direction = opposite the sun (+ manual offset). Bake its visibility:
@@ -120,7 +137,7 @@ namespace SelfShadowBakerTool.Editor
                     Vector3 fillDir = -sun + s.FillOffset;
                     if (fillDir.sqrMagnitude < 1e-6f) fillDir = -sun;
                     fillDir.Normalize();
-                    fill = ComputeShadow(cam, mat, draws, wb, halfDiag, fillDir, s, n, out cov, out _);
+                    fill = ComputeShadow(cam, mat, draws, occluderDraws, wb, halfDiag, fillDir, s, n, out cov, out _);
                 }
 
                 RenderTexture.active = prevActive;
@@ -172,6 +189,7 @@ namespace SelfShadowBakerTool.Editor
             }
             finally
             {
+                RenderTexture.active = prevActive;
                 EditorUtility.ClearProgressBar();
                 if (mat != null) Object.DestroyImmediate(mat);
                 if (camGO != null) Object.DestroyImmediate(camGO);
@@ -181,7 +199,7 @@ namespace SelfShadowBakerTool.Editor
         // =====================================================================
         // Self-shadow (single sun direction, PCF)
         // =====================================================================
-        static float[] ComputeShadow(Camera cam, Material mat, List<MeshDraw> draws, Bounds wb,
+        static float[] ComputeShadow(Camera cam, Material mat, List<MeshDraw> draws, List<MeshDraw> occluders, Bounds wb,
             float halfDiag, Vector3 sun, SelfShadowBakeSettings s, int n, out bool[] cov, out float shadowedPct)
         {
             var fit = FitOrtho(cam, wb, sun, halfDiag, s.ShadowMapResolution);
@@ -189,7 +207,7 @@ namespace SelfShadowBakerTool.Editor
             RenderTexture bakeRT = NewBakeRT(n);
             try
             {
-                RenderDepth(mat, fit, draws, depthRT);
+                RenderDepth(mat, fit, occluders, depthRT);
 
                 mat.SetTexture("_LightDepthTex", depthRT);
                 mat.SetMatrix("_LightView", fit.view);
@@ -232,11 +250,10 @@ namespace SelfShadowBakerTool.Editor
         // =====================================================================
         // Ambient occlusion (many directions, additive accumulation)
         // =====================================================================
-        static float[] ComputeAO(Camera cam, Material mat, List<MeshDraw> draws, Bounds wb,
-            float halfDiag, Vector3 sun, SelfShadowBakeSettings s, int n, out bool[] cov, out float aoPct)
+        static float[] ComputeAO(Camera cam, Material mat, List<MeshDraw> draws, List<MeshDraw> occluders, Bounds wb,
+            float halfDiag, float maxDist, Vector3 sun, SelfShadowBakeSettings s, int n, out bool[] cov, out float aoPct)
         {
             int samples = Mathf.Clamp(s.AoSamples, 8, 512);
-            float maxDist = s.AoMaxDistance > 1e-4f ? s.AoMaxDistance : halfDiag * 0.5f;
             Vector3 towardLight = (-sun).normalized;
 
             RenderTexture depthRT = NewDepthRT(s.AoDepthResolution);
@@ -264,7 +281,7 @@ namespace SelfShadowBakerTool.Editor
 
                     Vector3 dir = FibSphere(k, samples);     // outward sample direction
                     var fit = FitOrtho(cam, wb, -dir, halfDiag, s.AoDepthResolution); // light comes from dir
-                    RenderDepth(mat, fit, draws, depthRT);
+                    RenderDepth(mat, fit, occluders, depthRT);
 
                     mat.SetTexture("_LightDepthTex", depthRT);
                     mat.SetMatrix("_LightView", fit.view);
@@ -476,7 +493,7 @@ namespace SelfShadowBakerTool.Editor
             AssetDatabase.CreateFolder(parent, leaf);
         }
 
-        static string SanitizeFileName(string name)
+        internal static string SanitizeFileName(string name)
         {
             foreach (var ch in Path.GetInvalidFileNameChars())
                 name = name.Replace(ch, '_');

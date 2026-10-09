@@ -54,15 +54,22 @@ internal sealed class PathSplineEditor : Editor
     private int _boxControlId;
     private Vector2 _boxStart;
     private Vector2 _boxCurrent;
-    private bool _showPathSettings = true;
-    private bool _showSurfaceSettings;
-    private bool _showOutputSettings = true;
-    private bool _showOutputDetails;
-    private bool _showControlPointSettings = true;
-    private bool _showSceneHelp;
-    private bool _showMeshPlacement = true;
-    private bool _showMeshParts = true;
-    private bool _showMeshAdvanced;
+    private static bool _showPathSettings = true;
+    private static bool _showSurfaceSettings;
+    private static bool _showOutputSettings = true;
+    private static bool _showOutputDetails;
+    private static bool _showControlPointSettings = true;
+    private static bool _showSceneHelp;
+    private static bool _showMeshPlacement = true;
+    private static bool _showMeshParts = true;
+    private static bool _showMeshAdvanced;
+    private Transform _observedMountainInstance;
+    private Vector3 _observedMountainPosition;
+    private Vector3 _observedMountainScale;
+    private bool _mountainInstanceUndoActive;
+    private int _mountainInstanceUndoGroup = -1;
+    private bool _nativeToolsVisibilityOwned;
+    private bool _previousToolsHidden;
 
     private struct KnotHandleState
     {
@@ -98,13 +105,15 @@ internal sealed class PathSplineEditor : Editor
     private SerializedProperty _mountainCardHeight;
     private SerializedProperty _mountainCardPivot;
     private SerializedProperty _mountainCardRandomFlip;
+    private SerializedProperty _mountainCardFlipX;
+    private SerializedProperty _mountainCardFlipY;
+    private SerializedProperty _mountainCardRandomFlipY;
     private SerializedProperty _mountainCardColor;
-    private SerializedProperty _mountainCardSortingMode;
-    private SerializedProperty _mountainCardSortingLayerId;
-    private SerializedProperty _mountainCardSortingOrder;
-    private SerializedProperty _mountainCardRenderQueue;
     private SerializedProperty _mountainBakeOutput;
+    private SerializedProperty _mountainFlattenPreview;
     private SerializedProperty _keepMountainAuthoringAfterBake;
+    private SerializedProperty _mountainFlattenTarget;
+    private SerializedProperty _mountainWorldPlaneHeight;
     private SerializedProperty _mountainDecalSurfaceMask;
     private SerializedProperty _mountainDecalProjectionDistance;
     private SerializedProperty _mountainDecalSurfaceOffset;
@@ -134,10 +143,18 @@ internal sealed class PathSplineEditor : Editor
     private SerializedProperty _edgeObjectsProjectToSurface;
     private SerializedProperty _generatedAssetOutputFolder;
     private SerializedProperty _prefabOutputFolder;
+    private SerializedProperty _mountainMaterialOutputFolder;
+
+    private PathSpline[] _builders;
+    private SerializedObject _so;
 
     private void OnEnable()
     {
         _builder = (PathSpline)target;
+        _builders = new PathSpline[targets.Length];
+        for (int i = 0; i < targets.Length; i++)
+            _builders[i] = targets[i] as PathSpline;
+        _so = new SerializedObject(targets);
         _builder.EnsureDefaults();
         EnsureSelection();
         CacheProperties();
@@ -148,6 +165,7 @@ internal sealed class PathSplineEditor : Editor
 
     private void OnDisable()
     {
+        ReleaseNativeToolsVisibility();
         Undo.undoRedoPerformed -= OnUndoRedo;
     }
 
@@ -155,16 +173,16 @@ internal sealed class PathSplineEditor : Editor
     {
         DrawAuthoringInspector();
         EditorGUILayout.Space(8f);
-        serializedObject.Update();
+        _so.Update();
         DrawOutputPathSettings();
-        serializedObject.ApplyModifiedProperties();
+        _so.ApplyModifiedProperties();
         EditorGUILayout.Space(8f);
         DrawGenerationButtons();
     }
 
     internal void DrawAuthoringInspector()
     {
-        serializedObject.Update();
+        _so.Update();
 
         EditorGUI.BeginChangeCheck();
         DrawSplineSettings();
@@ -186,7 +204,7 @@ internal sealed class PathSplineEditor : Editor
         }
         bool serializedChanged = EditorGUI.EndChangeCheck();
 
-        serializedObject.ApplyModifiedProperties();
+        _so.ApplyModifiedProperties();
         if (serializedChanged)
         {
             MarkBuilderChanged(true);
@@ -195,7 +213,7 @@ internal sealed class PathSplineEditor : Editor
 
     internal void DrawOutputInspector()
     {
-        serializedObject.Update();
+        _so.Update();
 
         List<PathSample> samples =
             PathSplineUtility.BuildArcTable(_builder);
@@ -284,7 +302,7 @@ internal sealed class PathSplineEditor : Editor
         EditorGUILayout.HelpBox(
             "使用窗口底部的预览按钮检查实时结果，确认后点击烘焙按钮输出。",
             MessageType.Info);
-        serializedObject.ApplyModifiedProperties();
+        _so.ApplyModifiedProperties();
     }
 
     private string GetCurrentOutputLabel()
@@ -338,8 +356,14 @@ internal sealed class PathSplineEditor : Editor
                     _prefabOutputFolder,
                     new GUIContent(
                         "Prefab Folder",
-                        "山脉 Bake 后生成并连接的 Prefab 保存目录"),
+                        "Sprite / Texture Card 会先在这里生成模型材质 Prefab，山脉预览和 Bake 都使用这些 Prefab"),
                     "选择山脉 Prefab 输出目录");
+                DrawOutputFolderRow(
+                    _mountainMaterialOutputFolder,
+                    new GUIContent(
+                        "Material Folder",
+                        "面片山共享材质保存目录；留空则跟随 Asset Folder 的 Materials 子目录"),
+                    "选择山脉材质输出目录");
             }
             DrawOutputFolderRow(
                 _generatedAssetOutputFolder,
@@ -361,9 +385,21 @@ internal sealed class PathSplineEditor : Editor
                 _prefabOutputFolder.stringValue,
                 out _,
                 out prefabError);
-        if (!assetValid || !prefabValid)
+        string materialError = string.Empty;
+        bool materialValid = _builder.mode != PathBuildMode.Mountain
+            || string.IsNullOrWhiteSpace(
+                _mountainMaterialOutputFolder.stringValue)
+            || PathBuilderGenerator.TryNormalizeAssetFolder(
+                _mountainMaterialOutputFolder.stringValue,
+                out _,
+                out materialError);
+        if (!assetValid || !prefabValid || !materialValid)
         {
-            string error = !assetValid ? assetError : prefabError;
+            string error = !assetValid
+                ? assetError
+                : !prefabValid
+                    ? prefabError
+                    : materialError;
             EditorGUILayout.HelpBox(error, MessageType.Error);
         }
         else
@@ -444,7 +480,7 @@ internal sealed class PathSplineEditor : Editor
         }
 
         property.stringValue = normalized;
-        serializedObject.ApplyModifiedProperties();
+        _so.ApplyModifiedProperties();
         DefaultAsset folder =
             AssetDatabase.LoadAssetAtPath<DefaultAsset>(normalized);
         if (!folder)
@@ -1059,9 +1095,9 @@ internal sealed class PathSplineEditor : Editor
                             "把当前资源列表复制成可供多条山脉共用的贴花集"),
                         GUILayout.Width(116f)))
                     {
-                        serializedObject.ApplyModifiedProperties();
+                        _so.ApplyModifiedProperties();
                         CreateMountainDecalSet();
-                        serializedObject.Update();
+                        _so.Update();
                     }
                 }
             }
@@ -1231,61 +1267,20 @@ internal sealed class PathSplineEditor : Editor
                 _mountainCardRandomFlip,
                 new GUIContent("Random Flip X", "随机水平翻转图片以增加变化"));
             EditorGUILayout.PropertyField(
+                _mountainCardFlipX,
+                new GUIContent("Flip X", "固定水平翻转所有面片"));
+            EditorGUILayout.PropertyField(
+                _mountainCardFlipY,
+                new GUIContent("Flip Y", "固定垂直翻转所有面片"));
+            EditorGUILayout.PropertyField(
+                _mountainCardRandomFlipY,
+                new GUIContent("Random Flip Y", "随机垂直翻转图片以增加变化"));
+            EditorGUILayout.PropertyField(
                 _mountainCardColor,
                 new GUIContent("Vertex Color", "乘到面片材质上的整体顶点颜色"));
-            _mountainCardSortingMode.enumValueIndex = EditorGUILayout.Popup(
-                new GUIContent(
-                    "Transparency Sorting",
-                    "精确模式会按摄像机从远到近拆分绘制；高性能模式按贴图合批"),
-                _mountainCardSortingMode.enumValueIndex,
-                new[] { "Accurate: Back To Front", "Fast: Group By Texture" });
             EditorGUILayout.Space(3f);
-            EditorGUILayout.LabelField(
-                new GUIContent(
-                    "Other Transparent Objects",
-                    "控制面片山与场景中其他半透明物体的绘制先后"),
-                EditorStyles.miniBoldLabel);
-            DrawMountainCardSortingLayer();
-            EditorGUILayout.PropertyField(
-                _mountainCardSortingOrder,
-                new GUIContent(
-                    "Order in Layer",
-                    "数值越大越晚绘制；精确排序会以该值为中心安排山面片批次"));
-            if (!_mountainDecalSet.objectReferenceValue)
-            {
-                EditorGUILayout.PropertyField(
-                    _mountainCardRenderQueue,
-                    new GUIContent(
-                        "Render Queue",
-                        "透明物体通常为 3000；较大值更晚绘制，较小值更早绘制"));
-                _mountainCardRenderQueue.intValue = Mathf.Clamp(
-                    _mountainCardRenderQueue.intValue,
-                    2501,
-                    3999);
-            }
-            else
-            {
-                MountainDecalSet decalSet =
-                    _mountainDecalSet.objectReferenceValue as MountainDecalSet;
-                EditorGUILayout.LabelField(
-                    new GUIContent(
-                        "Render Queue",
-                        "共享模式下渲染队列由 Mountain Decal Set 统一控制"),
-                    decalSet ? decalSet.renderQueue.ToString() : "-");
-            }
-            EditorGUILayout.LabelField(
-                "透明方式：渐变透明混合，不使用透明裁剪。",
-                EditorStyles.miniLabel);
-            if ((MountainCardSortingMode)_mountainCardSortingMode.enumValueIndex
-                == MountainCardSortingMode.AccurateBackToFront)
-            {
-                EditorGUILayout.LabelField(
-                    "建议山图使用同一个精灵图集，可兼顾精确排序和较少的绘制批次。",
-                    EditorStyles.miniLabel);
-            }
-
             EditorGUILayout.HelpBox(
-                "与其他半透明物体冲突时，优先调整渲染队列；同一队列内再使用排序层和层内顺序。数值越大通常越晚绘制、显示越靠前。",
+                "渲染队列由材质球（Base Material 或 Mountain Decal Set 的材质）自带值控制，工具不再覆盖。如需调整绘制先后，请直接修改对应材质球的 Render Queue。",
                 MessageType.Info);
 
             EditorGUILayout.Space(6f);
@@ -1302,38 +1297,71 @@ internal sealed class PathSplineEditor : Editor
                 _keepMountainAuthoringAfterBake,
                 new GUIContent(
                     "Keep Spline & Settings",
-                    "开启后 Bake 只新增 Prefab，并保留烘焙前的样条线、参数和编辑会话"));
+                    "开启后 Bake 只新增普通山脉分组，并保留烘焙前的样条线、参数和编辑会话"));
             if ((MountainBakeOutput)_mountainBakeOutput.enumValueIndex
                 == MountainBakeOutput.GroundDecal)
             {
                 EditorGUILayout.PropertyField(
-                    _mountainDecalSurfaceMask,
+                    _mountainFlattenPreview,
                     new GUIContent(
-                        "Decal Surface Layer",
-                        "只选择地面或 Terrain 所在层；该层必须具有 Collider"));
-                EditorGUILayout.PropertyField(
-                    _mountainDecalProjectionDistance,
+                        "Flatten Preview",
+                        "在未烘焙时就把图片山沿指定正交摄像机投射并拍平到地表；关闭后恢复朝向摄像机的竖直面片"));
+                _mountainFlattenTarget.enumValueIndex = EditorGUILayout.Popup(
                     new GUIContent(
-                        "Projection Distance",
-                        "沿摄像机视线搜索地表的最大距离"));
+                        "Flatten Target",
+                        "World Plane 会按世界坐标拍到统一高度；Surface Colliders 会逐角投射到带 Collider 的地表"),
+                    _mountainFlattenTarget.enumValueIndex,
+                    new[] { "World Plane", "Surface Colliders" });
+                if ((MountainFlattenTarget)_mountainFlattenTarget.enumValueIndex
+                    == MountainFlattenTarget.WorldPlane)
+                {
+                    EditorGUILayout.PropertyField(
+                        _mountainWorldPlaneHeight,
+                        new GUIContent(
+                            "World Plane Y",
+                            "所有拍平山片最终所在的世界坐标高度，默认 0"));
+                }
+                else
+                {
+                    EditorGUILayout.PropertyField(
+                        _mountainDecalSurfaceMask,
+                        new GUIContent(
+                            "Decal Surface Layer",
+                            "只选择地面或 Terrain 所在层；该层必须具有 Collider"));
+                    EditorGUILayout.PropertyField(
+                        _mountainDecalProjectionDistance,
+                        new GUIContent(
+                            "Projection Distance",
+                            "沿摄像机视线搜索地表的最大距离"));
+                }
                 EditorGUILayout.LabelField(
                     new GUIContent(
                         "Geometry",
                         "每张山图固定使用四个角点和两个三角面"),
-                    "4 vertices / 2 triangles per image");
-                EditorGUILayout.PropertyField(
-                    _mountainDecalSurfaceOffset,
                     new GUIContent(
-                        "Surface Offset",
-                        "沿地表法线轻微抬高贴花，避免与地面闪烁"));
+                        "4 vertices / 2 triangles per image"));
+                if ((MountainFlattenTarget)_mountainFlattenTarget.enumValueIndex
+                    == MountainFlattenTarget.SurfaceColliders)
+                {
+                    EditorGUILayout.PropertyField(
+                        _mountainDecalSurfaceOffset,
+                        new GUIContent(
+                            "Surface Offset",
+                            "沿地表法线轻微抬高贴花，避免与地面闪烁"));
+                }
                 EditorGUILayout.HelpBox(
-                    "实时预览仍显示朝向摄像机的山图；Bake 时每张图片固定生成 4 个顶点、2 个三角面，只让四角贴到地表。适合平地和缓坡；起伏过大的地形中部可能悬空或被遮挡。Prefab 山不会被转换，地表层不要包含建筑。",
+                    _mountainFlattenPreview.boolValue
+                        ? ((MountainFlattenTarget)_mountainFlattenTarget.enumValueIndex
+                            == MountainFlattenTarget.WorldPlane
+                                ? "当前实时预览会按指定相机方向拍到统一的世界水平面。每张图片固定使用 4 个顶点、2 个三角面。"
+                                : "当前实时预览会逐角拍平到 Collider 地表。每张图片固定使用 4 个顶点、2 个三角面。")
+                        : "实时预览显示朝向摄像机的山图；Bake 时每张图片固定生成 4 个顶点、2 个三角面，只让四角贴到地表。适合平地和缓坡；起伏过大的地形中部可能悬空或被遮挡。Prefab 山不会被转换，地表层不要包含建筑。",
                     MessageType.Info);
             }
             EditorGUILayout.HelpBox(
                 _keepMountainAuthoringAfterBake.boolValue
-                    ? "Bake 后会创建并连接山脉 Prefab，同时保留原样条线和全部设置；原预览会暂时隐藏，修改参数或点击 Preview 后可继续生成。"
-                    : "Bake 后会创建并连接山脉 Prefab，并删除当前样条编辑会话。",
+                    ? "Preview 会先为每个 Sprite / Texture Card 生成模型材质 Prefab，再用实例摆山；Bake 只生成普通场景分组，同时保留原样条线和全部设置。"
+                    : "Preview 会先为每个 Sprite / Texture Card 生成模型材质 Prefab；Bake 只生成普通场景分组，并删除当前样条编辑会话。",
                 _keepMountainAuthoringAfterBake.boolValue
                     ? MessageType.Info
                     : MessageType.Warning);
@@ -1380,7 +1408,6 @@ internal sealed class PathSplineEditor : Editor
         MountainDecalSet decalSet =
             ScriptableObject.CreateInstance<MountainDecalSet>();
         decalSet.baseMaterial = _builder.mountainCardMaterial;
-        decalSet.renderQueue = _builder.mountainCardRenderQueue;
         if (_builder.mountainSources != null)
         {
             for (int i = 0; i < _builder.mountainSources.Count; i++)
@@ -1423,9 +1450,12 @@ internal sealed class PathSplineEditor : Editor
                 Undo.RecordObject(_builder, "Apply Path Preset");
                 _builder.ApplyRibbonPreset();
                 EditorUtility.SetDirty(_builder);
-                serializedObject.Update();
+                _so.Update();
                 MarkBuilderChanged(true);
             }
+
+            EditorGUILayout.Space(3f);
+            DrawUniformRiverWidth();
 
             EditorGUILayout.Space(3f);
             EditorGUILayout.LabelField("Surface Mesh", EditorStyles.miniBoldLabel);
@@ -1569,6 +1599,61 @@ internal sealed class PathSplineEditor : Editor
         }
     }
 
+    private void DrawUniformRiverWidth()
+    {
+        SerializedProperty knots = _so.FindProperty("knots");
+        if (knots == null || knots.arraySize == 0)
+            return;
+
+        float displayedWidth = Mathf.Max(
+            0.01f,
+            knots.GetArrayElementAtIndex(0)
+                .FindPropertyRelative("width")
+                .floatValue);
+        bool mixed = false;
+        for (int i = 1; i < knots.arraySize; i++)
+        {
+            float width = knots.GetArrayElementAtIndex(i)
+                .FindPropertyRelative("width")
+                .floatValue;
+            if (!Mathf.Approximately(width, displayedWidth))
+            {
+                mixed = true;
+                break;
+            }
+        }
+
+        EditorGUILayout.LabelField("Path Width", EditorStyles.miniBoldLabel);
+        bool previousMixedValue = EditorGUI.showMixedValue;
+        EditorGUI.showMixedValue = mixed;
+        EditorGUI.BeginChangeCheck();
+        float uniformWidth = EditorGUILayout.FloatField(
+            new GUIContent(
+                "Uniform Width",
+                "修改后把当前路径所有控制点设置为相同宽度；之后仍可单独调整控制点宽度"),
+            displayedWidth);
+        bool changed = EditorGUI.EndChangeCheck();
+        EditorGUI.showMixedValue = previousMixedValue;
+
+        if (changed)
+        {
+            uniformWidth = Mathf.Max(0.01f, uniformWidth);
+            for (int i = 0; i < knots.arraySize; i++)
+            {
+                knots.GetArrayElementAtIndex(i)
+                    .FindPropertyRelative("width")
+                    .floatValue = uniformWidth;
+            }
+            mixed = false;
+        }
+
+        EditorGUILayout.LabelField(
+            mixed
+                ? "当前各控制点宽度不同；输入数值可统一整条路径。"
+                : "修改该值会统一整条路径；控制点仍可继续局部调宽。",
+            EditorStyles.wordWrappedMiniLabel);
+    }
+
     private static string GetRibbonPresetLabel(RibbonPathPreset preset)
     {
         switch (preset)
@@ -1657,64 +1742,6 @@ internal sealed class PathSplineEditor : Editor
         _groupHandleSelectionVersion = -1;
         Repaint();
         SceneView.RepaintAll();
-    }
-
-    private void DrawMountainCardSortingLayer()
-    {
-        SortingLayer[] layers = SortingLayer.layers;
-        if (layers == null || layers.Length == 0)
-        {
-            EditorGUILayout.PropertyField(
-                _mountainCardSortingLayerId,
-                new GUIContent("Sorting Layer ID", "当前项目没有可用的排序层名称，直接填写排序层编号"));
-            return;
-        }
-
-        int currentId = _mountainCardSortingLayerId.intValue;
-        int currentIndex = -1;
-        for (int i = 0; i < layers.Length; i++)
-        {
-            if (layers[i].id == currentId)
-            {
-                currentIndex = i;
-                break;
-            }
-        }
-
-        string[] names;
-        int[] ids;
-        if (currentIndex >= 0)
-        {
-            names = new string[layers.Length];
-            ids = new int[layers.Length];
-            for (int i = 0; i < layers.Length; i++)
-            {
-                names[i] = layers[i].name;
-                ids[i] = layers[i].id;
-            }
-        }
-        else
-        {
-            names = new string[layers.Length + 1];
-            ids = new int[layers.Length + 1];
-            names[0] = $"Missing ({currentId})";
-            ids[0] = currentId;
-            currentIndex = 0;
-            for (int i = 0; i < layers.Length; i++)
-            {
-                names[i + 1] = layers[i].name;
-                ids[i + 1] = layers[i].id;
-            }
-        }
-
-        int selectedIndex = EditorGUILayout.Popup(
-            new GUIContent(
-                "Sorting Layer",
-                "选择面片山所属的 Unity 渲染排序层"),
-            currentIndex,
-            names);
-        if (selectedIndex >= 0 && selectedIndex < ids.Length)
-            _mountainCardSortingLayerId.intValue = ids[selectedIndex];
     }
 
     private void DrawPathEditing()
@@ -1855,6 +1882,21 @@ internal sealed class PathSplineEditor : Editor
 
     private void DrawGenerationButtons()
     {
+        if (_builder.mode == PathBuildMode.Mountain)
+        {
+            if (GUILayout.Button(
+                new GUIContent(
+                    "Reset Instances & Rebuild",
+                    "清空所有石头的单体位移和缩放记录，并使用当前样条、随机种子及参数重新生成；样条不会删除"),
+                GUILayout.Height(26f)))
+            {
+                Undo.RecordObject(_builder, "Reset Mountain Instances");
+                _builder.ClearMountainInstanceOverrides();
+                EditorUtility.SetDirty(_builder);
+                PathBuilderGenerator.Rebuild(_builder);
+            }
+        }
+
         using (new EditorGUILayout.HorizontalScope())
         {
             GUI.backgroundColor = new Color(0.5f, 0.85f, 0.5f);
@@ -1876,8 +1918,8 @@ internal sealed class PathSplineEditor : Editor
                 "Bake Generated Result",
                 _builder.mode == PathBuildMode.Mountain
                     ? (_builder.keepMountainAuthoringAfterBake
-                        ? "生成并连接山脉 Prefab，同时保留样条和设置"
-                        : "生成并连接山脉 Prefab，然后结束当前样条编辑")
+                        ? "保留已生成的卡片 Prefab 实例，同时保留样条和设置"
+                        : "保留已生成的卡片 Prefab 实例，然后结束当前样条编辑")
                     : "保留当前结果并与样条编辑器分离；河流 Mesh 会保存为资产"),
             GUILayout.Height(32f)))
         {
@@ -1914,9 +1956,19 @@ internal sealed class PathSplineEditor : Editor
         DrawSplineCurve();
         if (_builder.mode == PathBuildMode.River)
             DrawRiverWidthPreview();
+        if (HandleCurveInsertionShortcut())
+            return;
         DrawKnotButtons();
-        DrawSelectedKnotHandles();
-        HandleSceneShortcuts();
+        bool editingMountainInstance = TrackSelectedMountainInstanceScale();
+        if (!editingMountainInstance)
+        {
+            DrawSelectedKnotHandles();
+            HandleSceneShortcuts();
+        }
+        else
+        {
+            ReleaseBoxSelectionControl();
+        }
 
         if (_sceneChangePending
             && _builder.autoRebuild
@@ -1927,6 +1979,159 @@ internal sealed class PathSplineEditor : Editor
             PathBuilderGenerator.Rebuild(_builder, false);
             _lastLiveRebuildTime = EditorApplication.timeSinceStartup;
         }
+    }
+
+    private bool HandleCurveInsertionShortcut()
+    {
+        Event current = Event.current;
+        if (current.type != EventType.MouseDown
+            || current.button != 0
+            || current.clickCount < 2
+            || current.alt
+            || current.shift
+            || current.control
+            || current.command
+            || GUIUtility.hotControl != 0
+            || !InsertKnotOnCurve(current.mousePosition))
+        {
+            return false;
+        }
+
+        Selection.activeGameObject = _builder.Anchor.gameObject;
+        current.Use();
+        SceneView.RepaintAll();
+        return true;
+    }
+
+    internal void SuspendSceneEditing()
+    {
+        FinishMountainInstanceUndo();
+        ReleaseNativeToolsVisibility();
+        ReleaseBoxSelectionControl();
+    }
+
+    private void ReleaseBoxSelectionControl()
+    {
+        if (GUIUtility.hotControl == _boxControlId)
+            GUIUtility.hotControl = 0;
+        _boxSelecting = false;
+        _boxDragged = false;
+    }
+
+    private bool TrackSelectedMountainInstanceScale()
+    {
+        if (_builder.mode != PathBuildMode.Mountain
+            || !PathBuilderGenerator.TryGetMountainInstanceIndex(
+                _builder,
+                Selection.activeTransform,
+                out Transform instance,
+                out int placementIndex))
+        {
+            FinishMountainInstanceUndo();
+            ReleaseNativeToolsVisibility();
+            _observedMountainInstance = null;
+            return false;
+        }
+
+        AcquireNativeToolsVisibility();
+
+        if (Selection.activeTransform != instance)
+        {
+            Selection.activeGameObject = instance.gameObject;
+            _observedMountainInstance = instance;
+            _observedMountainPosition = instance.localPosition;
+            _observedMountainScale = instance.localScale;
+            return true;
+        }
+
+        if (_observedMountainInstance != instance)
+        {
+            _observedMountainInstance = instance;
+            _observedMountainPosition = instance.localPosition;
+            _observedMountainScale = instance.localScale;
+            return true;
+        }
+
+        Vector3 currentPosition = instance.localPosition;
+        Vector3 currentScale = instance.localScale;
+        bool positionChanged =
+            (currentPosition - _observedMountainPosition).sqrMagnitude
+                > 0.0000001f;
+        bool scaleChanged =
+            (currentScale - _observedMountainScale).sqrMagnitude
+                > 0.0000001f;
+        if (positionChanged || scaleChanged)
+        {
+            BeginMountainInstanceUndo();
+            Undo.RecordObject(_builder, "Edit Mountain Instance");
+            _builder.ApplyMountainInstanceTransformDelta(
+                placementIndex,
+                positionChanged,
+                currentPosition - _observedMountainPosition,
+                scaleChanged,
+                DivideScale(currentScale, _observedMountainScale));
+            _observedMountainPosition = currentPosition;
+            _observedMountainScale = currentScale;
+            EditorUtility.SetDirty(_builder);
+            if (_builder.Anchor)
+                EditorSceneManager.MarkSceneDirty(_builder.Anchor.gameObject.scene);
+        }
+
+        if (_mountainInstanceUndoActive
+            && Event.current.rawType == EventType.MouseUp)
+        {
+            FinishMountainInstanceUndo();
+        }
+
+        Handles.Label(
+            instance.position
+                + Vector3.up * HandleUtility.GetHandleSize(instance.position) * 0.2f,
+            $"Mountain {placementIndex}  Scale {currentScale.x:F2}, {currentScale.y:F2}, {currentScale.z:F2}");
+        return true;
+    }
+
+    private static Vector3 DivideScale(Vector3 value, Vector3 divisor)
+    {
+        return new Vector3(
+            Mathf.Abs(divisor.x) > 0.000001f ? value.x / divisor.x : 1f,
+            Mathf.Abs(divisor.y) > 0.000001f ? value.y / divisor.y : 1f,
+            Mathf.Abs(divisor.z) > 0.000001f ? value.z / divisor.z : 1f);
+    }
+
+    private void AcquireNativeToolsVisibility()
+    {
+        if (!_nativeToolsVisibilityOwned)
+        {
+            _previousToolsHidden = Tools.hidden;
+            _nativeToolsVisibilityOwned = true;
+        }
+        Tools.hidden = false;
+    }
+
+    private void ReleaseNativeToolsVisibility()
+    {
+        if (!_nativeToolsVisibilityOwned)
+            return;
+        Tools.hidden = _previousToolsHidden;
+        _nativeToolsVisibilityOwned = false;
+    }
+
+    private void BeginMountainInstanceUndo()
+    {
+        if (_mountainInstanceUndoActive)
+            return;
+        _mountainInstanceUndoGroup = Undo.GetCurrentGroup();
+        Undo.SetCurrentGroupName("Edit Mountain Instance");
+        _mountainInstanceUndoActive = true;
+    }
+
+    private void FinishMountainInstanceUndo()
+    {
+        if (!_mountainInstanceUndoActive)
+            return;
+        Undo.CollapseUndoOperations(_mountainInstanceUndoGroup);
+        _mountainInstanceUndoActive = false;
+        _mountainInstanceUndoGroup = -1;
     }
 
     private void DrawSplineCurve()
@@ -2345,21 +2550,6 @@ internal sealed class PathSplineEditor : Editor
 
         if (current.type == EventType.MouseDown
             && current.button == 0
-            && current.clickCount >= 2
-            && !current.alt
-            && !current.shift
-            && !current.control
-            && !current.command
-            && GUIUtility.hotControl == 0
-            && InsertKnotOnCurve(current.mousePosition))
-        {
-            current.Use();
-            SceneView.RepaintAll();
-            return;
-        }
-
-        if (current.type == EventType.MouseDown
-            && current.button == 0
             && !current.alt
             && GUIUtility.hotControl == 0)
         {
@@ -2477,7 +2667,7 @@ internal sealed class PathSplineEditor : Editor
     {
         nearestSegment = -1;
         nearestT = 0f;
-        const float hitDistance = 12f;
+        const float hitDistance = 16f;
         float bestDistance = hitDistance;
         int sampleCount = Mathf.Clamp(
             _builder.samplesPerCurve * 2,
@@ -2823,120 +3013,129 @@ internal sealed class PathSplineEditor : Editor
             return;
 
         bool missing = !_builder.GeneratedRoot;
+        bool migrateMountainOverrides =
+            _builder.mode == PathBuildMode.Mountain
+            && _builder.HasLegacyMountainInstanceOverrides();
         if (!missing && _builder.mode == PathBuildMode.River)
         {
             MeshFilter filter = _builder.GeneratedRoot.GetComponent<MeshFilter>();
             missing = !filter || !filter.sharedMesh;
         }
-        if (missing)
+        if (missing || migrateMountainOverrides)
             PathBuilderGenerator.Rebuild(_builder, false);
     }
 
     private void CacheProperties()
     {
-        _closed = serializedObject.FindProperty("closed");
-        _autoRebuild = serializedObject.FindProperty("autoRebuild");
-        _samplesPerCurve = serializedObject.FindProperty("samplesPerCurve");
-        _projectToSurface = serializedObject.FindProperty("projectToSurface");
-        _surfaceMask = serializedObject.FindProperty("surfaceMask");
-        _rayHeight = serializedObject.FindProperty("rayHeight");
-        _surfaceOffset = serializedObject.FindProperty("surfaceOffset");
-        _outputs = serializedObject.FindProperty("outputs");
+        _closed = _so.FindProperty("closed");
+        _autoRebuild = _so.FindProperty("autoRebuild");
+        _samplesPerCurve = _so.FindProperty("samplesPerCurve");
+        _projectToSurface = _so.FindProperty("projectToSurface");
+        _surfaceMask = _so.FindProperty("surfaceMask");
+        _rayHeight = _so.FindProperty("rayHeight");
+        _surfaceOffset = _so.FindProperty("surfaceOffset");
+        _outputs = _so.FindProperty("outputs");
         _mountainDecalSet =
-            serializedObject.FindProperty("mountainDecalSet");
-        _mountainSources = serializedObject.FindProperty("mountainSources");
-        _randomSeed = serializedObject.FindProperty("randomSeed");
-        _mountainSpacing = serializedObject.FindProperty("mountainSpacing");
+            _so.FindProperty("mountainDecalSet");
+        _mountainSources = _so.FindProperty("mountainSources");
+        _randomSeed = _so.FindProperty("randomSeed");
+        _mountainSpacing = _so.FindProperty("mountainSpacing");
         _mountainDistributionUniformity =
-            serializedObject.FindProperty("mountainDistributionUniformity");
-        _brushWidth = serializedObject.FindProperty("brushWidth");
-        _uniformScale = serializedObject.FindProperty("uniformScale");
+            _so.FindProperty("mountainDistributionUniformity");
+        _brushWidth = _so.FindProperty("brushWidth");
+        _uniformScale = _so.FindProperty("uniformScale");
         _uniformScaleRange =
-            serializedObject.FindProperty("uniformScaleRange");
+            _so.FindProperty("uniformScaleRange");
         _horizontalScaleRange =
-            serializedObject.FindProperty("horizontalScaleRange");
+            _so.FindProperty("horizontalScaleRange");
         _verticalScaleRange =
-            serializedObject.FindProperty("verticalScaleRange");
-        _yawRange = serializedObject.FindProperty("yawRange");
-        _alignToSpline = serializedObject.FindProperty("alignToSpline");
-        _useSplineWidth = serializedObject.FindProperty("useSplineWidth");
+            _so.FindProperty("verticalScaleRange");
+        _yawRange = _so.FindProperty("yawRange");
+        _alignToSpline = _so.FindProperty("alignToSpline");
+        _useSplineWidth = _so.FindProperty("useSplineWidth");
         _mountainHeightMode =
-            serializedObject.FindProperty("mountainHeightMode");
+            _so.FindProperty("mountainHeightMode");
         _mountainCardMaterial =
-            serializedObject.FindProperty("mountainCardMaterial");
+            _so.FindProperty("mountainCardMaterial");
         _mountainCardHeight =
-            serializedObject.FindProperty("mountainCardHeight");
+            _so.FindProperty("mountainCardHeight");
         _mountainCardPivot =
-            serializedObject.FindProperty("mountainCardPivot");
+            _so.FindProperty("mountainCardPivot");
         _mountainCardRandomFlip =
-            serializedObject.FindProperty("mountainCardRandomFlip");
+            _so.FindProperty("mountainCardRandomFlip");
+        _mountainCardFlipX =
+            _so.FindProperty("mountainCardFlipX");
+        _mountainCardFlipY =
+            _so.FindProperty("mountainCardFlipY");
+        _mountainCardRandomFlipY =
+            _so.FindProperty("mountainCardRandomFlipY");
         _mountainCardColor =
-            serializedObject.FindProperty("mountainCardColor");
-        _mountainCardSortingMode =
-            serializedObject.FindProperty("mountainCardSortingMode");
-        _mountainCardSortingLayerId =
-            serializedObject.FindProperty("mountainCardSortingLayerId");
-        _mountainCardSortingOrder =
-            serializedObject.FindProperty("mountainCardSortingOrder");
-        _mountainCardRenderQueue =
-            serializedObject.FindProperty("mountainCardRenderQueue");
+            _so.FindProperty("mountainCardColor");
         _mountainBakeOutput =
-            serializedObject.FindProperty("mountainBakeOutput");
+            _so.FindProperty("mountainBakeOutput");
+        _mountainFlattenPreview =
+            _so.FindProperty("mountainFlattenPreview");
         _keepMountainAuthoringAfterBake =
-            serializedObject.FindProperty("keepMountainAuthoringAfterBake");
+            _so.FindProperty("keepMountainAuthoringAfterBake");
+        _mountainFlattenTarget =
+            _so.FindProperty("mountainFlattenTarget");
+        _mountainWorldPlaneHeight =
+            _so.FindProperty("mountainWorldPlaneHeight");
         _mountainDecalSurfaceMask =
-            serializedObject.FindProperty("mountainDecalSurfaceMask");
+            _so.FindProperty("mountainDecalSurfaceMask");
         _mountainDecalProjectionDistance =
-            serializedObject.FindProperty("mountainDecalProjectionDistance");
+            _so.FindProperty("mountainDecalProjectionDistance");
         _mountainDecalSurfaceOffset =
-            serializedObject.FindProperty("mountainDecalSurfaceOffset");
-        _ribbonPreset = serializedObject.FindProperty("ribbonPreset");
-        _riverMaterial = serializedObject.FindProperty("riverMaterial");
-        _riverHeightMode = serializedObject.FindProperty("riverHeightMode");
+            _so.FindProperty("mountainDecalSurfaceOffset");
+        _ribbonPreset = _so.FindProperty("ribbonPreset");
+        _riverMaterial = _so.FindProperty("riverMaterial");
+        _riverHeightMode = _so.FindProperty("riverHeightMode");
         _riverSegmentLength =
-            serializedObject.FindProperty("riverSegmentLength");
+            _so.FindProperty("riverSegmentLength");
         _riverUvLength =
-            serializedObject.FindProperty("riverUvLength");
+            _so.FindProperty("riverUvLength");
         _generateCollider =
-            serializedObject.FindProperty("generateCollider");
+            _so.FindProperty("generateCollider");
         _edgeNoiseEnabled =
-            serializedObject.FindProperty("edgeNoiseEnabled");
-        _edgeNoiseSeed = serializedObject.FindProperty("edgeNoiseSeed");
+            _so.FindProperty("edgeNoiseEnabled");
+        _edgeNoiseSeed = _so.FindProperty("edgeNoiseSeed");
         _leftEdgeNoiseAmplitude =
-            serializedObject.FindProperty("leftEdgeNoiseAmplitude");
+            _so.FindProperty("leftEdgeNoiseAmplitude");
         _rightEdgeNoiseAmplitude =
-            serializedObject.FindProperty("rightEdgeNoiseAmplitude");
+            _so.FindProperty("rightEdgeNoiseAmplitude");
         _edgeNoiseWavelength =
-            serializedObject.FindProperty("edgeNoiseWavelength");
+            _so.FindProperty("edgeNoiseWavelength");
         _generateEdgeObjects =
-            serializedObject.FindProperty("generateEdgeObjects");
+            _so.FindProperty("generateEdgeObjects");
         _generateLeftEdge =
-            serializedObject.FindProperty("generateLeftEdge");
+            _so.FindProperty("generateLeftEdge");
         _generateRightEdge =
-            serializedObject.FindProperty("generateRightEdge");
-        _edgePrefabs = serializedObject.FindProperty("edgePrefabs");
+            _so.FindProperty("generateRightEdge");
+        _edgePrefabs = _so.FindProperty("edgePrefabs");
         _edgeObjectSeed =
-            serializedObject.FindProperty("edgeObjectSeed");
+            _so.FindProperty("edgeObjectSeed");
         _edgeObjectSpacingRange =
-            serializedObject.FindProperty("edgeObjectSpacingRange");
+            _so.FindProperty("edgeObjectSpacingRange");
         _edgeObjectDensity =
-            serializedObject.FindProperty("edgeObjectDensity");
+            _so.FindProperty("edgeObjectDensity");
         _edgeObjectScaleRange =
-            serializedObject.FindProperty("edgeObjectScaleRange");
+            _so.FindProperty("edgeObjectScaleRange");
         _edgeObjectYawRange =
-            serializedObject.FindProperty("edgeObjectYawRange");
+            _so.FindProperty("edgeObjectYawRange");
         _edgeObjectOutwardOffset =
-            serializedObject.FindProperty("edgeObjectOutwardOffset");
+            _so.FindProperty("edgeObjectOutwardOffset");
         _edgeObjectHeightOffset =
-            serializedObject.FindProperty("edgeObjectHeightOffset");
+            _so.FindProperty("edgeObjectHeightOffset");
         _edgeObjectsAlignToPath =
-            serializedObject.FindProperty("edgeObjectsAlignToPath");
+            _so.FindProperty("edgeObjectsAlignToPath");
         _edgeObjectsProjectToSurface =
-            serializedObject.FindProperty("edgeObjectsProjectToSurface");
+            _so.FindProperty("edgeObjectsProjectToSurface");
         _generatedAssetOutputFolder =
-            serializedObject.FindProperty("generatedAssetOutputFolder");
+            _so.FindProperty("generatedAssetOutputFolder");
         _prefabOutputFolder =
-            serializedObject.FindProperty("prefabOutputFolder");
+            _so.FindProperty("prefabOutputFolder");
+        _mountainMaterialOutputFolder =
+            _so.FindProperty("mountainMaterialOutputFolder");
     }
 }
 
@@ -2945,14 +3144,12 @@ internal sealed class MountainDecalSetEditor : Editor
 {
     private SerializedProperty _sources;
     private SerializedProperty _baseMaterial;
-    private SerializedProperty _renderQueue;
     private SerializedProperty _materialPages;
 
     private void OnEnable()
     {
         _sources = serializedObject.FindProperty("sources");
         _baseMaterial = serializedObject.FindProperty("baseMaterial");
-        _renderQueue = serializedObject.FindProperty("renderQueue");
         _materialPages = serializedObject.FindProperty("materialPages");
     }
 
@@ -2975,15 +3172,9 @@ internal sealed class MountainDecalSetEditor : Editor
                 new GUIContent(
                     "Base Material",
                     "共享材质模板；留空时使用 URP Unlit 透明材质"));
-            EditorGUILayout.PropertyField(
-                _renderQueue,
-                new GUIContent(
-                    "Render Queue",
-                    "该资源集生成的所有贴花材质统一使用此渲染队列"));
-            _renderQueue.intValue = Mathf.Clamp(
-                _renderQueue.intValue,
-                2501,
-                3999);
+            EditorGUILayout.HelpBox(
+                "渲染队列由 Base Material 自带值控制，工具不再覆盖。如需调整绘制先后，请直接修改 Base Material 的 Render Queue。",
+                MessageType.Info);
             EditorGUILayout.LabelField(
                 new GUIContent(
                     "Cached Material Pages",

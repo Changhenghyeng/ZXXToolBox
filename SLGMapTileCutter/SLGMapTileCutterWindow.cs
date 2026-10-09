@@ -15,6 +15,7 @@ namespace SLGMapTileCutter.Editor
     {
         private const string DefaultOutputFolder = "Assets/Generated/SLGMapTileCutter";
         private const string PreviewColliderName = "__SLGMapTileCutterPreviewCollider";
+        private const int MaxRecognitionResolution = 8192;
         [SerializeField] private SLGMapTileMapAsset _configuration;
         [SerializeField] private Texture2D _lineTexture;
         [SerializeField] private MeshFilter _target;
@@ -22,6 +23,7 @@ namespace SLGMapTileCutter.Editor
         [SerializeField] private float _darkThreshold = 0.62f;
         [SerializeField] private int _gapCloseRadius = 1;
         [SerializeField] private int _minimumRegionPixels = 8;
+        [SerializeField] private bool _enclosedRegionsOnly;
         [SerializeField] private Vector2 _projectionOffset;
         [SerializeField] private Vector2 _projectionScale = Vector2.one;
         [SerializeField] private float _projectionRotation;
@@ -1063,7 +1065,7 @@ namespace SLGMapTileCutter.Editor
             _longSideResolution = EditorGUILayout.IntSlider(
                 new GUIContent("Recognition Resolution",
                     "越高越能保留原图细节。最终边界点数主要由轮廓简化误差控制。"),
-                _longSideResolution, 32, 512);
+                _longSideResolution, 32, MaxRecognitionResolution);
             _darkThreshold = EditorGUILayout.Slider(
                 new GUIContent(
                     "Line Darkness Threshold",
@@ -1077,6 +1079,11 @@ namespace SLGMapTileCutter.Editor
                     "Minimum Region Pixels",
                     "小于该像素数量的区域不会作为独立地块保留。"),
                 _minimumRegionPixels, 1, 128);
+            _enclosedRegionsOnly = EditorGUILayout.Toggle(
+                new GUIContent(
+                    "Enclosed Regions Only",
+                    "只保留完全被黑线包围的区域，不生成图片外部的大平面。细长双线轮廓建议将识别分辨率设为图片导入分辨率，并将 Gap Closing 设为 0。"),
+                _enclosedRegionsOnly);
             if (EditorGUI.EndChangeCheck())
             {
                 Invalidate();
@@ -1363,6 +1370,8 @@ namespace SLGMapTileCutter.Editor
             _lineTexture = configuration.lineTexture;
             _darkThreshold = configuration.darkThreshold;
             _gapCloseRadius = Mathf.Max(0, configuration.closeRadius);
+            _enclosedRegionsOnly = configuration.version >= 6
+                && configuration.enclosedRegionsOnly;
             _tileGap = Mathf.Max(0f, configuration.tileGap);
             _projectionOffset = configuration.projectionOffset;
             _projectionScale = new Vector2(
@@ -1384,7 +1393,8 @@ namespace SLGMapTileCutter.Editor
             if (configuration.version >= 2)
             {
                 _longSideResolution = Mathf.Clamp(
-                    configuration.longSideResolution, 32, 512);
+                    configuration.longSideResolution, 32,
+                    MaxRecognitionResolution);
                 _minimumRegionPixels = Mathf.Clamp(
                     configuration.minimumRegionPixels, 1, 128);
                 _skeletonSimplifyTolerance = Mathf.Clamp(
@@ -1432,7 +1442,7 @@ namespace SLGMapTileCutter.Editor
                 // Older assets did not contain a complete settings snapshot.
                 _longSideResolution = Mathf.Clamp(
                     Mathf.Max(configuration.gridWidth, configuration.gridHeight),
-                    32, 512);
+                    32, MaxRecognitionResolution);
             }
 
             if (_target == null || _target.sharedMesh != configuration.sourceMesh)
@@ -1540,8 +1550,9 @@ namespace SLGMapTileCutter.Editor
 
         private void BuildRegionLabels()
         {
-            int imageWidth = Mathf.Max(1, _lineTexture.width);
-            int imageHeight = Mathf.Max(1, _lineTexture.height);
+            Vector2Int sourceSize = GetLineTextureSourceSize();
+            int imageWidth = Mathf.Max(1, sourceSize.x);
+            int imageHeight = Mathf.Max(1, sourceSize.y);
             if (imageWidth >= imageHeight)
             {
                 _gridWidth = _longSideResolution;
@@ -1567,16 +1578,21 @@ namespace SLGMapTileCutter.Editor
             // cannot immediately heal the artist-authored opening.
             RasterizeManualEraseSegments(lineMask);
 
-            // The picture rectangle is the default outer boundary for partial edge tiles.
-            for (int x = 0; x < _gridWidth; x++)
+            // Multi-tile mode treats the picture rectangle as its outer boundary.
+            // Enclosed-only mode must leave it open so the exterior component can
+            // be identified and discarded.
+            if (!_enclosedRegionsOnly)
             {
-                lineMask[Index(x, 0)] = true;
-                lineMask[Index(x, _gridHeight - 1)] = true;
-            }
-            for (int y = 0; y < _gridHeight; y++)
-            {
-                lineMask[Index(0, y)] = true;
-                lineMask[Index(_gridWidth - 1, y)] = true;
+                for (int x = 0; x < _gridWidth; x++)
+                {
+                    lineMask[Index(x, 0)] = true;
+                    lineMask[Index(x, _gridHeight - 1)] = true;
+                }
+                for (int y = 0; y < _gridHeight; y++)
+                {
+                    lineMask[Index(0, y)] = true;
+                    lineMask[Index(_gridWidth - 1, y)] = true;
+                }
             }
 
             _labels = new int[count];
@@ -1605,8 +1621,11 @@ namespace SLGMapTileCutter.Editor
                     EnqueueOpenNeighbours(current, nextLabel, lineMask, queue);
                 }
 
-                if (component.Count < _minimumRegionPixels
-                    && !ComponentTouchesMask(component, manualLineMask))
+                bool discardExterior = _enclosedRegionsOnly
+                    && ComponentTouchesGridEdge(component);
+                bool discardSmall = component.Count < _minimumRegionPixels
+                    && !ComponentTouchesMask(component, manualLineMask);
+                if (discardExterior || discardSmall)
                 {
                     for (int i = 0; i < component.Count; i++)
                     {
@@ -1623,15 +1642,35 @@ namespace SLGMapTileCutter.Editor
 
             if (nextLabel == 0)
             {
-                throw new InvalidOperationException("没有识别到封闭地块。请检查线框阈值、闭合距离或图片内容。");
+                throw new InvalidOperationException(_enclosedRegionsOnly
+                    ? "没有识别到被黑线完整包围的区域。请提高识别分辨率，并尝试将 Gap Closing 设为 0。"
+                    : "没有识别到封闭地块。请检查线框阈值、闭合距离或图片内容。");
             }
 
             // Assign the line band to the nearest open region with an exact squared
             // Euclidean transform. The old four-neighbour flood used Manhattan
             // distance, which visibly biased diagonal borders toward the grid axes.
-            FillLinePixelsByEuclideanNearestRegion();
+            if (!_enclosedRegionsOnly)
+            {
+                FillLinePixelsByEuclideanNearestRegion();
+            }
 
             _tileCount = nextLabel;
+        }
+
+        private bool ComponentTouchesGridEdge(List<int> component)
+        {
+            for (int i = 0; i < component.Count; i++)
+            {
+                int x = component[i] % _gridWidth;
+                int y = component[i] / _gridWidth;
+                if (x == 0 || y == 0
+                    || x == _gridWidth - 1 || y == _gridHeight - 1)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private static void MergeLineMask(bool[] destination, bool[] source)
@@ -1804,9 +1843,16 @@ namespace SLGMapTileCutter.Editor
                 return (bool[])_cachedImportedLineMask.Clone();
             }
 
-            Color32[] pixels = _lineTexture.GetPixels32();
-            int imageWidth = _lineTexture.width;
-            int imageHeight = _lineTexture.height;
+            Color32[] pixels;
+            int imageWidth;
+            int imageHeight;
+            if (!TryReadOriginalLineTexturePixels(out pixels,
+                out imageWidth, out imageHeight))
+            {
+                pixels = _lineTexture.GetPixels32();
+                imageWidth = _lineTexture.width;
+                imageHeight = _lineTexture.height;
+            }
             bool[] imported = new bool[_gridWidth * _gridHeight];
             for (int y = 0; y < _gridHeight; y++)
             {
@@ -1830,20 +1876,91 @@ namespace SLGMapTileCutter.Editor
             return imported;
         }
 
+        private Vector2Int GetLineTextureSourceSize()
+        {
+            if (_lineTexture == null)
+            {
+                return Vector2Int.one;
+            }
+            string path = AssetDatabase.GetAssetPath(_lineTexture);
+            TextureImporter importer = AssetImporter.GetAtPath(path)
+                as TextureImporter;
+            if (importer != null)
+            {
+                importer.GetSourceTextureWidthAndHeight(
+                    out int width, out int height);
+                if (width > 0 && height > 0)
+                {
+                    return new Vector2Int(width, height);
+                }
+            }
+            return new Vector2Int(_lineTexture.width, _lineTexture.height);
+        }
+
+        private bool TryReadOriginalLineTexturePixels(out Color32[] pixels,
+            out int width, out int height)
+        {
+            pixels = null;
+            width = 0;
+            height = 0;
+            string assetPath = AssetDatabase.GetAssetPath(_lineTexture);
+            if (string.IsNullOrEmpty(assetPath))
+            {
+                return false;
+            }
+            string projectFolder = System.IO.Path.GetDirectoryName(
+                Application.dataPath);
+            string fullPath = System.IO.Path.GetFullPath(
+                System.IO.Path.Combine(projectFolder, assetPath));
+            if (!System.IO.File.Exists(fullPath))
+            {
+                return false;
+            }
+
+            Texture2D source = new Texture2D(2, 2, TextureFormat.RGBA32,
+                false, false);
+            try
+            {
+                if (!ImageConversion.LoadImage(source,
+                    System.IO.File.ReadAllBytes(fullPath), false))
+                {
+                    return false;
+                }
+                width = source.width;
+                height = source.height;
+                pixels = source.GetPixels32();
+                return pixels != null && pixels.Length == width * height;
+            }
+            finally
+            {
+                DestroyImmediate(source);
+            }
+        }
+
         private bool IsLineCellFromPixels(int x, int y,
             Color32[] pixels, int imageWidth, int imageHeight)
         {
-            const int samplesPerAxis = 2;
-            for (int sampleY = 0; sampleY < samplesPerAxis; sampleY++)
+            int fromX = Mathf.Clamp(
+                Mathf.FloorToInt(x * imageWidth / (float)_gridWidth),
+                0, imageWidth - 1);
+            int toX = Mathf.Clamp(
+                Mathf.CeilToInt((x + 1) * imageWidth / (float)_gridWidth) - 1,
+                fromX, imageWidth - 1);
+            int fromY = Mathf.Clamp(
+                Mathf.FloorToInt(y * imageHeight / (float)_gridHeight),
+                0, imageHeight - 1);
+            int toY = Mathf.Clamp(
+                Mathf.CeilToInt((y + 1) * imageHeight / (float)_gridHeight) - 1,
+                fromY, imageHeight - 1);
+            for (int sourceY = fromY; sourceY <= toY; sourceY++)
             {
-                for (int sampleX = 0; sampleX < samplesPerAxis; sampleX++)
+                int row = sourceY * imageWidth;
+                for (int sourceX = fromX; sourceX <= toX; sourceX++)
                 {
-                    float u = (x + (sampleX + 0.5f)
-                        / samplesPerAxis) / _gridWidth;
-                    float v = (y + (sampleY + 0.5f)
-                        / samplesPerAxis) / _gridHeight;
-                    if (IsDarkBilinearSample(pixels, imageWidth,
-                        imageHeight, u, v))
+                    Color32 pixel = pixels[row + sourceX];
+                    if (pixel.a > 12
+                        && (pixel.r * 0.2126f + pixel.g * 0.7152f
+                            + pixel.b * 0.0722f) <= _darkThreshold * 255f)
                     {
                         return true;
                     }
@@ -2158,7 +2275,16 @@ namespace SLGMapTileCutter.Editor
             }
 
             AddSmoothedPreviewPaths(gridSegments);
-            StabilizeVectorizedGrid();
+            Mesh previewMesh = _target.sharedMesh;
+            bool directPlanarContour = _tileGap <= 0f
+                && previewMesh != null
+                && previewMesh.subMeshCount == 1
+                && IsFlatSource(previewMesh.vertices, previewMesh.bounds)
+                && HasAffineSourceUv(previewMesh.vertices, previewMesh.uv);
+            if (!directPlanarContour)
+            {
+                StabilizeVectorizedGrid();
+            }
             BuildPreviewUvPaths();
             ReprojectPreviewPaths();
         }
@@ -2280,8 +2406,8 @@ namespace SLGMapTileCutter.Editor
             bool isClosed = path.Count > 3 && path[0] == path[path.Count - 1];
             List<Vector2> prepared = SmoothRasterPath(path, isClosed);
             List<Vector2> simplified = isClosed
-                ? SimplifyClosedPath(prepared)
-                : SimplifyPath(prepared);
+                ? SimplifyClosedPath(prepared, _skeletonSimplifyTolerance)
+                : SimplifyPath(prepared, _skeletonSimplifyTolerance);
             if (simplified.Count >= 2)
             {
                 _vectorSkeletonPaths.Add(new List<Vector2>(simplified));
@@ -2415,14 +2541,16 @@ namespace SLGMapTileCutter.Editor
             return a + direction * t;
         }
 
-        private List<Vector2> SimplifyClosedPath(List<Vector2> path)
+        private static List<Vector2> SimplifyClosedPath(List<Vector2> path,
+            float tolerance)
         {
             path.RemoveAt(path.Count - 1);
             int pivot = Mathf.Max(1, path.Count / 2);
-            List<Vector2> first = SimplifyPath(path.GetRange(0, pivot + 1));
+            List<Vector2> first = SimplifyPath(
+                path.GetRange(0, pivot + 1), tolerance);
             List<Vector2> secondInput = path.GetRange(pivot, path.Count - pivot);
             secondInput.Add(path[0]);
-            List<Vector2> second = SimplifyPath(secondInput);
+            List<Vector2> second = SimplifyPath(secondInput, tolerance);
             first.RemoveAt(first.Count - 1);
             first.AddRange(second);
             return first;
@@ -3229,18 +3357,29 @@ namespace SLGMapTileCutter.Editor
                 throw new InvalidOperationException(
                     "参考 Mesh 没有完整的 UV0，无法保证生成地块的纹理位置与原模型完全一致。");
             }
+            bool directPlanarSource = _tileGap <= 0f
+                && source.subMeshCount == 1
+                && IsFlatSource(source.vertices, source.bounds)
+                && HasAffineSourceUv(source.vertices, source.uv);
+            if (directPlanarSource)
+            {
+                if (TryBuildMinimalPlanarPreviewTiles(source,
+                    out Dictionary<int, TileBuilder> previewBuilders))
+                {
+                    return previewBuilders;
+                }
+                throw new InvalidOperationException(
+                    (string.IsNullOrEmpty(_lastMinimalBuildFailure)
+                        ? "当前青色线框中没有可生成的闭合多边形"
+                        : _lastMinimalBuildFailure)
+                    + "。"
+                    + "请只检查青色线框是否闭合；工具不会自动切换模式，"
+                    + "也不会修改当前参数。");
+            }
             if (TryBuildMinimalPlanarTiles(source,
                 out Dictionary<int, TileBuilder> planarBuilders))
             {
                 return planarBuilders;
-            }
-            if (_tileGap <= 0f && source.subMeshCount == 1
-                && IsFlatSource(source.vertices, source.bounds)
-                && HasAffineSourceUv(source.vertices, source.uv))
-            {
-                throw new InvalidOperationException(
-                    "骨架轮廓最少面三角化失败：" + _lastMinimalBuildFailure
-                    + "。已取消输出，不会回退到旧模型布线。");
             }
             if (_tileGap <= 0f)
             {
@@ -3319,6 +3458,10 @@ namespace SLGMapTileCutter.Editor
                         for (int x = fromX; x <= toX; x++)
                         {
                             int tile = _labels[Index(x, y)];
+                            if (tile < 0)
+                            {
+                                continue;
+                            }
                             if (!builders.TryGetValue(tile, out TileBuilder builder))
                             {
                                 builder = new TileBuilder(subMeshCount);
@@ -3348,6 +3491,184 @@ namespace SLGMapTileCutter.Editor
                 }
             }
             return builders;
+        }
+
+        // A flat reference plane does not need to be cut cell by cell. The cyan
+        // preview already consists of vector polylines, so every closed preview
+        // loop (except the image frame) is the polygon the artist asked to create.
+        // This path deliberately does not change recognition settings or modes.
+        private bool TryBuildMinimalPlanarPreviewTiles(Mesh source,
+            out Dictionary<int, TileBuilder> builders)
+        {
+            builders = null;
+            if (source == null || source.subMeshCount != 1 || _tileGap > 0f
+                || _vectorSkeletonPaths.Count == 0)
+            {
+                return false;
+            }
+
+            Vector3[] positions = source.vertices;
+            Vector2[] sourceUvs = source.uv;
+            Vector3[] sourceNormals = source.normals;
+            Vector4[] sourceTangents = source.tangents;
+            int[] sourceTriangles = source.GetTriangles(0);
+            if (!IsFlatSource(positions, source.bounds)
+                || !HasAffineSourceUv(positions, sourceUvs))
+            {
+                return false;
+            }
+
+            float desiredAreaSign = SourceProjectedAreaSign(positions,
+                sourceTriangles);
+            if (Mathf.Abs(desiredAreaSign) < 0.5f)
+            {
+                return false;
+            }
+
+            Dictionary<int, TileBuilder> result =
+                new Dictionary<int, TileBuilder>();
+            int closedContourCount = 0;
+            for (int pathIndex = 0;
+                pathIndex < _vectorSkeletonPaths.Count; pathIndex++)
+            {
+                List<Vector2> path = _vectorSkeletonPaths[pathIndex];
+                if (!TryGetClosedPreviewContour(path,
+                    out List<Vector2> contour)
+                    || IsImageFrameContour(contour)
+                    || Mathf.Abs(SignedContourArea(contour))
+                        < _minimumRegionPixels)
+                {
+                    continue;
+                }
+                closedContourCount++;
+
+                List<PolyVertex> polygon =
+                    new List<PolyVertex>(contour.Count);
+                bool valid = true;
+                for (int i = 0; i < contour.Count; i++)
+                {
+                    if (!TryCreateAffinePlanarVertex(contour[i], positions,
+                        sourceUvs, sourceNormals, sourceTangents,
+                        out PolyVertex vertex))
+                    {
+                        valid = false;
+                        break;
+                    }
+                    polygon.Add(vertex);
+                }
+                if (!valid || !TryTriangulateVectorPolygon(polygon,
+                    desiredAreaSign, out List<int> polygonTriangles))
+                {
+                    _lastMinimalBuildFailure = string.Format(
+                        "青色闭合线框 {0} 存在自交或重叠，无法三角化",
+                        closedContourCount);
+                    return false;
+                }
+
+                int tile = result.Count;
+                TileBuilder builder = new TileBuilder(1);
+                if (builder.AddTriangulatedPolygon(polygon,
+                    polygonTriangles, 0, TileColor(tile)))
+                {
+                    result.Add(tile, builder);
+                }
+            }
+
+            if (result.Count == 0 || result.Count != closedContourCount)
+            {
+                _lastMinimalBuildFailure =
+                    "当前青色线框中没有可三角化的闭合多边形";
+                return false;
+            }
+            builders = result;
+            return true;
+        }
+
+        private static float SignedContourArea(List<Vector2> contour)
+        {
+            float area = 0f;
+            for (int i = 0; i < contour.Count; i++)
+            {
+                Vector2 a = contour[i];
+                Vector2 b = contour[(i + 1) % contour.Count];
+                area += Cross2D(a, b);
+            }
+            return area * 0.5f;
+        }
+
+        private static bool TryGetClosedPreviewContour(List<Vector2> path,
+            out List<Vector2> contour)
+        {
+            contour = null;
+            if (path == null || path.Count < 4
+                || (path[0] - path[path.Count - 1]).sqrMagnitude
+                    > 0.000001f)
+            {
+                return false;
+            }
+
+            contour = new List<Vector2>(path.Count - 1);
+            for (int i = 0; i < path.Count - 1; i++)
+            {
+                Vector2 point = path[i];
+                if (contour.Count == 0
+                    || (point - contour[contour.Count - 1]).sqrMagnitude
+                        > 0.00000001f)
+                {
+                    contour.Add(point);
+                }
+            }
+            RemoveCollinearContourPoints(contour);
+            return contour.Count >= 3;
+        }
+
+        private static void RemoveCollinearContourPoints(List<Vector2> contour)
+        {
+            bool changed = true;
+            while (changed && contour.Count >= 3)
+            {
+                changed = false;
+                for (int i = 0; i < contour.Count; i++)
+                {
+                    Vector2 previous = contour[(i - 1 + contour.Count)
+                        % contour.Count];
+                    Vector2 current = contour[i];
+                    Vector2 next = contour[(i + 1) % contour.Count];
+                    Vector2 a = current - previous;
+                    Vector2 b = next - current;
+                    float scale = Mathf.Max(1f, a.magnitude + b.magnitude);
+                    if (Mathf.Abs(Cross2D(a, b)) <= 0.00001f * scale
+                        && Vector2.Dot(a, b) >= 0f)
+                    {
+                        contour.RemoveAt(i);
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        private bool IsImageFrameContour(List<Vector2> contour)
+        {
+            if (contour == null || contour.Count < 4)
+            {
+                return false;
+            }
+            float minX = float.MaxValue;
+            float maxX = float.MinValue;
+            float minY = float.MaxValue;
+            float maxY = float.MinValue;
+            for (int i = 0; i < contour.Count; i++)
+            {
+                minX = Mathf.Min(minX, contour[i].x);
+                maxX = Mathf.Max(maxX, contour[i].x);
+                minY = Mathf.Min(minY, contour[i].y);
+                maxY = Mathf.Max(maxY, contour[i].y);
+            }
+            const float edgeTolerance = 0.01f;
+            return minX <= edgeTolerance && minY <= edgeTolerance
+                && maxX >= _gridWidth - edgeTolerance
+                && maxY >= _gridHeight - edgeTolerance;
         }
 
         private Dictionary<int, TileBuilder> BuildSurfaceConformingTiles(Mesh source)
@@ -3446,24 +3767,23 @@ namespace SLGMapTileCutter.Editor
             for (int label = 0; label < _tileCount; label++)
             {
                 if (!boundaryEdges.TryGetValue(label, out List<GridSegment> edges)
-                    || !TryTraceSingleBoundaryLoop(edges, out List<Vector2Int> loop))
+                    || !TryTraceRegionBoundaryLoop(edges, out List<Vector2Int> loop))
                 {
                     throw new InvalidOperationException(string.Format(
                         "地块 {0} 不是单一闭合轮廓。请在骨架预览中补线或清理交叉线后重试。",
                         label + 1));
                 }
-                RemoveCollinearVectorBoundary(loop);
-                if (loop.Count < 3)
+                List<Vector2> contour = BuildDirectVectorContour(loop);
+                if (contour.Count < 3)
                 {
                     throw new InvalidOperationException(string.Format(
                         "地块 {0} 的有效边界点少于 3 个。", label + 1));
                 }
 
-                List<PolyVertex> polygon = new List<PolyVertex>(loop.Count);
-                for (int i = 0; i < loop.Count; i++)
+                List<PolyVertex> polygon = new List<PolyVertex>(contour.Count);
+                for (int i = 0; i < contour.Count; i++)
                 {
-                    Vector2 point = GetVectorizedGridPoint(loop[i].x, loop[i].y);
-                    polygon.Add(new PolyVertex { plane = point });
+                    polygon.Add(new PolyVertex { plane = contour[i] });
                 }
                 if (!TryTriangulateVectorPolygon(polygon, 1f,
                     out List<int> triangleIndices))
@@ -3563,26 +3883,24 @@ namespace SLGMapTileCutter.Editor
             for (int label = 0; label < _tileCount; label++)
             {
                 if (!boundaryEdges.TryGetValue(label, out List<GridSegment> edges)
-                    || !TryTraceSingleBoundaryLoop(edges, out List<Vector2Int> loop))
+                    || !TryTraceRegionBoundaryLoop(edges, out List<Vector2Int> loop))
                 {
                     _lastMinimalBuildFailure = string.Format(
                         "地块 {0} 不是单一闭合轮廓", label + 1);
                     return false;
                 }
-                RemoveCollinearVectorBoundary(loop);
-                if (loop.Count < 3)
+                List<Vector2> contour = BuildDirectVectorContour(loop);
+                if (contour.Count < 3)
                 {
                     _lastMinimalBuildFailure = string.Format(
                         "地块 {0} 的有效轮廓点少于 3 个", label + 1);
                     return false;
                 }
 
-                List<PolyVertex> polygon = new List<PolyVertex>(loop.Count);
-                for (int i = 0; i < loop.Count; i++)
+                List<PolyVertex> polygon = new List<PolyVertex>(contour.Count);
+                for (int i = 0; i < contour.Count; i++)
                 {
-                    Vector2Int key = loop[i];
-                    Vector2 gridPoint = GetVectorizedGridPoint(key.x, key.y);
-                    if (!TryCreateAffinePlanarVertex(gridPoint, positions, sourceUvs,
+                    if (!TryCreateAffinePlanarVertex(contour[i], positions, sourceUvs,
                         sourceNormals, sourceTangents, out PolyVertex vertex))
                     {
                         _lastMinimalBuildFailure = string.Format(
@@ -3862,32 +4180,188 @@ namespace SLGMapTileCutter.Editor
             return loop.Count == edges.Count;
         }
 
-        private void RemoveCollinearVectorBoundary(List<Vector2Int> loop)
+        private bool TryTraceRegionBoundaryLoop(List<GridSegment> edges,
+            out List<Vector2Int> loop)
         {
+            if (!_enclosedRegionsOnly)
+            {
+                return TryTraceSingleBoundaryLoop(edges, out loop);
+            }
+            return TryTraceLargestOuterBoundaryLoop(edges, out loop);
+        }
+
+        // Imported JPG outlines can contain isolated dark specks or diagonal pixel
+        // contacts. They create extra tiny boundary cycles even though the visible
+        // white strip has one clear exterior contour. In enclosed-region mode the
+        // requested mesh is that exterior contour, so trace every cycle and keep the
+        // largest counter-clockwise one instead of rejecting the whole region.
+        private static bool TryTraceLargestOuterBoundaryLoop(
+            List<GridSegment> edges, out List<Vector2Int> loop)
+        {
+            loop = null;
+            if (edges == null || edges.Count < 3)
+            {
+                return false;
+            }
+
+            Dictionary<Vector2Int, List<int>> outgoing =
+                new Dictionary<Vector2Int, List<int>>();
+            for (int i = 0; i < edges.Count; i++)
+            {
+                if (!outgoing.TryGetValue(edges[i].a, out List<int> indices))
+                {
+                    indices = new List<int>(1);
+                    outgoing.Add(edges[i].a, indices);
+                }
+                indices.Add(i);
+            }
+
+            bool[] used = new bool[edges.Count];
+            List<Vector2Int> largestPositive = null;
+            List<Vector2Int> largestAny = null;
+            long largestPositiveArea2 = 0;
+            long largestAbsoluteArea2 = 0;
+            for (int startIndex = 0; startIndex < edges.Count; startIndex++)
+            {
+                if (used[startIndex])
+                {
+                    continue;
+                }
+
+                GridSegment first = edges[startIndex];
+                List<Vector2Int> candidate = new List<Vector2Int>();
+                candidate.Add(first.a);
+                used[startIndex] = true;
+                Vector2Int previous = first.a;
+                Vector2Int current = first.b;
+                bool closed = false;
+                for (int guard = 0; guard <= edges.Count; guard++)
+                {
+                    if (current == first.a)
+                    {
+                        closed = true;
+                        break;
+                    }
+                    candidate.Add(current);
+                    if (!outgoing.TryGetValue(current, out List<int> nextIndices))
+                    {
+                        break;
+                    }
+
+                    int nextIndex = ChooseBoundaryContinuation(edges, nextIndices,
+                        used, previous, current);
+                    if (nextIndex < 0)
+                    {
+                        break;
+                    }
+                    used[nextIndex] = true;
+                    previous = current;
+                    current = edges[nextIndex].b;
+                }
+                if (!closed || candidate.Count < 3)
+                {
+                    continue;
+                }
+
+                long area2 = SignedGridLoopArea2(candidate);
+                long absoluteArea2 = Math.Abs(area2);
+                if (absoluteArea2 > largestAbsoluteArea2)
+                {
+                    largestAbsoluteArea2 = absoluteArea2;
+                    largestAny = candidate;
+                }
+                if (area2 > largestPositiveArea2)
+                {
+                    largestPositiveArea2 = area2;
+                    largestPositive = candidate;
+                }
+            }
+
+            loop = largestPositive ?? largestAny;
+            return loop != null;
+        }
+
+        private static int ChooseBoundaryContinuation(List<GridSegment> edges,
+            List<int> candidates, bool[] used, Vector2Int previous,
+            Vector2Int current)
+        {
+            Vector2Int incoming = current - previous;
+            int bestIndex = -1;
+            int bestTurn = int.MinValue;
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                int edgeIndex = candidates[i];
+                if (used[edgeIndex])
+                {
+                    continue;
+                }
+                Vector2Int outgoing = edges[edgeIndex].b - current;
+                int cross = incoming.x * outgoing.y - incoming.y * outgoing.x;
+                int dot = incoming.x * outgoing.x + incoming.y * outgoing.y;
+                int turn = cross > 0 ? 3 : dot > 0 ? 2 : cross < 0 ? 1 : 0;
+                if (turn > bestTurn)
+                {
+                    bestTurn = turn;
+                    bestIndex = edgeIndex;
+                }
+            }
+            return bestIndex;
+        }
+
+        private static long SignedGridLoopArea2(List<Vector2Int> points)
+        {
+            long area2 = 0;
+            for (int i = 0; i < points.Count; i++)
+            {
+                Vector2Int a = points[i];
+                Vector2Int b = points[(i + 1) % points.Count];
+                area2 += (long)a.x * b.y - (long)a.y * b.x;
+            }
+            return area2;
+        }
+
+        private List<Vector2> BuildDirectVectorContour(List<Vector2Int> loop)
+        {
+            List<Vector2> contour = new List<Vector2>(loop.Count);
+            for (int i = 0; i < loop.Count; i++)
+            {
+                Vector2Int key = loop[i];
+                Vector2 point = GetVectorizedGridPoint(key.x, key.y);
+                if (contour.Count == 0
+                    || (point - contour[contour.Count - 1]).sqrMagnitude
+                        > 0.00000001f)
+                {
+                    contour.Add(point);
+                }
+            }
+            if (contour.Count > 1
+                && (contour[0] - contour[contour.Count - 1]).sqrMagnitude
+                    <= 0.00000001f)
+            {
+                contour.RemoveAt(contour.Count - 1);
+            }
+
             bool removed;
             do
             {
                 removed = false;
-                for (int i = 0; i < loop.Count && loop.Count > 3; i++)
+                for (int i = 0; i < contour.Count && contour.Count > 3; i++)
                 {
-                    Vector2 a = GetVectorizedGridPoint(
-                        loop[(i - 1 + loop.Count) % loop.Count].x,
-                        loop[(i - 1 + loop.Count) % loop.Count].y);
-                    Vector2 b = GetVectorizedGridPoint(loop[i].x, loop[i].y);
-                    Vector2 c = GetVectorizedGridPoint(
-                        loop[(i + 1) % loop.Count].x,
-                        loop[(i + 1) % loop.Count].y);
+                    Vector2 a = contour[(i - 1 + contour.Count) % contour.Count];
+                    Vector2 b = contour[i];
+                    Vector2 c = contour[(i + 1) % contour.Count];
                     float area = Mathf.Abs(Cross2D(b - a, c - b));
                     float scale = Mathf.Max(1f, (b - a).magnitude + (c - b).magnitude);
                     if (area <= scale * 0.00001f)
                     {
-                        loop.RemoveAt(i);
+                        contour.RemoveAt(i);
                         removed = true;
                         break;
                     }
                 }
             }
             while (removed);
+            return contour;
         }
 
         private float SourceProjectedAreaSign(Vector3[] positions, int[] triangles)
@@ -4566,6 +5040,7 @@ namespace SLGMapTileCutter.Editor
             mapAsset.regionLabels = (int[])_labels.Clone();
             mapAsset.darkThreshold = _darkThreshold;
             mapAsset.closeRadius = _gapCloseRadius;
+            mapAsset.enclosedRegionsOnly = _enclosedRegionsOnly;
             mapAsset.skeletonSimplifyTolerance = _skeletonSimplifyTolerance;
             mapAsset.skeletonSmoothing = _skeletonSmoothing;
             mapAsset.tileGap = _tileGap;
@@ -4921,10 +5396,17 @@ namespace SLGMapTileCutter.Editor
             Texture2D outlineDistanceMap)
         {
             Material[] materials = new Material[subMeshCount];
-            Shader shader = Shader.Find("Custom/SLG Map/Tile Inner Outline");
+            Shader shader = Shader.Find("Custom/Tile Inner Outline");
             if (shader == null)
             {
-                throw new InvalidOperationException("未找到 URP Unlit Shader，无法创建颜色预览材质。");
+                shader = AssetDatabase.LoadAssetAtPath<Shader>(
+                    "Assets/Scripts/Editor/ArtTools/ZXXTools/"
+                    + "SLGMapTileCutter/SLGMapTileInnerOutline.shader");
+            }
+            if (shader == null)
+            {
+                throw new InvalidOperationException(
+                    "未找到 SLG 地块内描边 Shader，无法创建预览材质。");
             }
 
             for (int i = 0; i < subMeshCount; i++)

@@ -16,9 +16,8 @@ Shader "Custom/Fog Of War"
         _CloudSpeed ("Cloud Speed (Layer1 XY, Layer2 ZW)", Vector) = (0.018, 0.011, -0.013, -0.017)
 
         [Header(Mask Edge)]
-        _MaskEdgeMin ("Edge Min", Float) = 0.2
-        _MaskEdgeMax ("Edge Max", Float) = 0.8
-        _MaskEdgePower ("Edge Power", Float) = 1
+        _MaskGradientWidth ("Gradient Width (Cells)", Float) = 2
+        _MaskGradientTransparency ("Gradient Transparency Strength", Range(0, 2)) = 1
         _MaskDistortCenterX ("Distortion Center X", Float) = 0.5
         _MaskDistortCenterY ("Distortion Center Y", Float) = 0.5
         _MaskDistortStrength ("Distortion Strength", Float) = 10
@@ -70,9 +69,8 @@ Shader "Custom/Fog Of War"
             half4 _ShadowColor;
             float _TillingFactor;
             float4 _CloudSpeed;
-            float _MaskEdgeMin;
-            float _MaskEdgeMax;
-            float _MaskEdgePower;
+            float _MaskGradientWidth;
+            float _MaskGradientTransparency;
             float _MaskDistortCenterX;
             float _MaskDistortCenterY;
             float _MaskDistortStrength;
@@ -121,19 +119,63 @@ Shader "Custom/Fog Of War"
             return c;
         }
 
-        // Reference: improve a low-resolution mask edge without enlarging the mask texture.
-        half ClampAndPowValue(
-            half value,
-            half edgeMin,
-            half edgeMax,
-            half edgePower)
+        // Uniform line integration of the existing binary R mask.
+        // Across a mask edge, the integral changes linearly with distance.
+        half GetOutwardMaskGradient(float2 maskUV)
         {
-            half minValue = saturate(min(edgeMin, edgeMax));
-            half maxValue = saturate(max(edgeMin, edgeMax));
-            maxValue = max(maxValue, minValue + 0.0001h);
+            half center = SAMPLE_TEXTURE2D(
+                _MainTex,
+                sampler_MainTex,
+                maskUV).r;
 
-            half result = saturate((value - minValue) / (maxValue - minValue));
-            return saturate(pow(result, max(0.0001h, edgePower)));
+            // The empty area always stays empty. Only the solid side receives the band.
+            if (center <= 0.5h)
+            {
+                return 0.0h;
+            }
+
+            float2 texel = _MainTex_TexelSize.xy;
+            float widthInCells = max(0.01, _MaskGradientWidth);
+            half integralX = 0.0h;
+            half integralY = 0.0h;
+            half integralDiagonalA = 0.0h;
+            half integralDiagonalB = 0.0h;
+
+            // Four continuous lines cover straight sides and square corners. Unlike the
+            // previous eight-point ring search, no direction suddenly appears/disappears.
+            [unroll]
+            for (int sampleIndex = -8; sampleIndex <= 8; sampleIndex++)
+            {
+                float lineOffset = sampleIndex * 0.125 * widthInCells;
+                float2 offsetX = float2(lineOffset, 0.0) * texel;
+                float2 offsetY = float2(0.0, lineOffset) * texel;
+                float2 offsetDiagonalA = float2(lineOffset, lineOffset) * texel;
+                float2 offsetDiagonalB = float2(lineOffset, -lineOffset) * texel;
+
+                integralX += SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, maskUV + offsetX).r;
+                integralY += SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, maskUV + offsetY).r;
+                integralDiagonalA += SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, maskUV + offsetDiagonalA).r;
+                integralDiagonalB += SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, maskUV + offsetDiagonalB).r;
+            }
+
+            half lineAverage = min(
+                min(integralX, integralY),
+                min(integralDiagonalA, integralDiagonalB)) / 17.0h;
+
+            // The line average is 0.5 at the original boundary and reaches 1 after
+            // widthInCells, so this is the outward linear 0 -> 1 remap.
+            half linearGradient = saturate(lineAverage * 2.0h - 1.0h);
+            half transparencyStrength = max(
+                0.0h,
+                (half)_MaskGradientTransparency);
+            if (transparencyStrength <= 0.0001h)
+            {
+                return 1.0h;
+            }
+
+            // Strength changes only the opacity curve inside the same band:
+            // 1 = linear, 2 = more transparent middle, with unchanged 0/1 endpoints.
+            return pow(linearGradient, transparencyStrength);
         }
 
         // Reference: B is the per-cell dissolve progress.
@@ -169,11 +211,7 @@ Shader "Custom/Fog Of War"
                 _MainTex,
                 sampler_MainTex,
                 sampledMaskUV);
-            mask.r = ClampAndPowValue(
-                mask.r,
-                _MaskEdgeMin,
-                _MaskEdgeMax,
-                _MaskEdgePower);
+            mask.r = GetOutwardMaskGradient(sampledMaskUV);
 
             // Keep dissolve detail stable when the grid resolution changes.
             // With one mask pixel per cell, ST tiling now controls repeats per cell
@@ -190,8 +228,8 @@ Shader "Custom/Fog Of War"
             return cloud;
         }
 
-        // Softly removes fog where opaque scene geometry is closer to the camera.
-        // World-space reconstruction keeps the comparison valid for orthographic cameras.
+        // Reconstruct scene depth in world space and compare it with the fog plane
+        // along the camera forward axis. This also works with orthographic cameras.
         half GetDepthOcclusion(float4 positionHCS, float3 fogWorldPos)
         {
             if (_EnableDepthOcclusion < 0.5)
@@ -201,12 +239,23 @@ Shader "Custom/Fog Of War"
 
             float2 screenUV = GetNormalizedScreenSpaceUV(positionHCS);
             float sceneRawDepth = SampleSceneDepth(screenUV);
+#if UNITY_REVERSED_Z
+            if (sceneRawDepth <= 0.00001)
+            {
+                return 1.0h;
+            }
+#else
+            if (sceneRawDepth >= 0.99999)
+            {
+                return 1.0h;
+            }
+            sceneRawDepth = lerp(UNITY_NEAR_CLIP_VALUE, 1.0, sceneRawDepth);
+#endif
             float3 sceneWorldPos = ComputeWorldSpacePosition(
                 screenUV,
                 sceneRawDepth,
                 UNITY_MATRIX_I_VP);
             float3 cameraForwardWS = -UNITY_MATRIX_V[2].xyz;
-
             float occluderDepth =
                 dot(fogWorldPos - sceneWorldPos, cameraForwardWS)
                 - _DepthOcclusionOffset;

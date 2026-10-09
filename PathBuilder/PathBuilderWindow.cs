@@ -49,6 +49,10 @@ public class PathBuilderWindow : EditorWindow
     private string rootName = "WallEnclosure";
 
     private Vector2 scroll;
+    private bool _batchBaking;
+    private readonly List<PathSpline> _selectedMountainBuilders =
+        new List<PathSpline>();
+    [SerializeField] private Camera _batchMountainCamera;
 
     public static void ShowWindow()
     {
@@ -72,6 +76,7 @@ public class PathBuilderWindow : EditorWindow
         RecalcWallSegments();
         RestoreWindowSession();
         EnableSplineUI();
+        RefreshSelectedMountainBuilders(false);
     }
 
     private void OnDisable()
@@ -91,17 +96,17 @@ public class PathBuilderWindow : EditorWindow
 
     private void OnSelectionChange()
     {
-        if (activeTab == BuilderTab.Wall)
+        if (_batchBaking)
             return;
-
+        RefreshSelectedMountainBuilders(true);
         if (PathBuilderAuthoringStorage.TryRestoreSelected(
-                CurrentSplineMode,
                 out PathSpline selectedBuilder)
             && selectedBuilder != _builder)
         {
             SaveCurrentSession();
             ActivateSession(selectedBuilder);
         }
+        Repaint();
     }
 
     private static GUIContent Content(
@@ -693,11 +698,14 @@ public class PathBuilderWindow : EditorWindow
                         : "Preview retained · hidden")
                     : "Preview empty";
                 EditorGUILayout.LabelField(
-                    $"{_builder.knots.Count} points · {previewState}",
+                    $"{_builder.Anchor.name} · "
+                        + $"{_builder.knots.Count} points · {previewState}",
                     EditorStyles.miniLabel);
                 GUILayout.FlexibleSpace();
                 if (GUILayout.Button(
-                    new GUIContent("New Path", "创建一条新的路径"),
+                    new GUIContent(
+                        "New Path",
+                        "保存并保留当前路径，然后创建一条新的独立路径"),
                     GUILayout.Width(76f)))
                     CreateSession(_builder.mode);
                 if (GUILayout.Button(
@@ -708,6 +716,31 @@ public class PathBuilderWindow : EditorWindow
 
             if (!_builder)
                 return;
+
+            if (_builder.mode == PathBuildMode.Mountain)
+            {
+                DrawSelectedMountainBatchControls();
+
+                bool flattenPreview = GUILayout.Toggle(
+                    _builder.mountainFlattenPreview,
+                    new GUIContent(
+                        "Flatten Preview",
+                        "未烘焙时将图片山拍平到地表；开启后自动使用 Ground Decal 输出，仍保留样条编辑"),
+                    "Button",
+                    GUILayout.Height(26f));
+                if (flattenPreview != _builder.mountainFlattenPreview)
+                {
+                    Undo.RecordObject(_builder, "Toggle Flatten Preview");
+                    _builder.mountainFlattenPreview = flattenPreview;
+                    if (flattenPreview)
+                    {
+                        _builder.mountainBakeOutput =
+                            MountainBakeOutput.GroundDecal;
+                    }
+                    EditorUtility.SetDirty(_builder);
+                    PathBuilderGenerator.Rebuild(_builder);
+                }
+            }
 
             using (new EditorGUILayout.HorizontalScope())
             {
@@ -726,6 +759,21 @@ public class PathBuilderWindow : EditorWindow
                         PathBuilderGenerator.Rebuild(_builder);
                     GUI.backgroundColor = Color.white;
 
+                    if (_builder.mode == PathBuildMode.Mountain
+                        && GUILayout.Button(
+                            new GUIContent(
+                                "Reset Rocks",
+                                "清空所有石头的单体位移和缩放记录，并根据当前样条、随机种子和参数重新生成；样条不会删除"),
+                            GUILayout.Height(30f)))
+                    {
+                        Undo.RecordObject(
+                            _builder,
+                            "Reset Mountain Instances");
+                        _builder.ClearMountainInstanceOverrides();
+                        EditorUtility.SetDirty(_builder);
+                        PathBuilderGenerator.Rebuild(_builder);
+                    }
+
                     if (GUILayout.Button(
                         new GUIContent("Clear", "仅清除生成结果，保留样条和参数"),
                         GUILayout.Height(30f)))
@@ -734,14 +782,92 @@ public class PathBuilderWindow : EditorWindow
                     GUI.backgroundColor = new Color(0.55f, 0.75f, 1f);
                     string bakeTooltip = _builder.mode == PathBuildMode.Mountain
                         ? (_builder.keepMountainAuthoringAfterBake
-                            ? "生成并连接山脉 Prefab，同时保留样条线和设置"
-                            : "生成并连接山脉 Prefab，然后结束当前样条编辑")
+                            ? "生成普通山脉分组，同时保留样条线和设置"
+                            : "生成普通山脉分组，然后结束当前样条编辑")
                         : "保留当前结果并结束该路径的编辑状态";
                     if (GUILayout.Button(
                         new GUIContent("Bake", bakeTooltip),
                         GUILayout.Height(30f)))
                         BakeCurrentSession();
                     GUI.backgroundColor = Color.white;
+                }
+            }
+
+            using (new EditorGUI.DisabledScope(
+                _isDrawing || _builder.knots.Count < 2))
+            {
+                string batchLabel = _builder.mode == PathBuildMode.Mountain
+                    ? "Bake All Mountain Paths"
+                    : "Bake All River / Road Paths";
+                if (GUILayout.Button(
+                    new GUIContent(
+                        batchLabel,
+                        _builder.mode == PathBuildMode.Mountain
+                            ? "批量烘焙当前场景中的全部山脉路径；每条路径使用自己的设置和输出目录"
+                            : "批量烘焙当前场景中的全部河流/道路路径；每条路径使用自己的设置和输出目录"),
+                    GUILayout.Height(28f)))
+                {
+                    BakeAllCurrentScenePaths();
+                }
+            }
+        }
+    }
+
+    private void DrawSelectedMountainBatchControls()
+    {
+        if (_selectedMountainBuilders.Count < 2)
+            return;
+
+        EditorGUILayout.Space(3f);
+        using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+        {
+            EditorGUILayout.LabelField(
+                $"Selected Mountain Paths ({_selectedMountainBuilders.Count})",
+                EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(
+                "Batch targets locked · dragging a camera will not clear them",
+                EditorStyles.miniLabel);
+            _batchMountainCamera = EditorGUILayout.ObjectField(
+                new GUIContent(
+                    "Batch Camera",
+                    "将此正交相机统一写入当前多选的 Mountain Spline Authoring，用于面片朝向和拍平投射"),
+                _batchMountainCamera,
+                typeof(Camera),
+                true) as Camera;
+
+            bool validCamera = TryValidateBatchMountainCamera(
+                out string cameraMessage);
+            if (!validCamera)
+            {
+                EditorGUILayout.HelpBox(cameraMessage, MessageType.Warning);
+            }
+            else
+            {
+                EditorGUILayout.HelpBox(
+                    "只处理 Hierarchy 中直接选中的山脉 Authoring 根节点；每条路径仍使用自己的输出目录和保留样条设置。",
+                    MessageType.Info);
+            }
+
+            using (new EditorGUI.DisabledScope(
+                _batchBaking || _isDrawing || !validCamera))
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (GUILayout.Button(
+                    new GUIContent(
+                        "Flatten Selected",
+                        "为选中的山脉统一设置相机并开启拍平实时预览；保留全部样条和设置"),
+                    GUILayout.Height(28f)))
+                {
+                    FlattenSelectedMountainPaths();
+                }
+
+                if (GUILayout.Button(
+                    new GUIContent(
+                        "Bake Selected",
+                        "使用指定相机拍平并只烘焙选中的山脉；分别沿用各自输出目录和 Keep Spline 设置"),
+                    GUILayout.Height(28f)))
+                {
+                    BakeSelectedMountainPaths();
                 }
             }
         }
@@ -841,14 +967,12 @@ public class PathBuilderWindow : EditorWindow
     {
         if (_builder && _builder.Anchor)
         {
-            bool replace = EditorUtility.DisplayDialog(
-                "路径构建",
-                "当前有未烘焙的样条。是否丢弃并创建新的样条？",
-                "创建新的",
-                "取消");
-            if (!replace)
-                return false;
-            DiscardSession();
+            SaveCurrentSession();
+            DestroyEditor();
+            _builder = null;
+            _isDrawing = false;
+            _drawingChanged = false;
+            _hasHoverPosition = false;
         }
 
         _builder = PathBuilderAuthoringStorage.Create(mode);
@@ -858,6 +982,8 @@ public class PathBuilderWindow : EditorWindow
         string objectName = mode == PathBuildMode.Mountain
             ? "Mountain Spline Authoring"
             : "River Spline Authoring";
+        objectName = GameObjectUtility.GetUniqueNameForSibling(
+            null, objectName);
         GameObject anchor = new GameObject(objectName);
         anchor.hideFlags = HideFlags.DontSaveInBuild;
         Undo.RegisterCreatedObjectUndo(anchor, $"Create {objectName}");
@@ -1044,7 +1170,7 @@ public class PathBuilderWindow : EditorWindow
             _isDrawing = false;
             _splineStage = SplineStage.Adjust;
             _hasHoverPosition = false;
-            ShowNotification(new GUIContent("Prefab 已生成，样条与设置已保留"));
+            ShowNotification(new GUIContent("山脉分组已生成，样条与设置已保留"));
             SceneView.RepaintAll();
             Repaint();
             return;
@@ -1056,6 +1182,297 @@ public class PathBuilderWindow : EditorWindow
         _isDrawing = false;
         _splineStage = SplineStage.Output;
         _hasHoverPosition = false;
+        SceneView.RepaintAll();
+        Repaint();
+    }
+
+    private void RefreshSelectedMountainBuilders(
+        bool preserveLockedTargetsWhenSelectionChanges)
+    {
+        List<PathSpline> selected =
+            PathBuilderAuthoringStorage.GetSelectedBuilders(
+                PathBuildMode.Mountain);
+        if (preserveLockedTargetsWhenSelectionChanges
+            && selected.Count < 2
+            && _selectedMountainBuilders.Count >= 2
+            && SelectionContainsCamera())
+        {
+            _selectedMountainBuilders.RemoveAll(
+                candidate => !candidate || !candidate.Anchor);
+            return;
+        }
+
+        _selectedMountainBuilders.Clear();
+        _selectedMountainBuilders.AddRange(selected);
+    }
+
+    private static bool SelectionContainsCamera()
+    {
+        Object[] selectedObjects = Selection.objects;
+        for (int i = 0; i < selectedObjects.Length; i++)
+        {
+            if (selectedObjects[i] is Camera)
+                return true;
+            if (selectedObjects[i] is GameObject gameObject
+                && gameObject.GetComponent<Camera>())
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<PathSpline> GetLockedMountainBuilders()
+    {
+        _selectedMountainBuilders.RemoveAll(
+            candidate => !candidate || !candidate.Anchor
+                || candidate.mode != PathBuildMode.Mountain);
+        return new List<PathSpline>(_selectedMountainBuilders);
+    }
+
+    private bool TryValidateBatchMountainCamera(out string message)
+    {
+        if (!_batchMountainCamera)
+        {
+            message = "请拖入用于山脉面片朝向和拍平投射的正交相机。";
+            return false;
+        }
+        if (!_batchMountainCamera.orthographic)
+        {
+            message = "Batch Camera 必须是正交相机。";
+            return false;
+        }
+        if (_batchMountainCamera.transform.forward.y >= -0.01f)
+        {
+            message = "Batch Camera 必须朝向地面，才能将山脉面片拍平。";
+            return false;
+        }
+
+        message = string.Empty;
+        return true;
+    }
+
+    private void FlattenSelectedMountainPaths()
+    {
+        if (!TryValidateBatchMountainCamera(out _))
+            return;
+
+        SaveCurrentSession();
+        List<PathSpline> builders = GetLockedMountainBuilders();
+        int succeeded = 0;
+        int failed = 0;
+        Undo.IncrementCurrentGroup();
+        int undoGroup = Undo.GetCurrentGroup();
+        Undo.SetCurrentGroupName("Flatten Selected Mountain Paths");
+        _batchBaking = true;
+        try
+        {
+            for (int i = 0; i < builders.Count; i++)
+            {
+                PathSpline candidate = builders[i];
+                if (!candidate || !candidate.Anchor)
+                {
+                    failed++;
+                    continue;
+                }
+
+                Undo.RecordObject(
+                    candidate,
+                    "Flatten Selected Mountain Paths");
+                PathBuilderAuthoringStorage.SetMountainFacingCamera(
+                    candidate,
+                    _batchMountainCamera);
+                candidate.mountainBakeOutput =
+                    MountainBakeOutput.GroundDecal;
+                candidate.mountainFlattenPreview = true;
+                EditorUtility.SetDirty(candidate);
+                bool rebuilt = PathBuilderGenerator.Rebuild(
+                    candidate,
+                    true,
+                    out bool flattened);
+                if (rebuilt && flattened)
+                    succeeded++;
+                else
+                    failed++;
+                PathBuilderAuthoringStorage.Save(candidate);
+            }
+        }
+        finally
+        {
+            Undo.CollapseUndoOperations(undoGroup);
+            _batchBaking = false;
+        }
+
+        RefreshSelectedMountainBuilders(true);
+        string summary = $"批量拍平完成：成功 {succeeded}，失败 {failed}";
+        ShowNotification(new GUIContent(summary));
+        Debug.Log($"[Path Builder] {summary}");
+        SceneView.RepaintAll();
+        Repaint();
+    }
+
+    private void BakeSelectedMountainPaths()
+    {
+        if (!TryValidateBatchMountainCamera(out _))
+            return;
+
+        SaveCurrentSession();
+        List<PathSpline> builders = GetLockedMountainBuilders();
+        List<GameObject> survivingAuthoringRoots = new List<GameObject>();
+        int succeeded = 0;
+        int failed = 0;
+        bool currentRemoved = false;
+        _batchBaking = true;
+        try
+        {
+            for (int i = 0; i < builders.Count; i++)
+            {
+                PathSpline candidate = builders[i];
+                if (!candidate || !candidate.Anchor)
+                {
+                    failed++;
+                    continue;
+                }
+
+                Undo.RecordObject(candidate, "Bake Selected Mountain Paths");
+                PathBuilderAuthoringStorage.SetMountainFacingCamera(
+                    candidate,
+                    _batchMountainCamera);
+                candidate.mountainBakeOutput =
+                    MountainBakeOutput.GroundDecal;
+                candidate.mountainFlattenPreview = true;
+                EditorUtility.SetDirty(candidate);
+                bool rebuilt = PathBuilderGenerator.Rebuild(
+                    candidate,
+                    true,
+                    out bool flattened);
+                if (!rebuilt || !flattened
+                    || !PathBuilderGenerator.Bake(candidate))
+                {
+                    failed++;
+                    if (candidate.Anchor)
+                        survivingAuthoringRoots.Add(candidate.Anchor.gameObject);
+                    PathBuilderAuthoringStorage.Save(candidate);
+                    continue;
+                }
+
+                succeeded++;
+                if (candidate.keepMountainAuthoringAfterBake)
+                {
+                    PathBuilderAuthoringStorage.Save(candidate);
+                    if (candidate.Anchor)
+                        survivingAuthoringRoots.Add(candidate.Anchor.gameObject);
+                }
+                else
+                {
+                    if (candidate == _builder)
+                        currentRemoved = true;
+                    PathBuilderAuthoringStorage.Delete(candidate);
+                }
+            }
+
+            if (survivingAuthoringRoots.Count > 0)
+                Selection.objects = survivingAuthoringRoots.ToArray();
+        }
+        finally
+        {
+            _batchBaking = false;
+        }
+
+        if (currentRemoved)
+        {
+            DestroyEditor();
+            _builder = null;
+            for (int i = 0; i < builders.Count; i++)
+            {
+                PathSpline candidate = builders[i];
+                if (candidate && candidate.Anchor)
+                {
+                    ActivateSession(candidate);
+                    break;
+                }
+            }
+        }
+
+        RefreshSelectedMountainBuilders(true);
+        string summary = $"选中山脉烘焙完成：成功 {succeeded}，失败 {failed}";
+        ShowNotification(new GUIContent(summary));
+        Debug.Log($"[Path Builder] {summary}");
+        SceneView.RepaintAll();
+        Repaint();
+    }
+
+    private void BakeAllCurrentScenePaths()
+    {
+        if (!_builder || !_builder.Anchor)
+            return;
+
+        SaveCurrentSession();
+        PathBuildMode mode = _builder.mode;
+        List<PathSpline> builders =
+            PathBuilderAuthoringStorage.GetSceneBuilders(
+                mode,
+                _builder.Anchor.gameObject.scene);
+        int succeeded = 0;
+        int failed = 0;
+        bool currentRemoved = false;
+        _batchBaking = true;
+        try
+        {
+            for (int i = 0; i < builders.Count; i++)
+            {
+                PathSpline candidate = builders[i];
+                if (!candidate || !candidate.Anchor)
+                {
+                    failed++;
+                    continue;
+                }
+
+                bool keepAuthoring =
+                    candidate.mode == PathBuildMode.Mountain
+                    && candidate.keepMountainAuthoringAfterBake;
+                if (!PathBuilderGenerator.Bake(candidate))
+                {
+                    failed++;
+                    continue;
+                }
+
+                succeeded++;
+                if (keepAuthoring)
+                {
+                    PathBuilderAuthoringStorage.Save(candidate);
+                }
+                else
+                {
+                    if (candidate == _builder)
+                        currentRemoved = true;
+                    PathBuilderAuthoringStorage.Delete(candidate);
+                }
+            }
+        }
+        finally
+        {
+            _batchBaking = false;
+        }
+
+        if (currentRemoved)
+        {
+            DestroyEditor();
+            _builder = null;
+            for (int i = 0; i < builders.Count; i++)
+            {
+                PathSpline candidate = builders[i];
+                if (candidate && candidate.Anchor)
+                {
+                    ActivateSession(candidate);
+                    break;
+                }
+            }
+        }
+
+        string summary = $"批量烘焙完成：成功 {succeeded}，失败 {failed}";
+        ShowNotification(new GUIContent(summary));
+        Debug.Log($"[Path Builder] {summary}");
         SceneView.RepaintAll();
         Repaint();
     }
@@ -1123,7 +1540,11 @@ public class PathBuilderWindow : EditorWindow
         // Once the user selects another scene object, stop registering spline
         // controls so Unity's native W/E/R transform handles remain available.
         if (HasExternalSceneSelection())
+        {
+            if (_builderEditor)
+                _builderEditor.SuspendSceneEditing();
             return;
+        }
 
         if (_isDrawing)
             DrawSplinePlacement(sceneView);
@@ -1394,7 +1815,8 @@ public class PathBuilderWindow : EditorWindow
     private bool HasExternalSceneSelection()
     {
         Transform active = Selection.activeTransform;
-        return active && active != _builder.Anchor;
+        return !active
+            || !PathBuilderAuthoringStorage.IsAuthoringHierarchy(active);
     }
 
     private void ResumeSplineEditing()
@@ -1457,7 +1879,9 @@ public class PathBuilderWindow : EditorWindow
                 using (new EditorGUILayout.HorizontalScope())
                 {
                     GUILayout.Label(
-                        "外部物体操作中，W/E/R 使用 Unity 原生手柄",
+                        Selection.activeTransform
+                            ? "已退出路径编辑，W/E/R 操作当前物体"
+                            : "已退出路径编辑，当前未选择场景物体",
                         EditorStyles.wordWrappedMiniLabel);
                     if (GUILayout.Button(
                         new GUIContent("Resume Path", "重新选择路径并继续编辑"),

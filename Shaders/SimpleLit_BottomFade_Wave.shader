@@ -30,106 +30,14 @@ Shader "Custom/SimpleLit_BottomFade_Wave"
             "Queue"          = "Transparent"
         }
 
-        // Pass 1：深度预写（无 LightMode Tag，强制每帧执行）
-        Pass
-        {
-            Name "DepthPrepass"
-
-            ZWrite On
-            ZTest LEqual
-            ColorMask 0
-            Cull [_Cull]
-
-            HLSLPROGRAM
-            #pragma vertex DepthVert
-            #pragma fragment DepthFrag
-            #pragma multi_compile_instancing
-
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
-
-            CBUFFER_START(UnityPerMaterial)
-                float4 _BaseMap_ST;
-                float4 _BaseColor;
-                float  _FadeStart;
-                float  _FadeRange;
-                float2 _WindDirection;
-                float  _WindStrength;
-                float  _WindSpeed;
-                float  _WindScale;
-                float  _WindChaos;
-                float  _ReceiveLighting;
-            CBUFFER_END
-
-            // ---- Wind displacement shared by both passes ----
-            float3 CalculateWindOffset(float3 positionOS)
-            {
-                // 用世界坐标算相位，保证相邻草片摆动一致
-                float3 worldPos = TransformObjectToWorld(positionOS);
-                float  time     = _Time.y * _WindSpeed;
-
-                // 高度因子：根部不动，顶部摆动最大
-                float heightFactor = saturate(positionOS.y);
-
-                // 主波形
-                float wave1 = sin(worldPos.x * _WindScale + time)
-                            * cos(worldPos.z * _WindScale * 1.3 + time * 0.6);
-
-                // 高频扰动层，让摆动不那么整齐
-                float wave2 = sin(worldPos.z * _WindScale * 3.7 + time * 1.7)
-                            * cos(worldPos.x * _WindScale * 2.3 - time * 1.1);
-
-                float combined = wave1 + wave2 * _WindChaos;
-
-                float3 offset = float3(_WindDirection.x, 0, _WindDirection.y)
-                              * (combined * _WindStrength * heightFactor);
-
-                return offset;
-            }
-
-            struct DepthAttribs
-            {
-                float4 positionOS : POSITION;
-                UNITY_VERTEX_INPUT_INSTANCE_ID
-            };
-
-            struct DepthVaryings
-            {
-                float4 positionCS : SV_POSITION;
-                float3 positionWS : TEXCOORD0;
-                UNITY_VERTEX_INPUT_INSTANCE_ID
-            };
-
-            DepthVaryings DepthVert(DepthAttribs IN)
-            {
-                DepthVaryings OUT;
-                UNITY_SETUP_INSTANCE_ID(IN);
-                UNITY_TRANSFER_INSTANCE_ID(IN, OUT);
-
-                float3 posOS = IN.positionOS.xyz + CalculateWindOffset(IN.positionOS.xyz);
-                VertexPositionInputs posInputs = GetVertexPositionInputs(posOS);
-                OUT.positionCS = posInputs.positionCS;
-                OUT.positionWS = posInputs.positionWS;
-                return OUT;
-            }
-
-            half4 DepthFrag(DepthVaryings IN) : SV_Target
-            {
-                UNITY_SETUP_INSTANCE_ID(IN);
-                float fadeT = smoothstep(_FadeStart, _FadeStart + max(_FadeRange, 0.0001), IN.positionWS.y);
-                clip(fadeT - 0.01);
-                return 0;
-            }
-            ENDHLSL
-        }
-
-        // Pass 2：光照 + Alpha 混合
+        // 单一 Forward Pass 自身写深度，避免 URP 对多 Pass 透明物体的不稳定匹配与排序。
         Pass
         {
             Name "ForwardLit"
             Tags { "LightMode" = "UniversalForward" }
 
             Blend SrcAlpha OneMinusSrcAlpha
-            ZWrite Off
+            ZWrite On
             ZTest LEqual
             Cull [_Cull]
 
@@ -163,10 +71,16 @@ Shader "Custom/SimpleLit_BottomFade_Wave"
                 float  _ReceiveLighting;
             CBUFFER_END
 
+            // Wind displacement is derived only from POSITION.
+            // Do not use UV/UV2/normal/tangent here: those attributes can differ
+            // across split vertices at seams and would physically tear the mesh.
             float3 CalculateWindOffset(float3 positionOS)
             {
                 float3 worldPos = TransformObjectToWorld(positionOS);
                 float  time     = _Time.y * _WindSpeed;
+
+                // Preserve the original bottom-to-top weighting behavior, but use
+                // object-space Y only so coincident split vertices move identically.
                 float  heightFactor = saturate(positionOS.y);
 
                 float wave1 = sin(worldPos.x * _WindScale + time)
@@ -205,6 +119,11 @@ Shader "Custom/SimpleLit_BottomFade_Wave"
                 UNITY_SETUP_INSTANCE_ID(IN);
                 UNITY_TRANSFER_INSTANCE_ID(IN, OUT);
 
+                // IMPORTANT:
+                // Use POSITION only for vertex displacement. Vertices split by UV,
+                // lightmap UV, hard normals, etc. can share the same position but
+                // have different per-vertex attributes. POSITION-only displacement
+                // keeps those coincident vertices welded visually during animation.
                 float3 posOS = IN.positionOS.xyz + CalculateWindOffset(IN.positionOS.xyz);
 
                 VertexPositionInputs posInputs  = GetVertexPositionInputs(posOS);
@@ -229,6 +148,7 @@ Shader "Custom/SimpleLit_BottomFade_Wave"
                 // FadeStart = 完全透明起点，FadeStart + FadeRange = 完全不透明终点
                 float fadeT = smoothstep(_FadeStart, _FadeStart + max(_FadeRange, 0.0001), IN.positionWS.y);
                 float alpha = albedo.a * fadeT;
+                clip(alpha - 0.01);
 
             #ifdef _RECEIVE_LIGHTING_ON
                 InputData inputData;

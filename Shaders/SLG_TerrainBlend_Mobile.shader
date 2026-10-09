@@ -22,6 +22,14 @@ Shader "Custom/Terrain Blend Mobile"
         _Terrain1Tint("Type B Tint", Color) = (1, 1, 1, 1)
         _Terrain2Tint("Type C Tint", Color) = (1, 1, 1, 1)
         _Terrain3Tint("Type D Tint", Color) = (1, 1, 1, 1)
+        _Terrain0HueShift("Type A Hue Shift", Range(-180, 180)) = 0
+        _Terrain1HueShift("Type B Hue Shift", Range(-180, 180)) = 0
+        _Terrain2HueShift("Type C Hue Shift", Range(-180, 180)) = 0
+        _Terrain3HueShift("Type D Hue Shift", Range(-180, 180)) = 0
+        _Terrain0Saturation("Type A Saturation", Range(0, 2)) = 1
+        _Terrain1Saturation("Type B Saturation", Range(0, 2)) = 1
+        _Terrain2Saturation("Type C Saturation", Range(0, 2)) = 1
+        _Terrain3Saturation("Type D Saturation", Range(0, 2)) = 1
 
         [Header(Variant)]
         [Toggle(_SLG_VARIANTS)] _UseVariants("Enable Variant Textures", Float) = 1
@@ -51,9 +59,13 @@ Shader "Custom/Terrain Blend Mobile"
         _Lod3ToBottomRange("LOD3 To Bottom Range", Float) = 12
         _LodTransitionRatio("LOD Transition Smoothness", Range(0.01, 1.0)) = 0.2
 
+        [Header(Lighting)]
+        [Toggle(_SLG_UNLIT)] _Unlit("Unlit (Ignore Lighting And Shadows)", Float) = 0
+
         [Header(Global)]
         _GlobalTint("Global Tint", Color) = (1, 1, 1, 1)
         _Saturation("Saturation", Range(0, 2)) = 1
+
     }
 
     SubShader
@@ -79,6 +91,7 @@ Shader "Custom/Terrain Blend Mobile"
             #pragma vertex Vert
             #pragma fragment Frag
 
+            #pragma shader_feature_local_fragment _SLG_UNLIT
             #pragma shader_feature_local_fragment _SLG_VARIANTS
             #pragma shader_feature_local_fragment _SLG_BOTTOM_LOD
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
@@ -113,6 +126,14 @@ Shader "Custom/Terrain Blend Mobile"
                 half4 _Terrain1Tint;
                 half4 _Terrain2Tint;
                 half4 _Terrain3Tint;
+                float _Terrain0HueShift;
+                float _Terrain1HueShift;
+                float _Terrain2HueShift;
+                float _Terrain3HueShift;
+                float _Terrain0Saturation;
+                float _Terrain1Saturation;
+                float _Terrain2Saturation;
+                float _Terrain3Saturation;
                 half4 _BottomTint;
                 half4 _GlobalTint;
                 float _ControlSharpness;
@@ -359,6 +380,22 @@ Shader "Custom/Terrain Blend Mobile"
                 return (half)_Terrain3VariantRatio;
             }
 
+            half SelectTerrainSaturation(int id)
+            {
+                if (id == 0) return (half)_Terrain0Saturation;
+                if (id == 1) return (half)_Terrain1Saturation;
+                if (id == 2) return (half)_Terrain2Saturation;
+                return (half)_Terrain3Saturation;
+            }
+
+            half SelectTerrainHueShift(int id)
+            {
+                if (id == 0) return (half)_Terrain0HueShift;
+                if (id == 1) return (half)_Terrain1HueShift;
+                if (id == 2) return (half)_Terrain2HueShift;
+                return (half)_Terrain3HueShift;
+            }
+
             half4 CompensatePackedNoise(
                 half4 packedNoise,
                 float noiseMip)
@@ -597,6 +634,54 @@ Shader "Custom/Terrain Blend Mobile"
                 return result;
             }
 
+            half3 ApplyHueShift(half3 color, half hueShiftDegrees)
+            {
+                half3 result = color;
+                [branch]
+                if (abs(hueShiftDegrees) >= 0.001h)
+                {
+                    const half4 k = half4(
+                        0.0h,
+                        -0.333333h,
+                        0.666667h,
+                        -1.0h);
+                    half4 p = lerp(
+                        half4(color.bg, k.wz),
+                        half4(color.gb, k.xy),
+                        step(color.b, color.g));
+                    half4 q = lerp(
+                        half4(p.xyw, color.r),
+                        half4(color.r, p.yzx),
+                        step(p.x, color.r));
+                    half delta = q.x - min(q.w, q.y);
+                    half epsilon = 0.0001h;
+                    half3 hsv = half3(
+                        abs(q.z + (q.w - q.y) /
+                            (6.0h * delta + epsilon)),
+                        delta / (q.x + epsilon),
+                        q.x);
+                    hsv.x = frac(
+                        hsv.x + hueShiftDegrees / 360.0h);
+
+                    const half4 hsvToRgbK = half4(
+                        1.0h,
+                        0.666667h,
+                        0.333333h,
+                        3.0h);
+                    half3 rgb = saturate(
+                        abs(
+                            frac(hsv.xxx + hsvToRgbK.xyz) * 6.0h -
+                            hsvToRgbK.www) -
+                        hsvToRgbK.xxx);
+                    result = hsv.z * lerp(
+                        hsvToRgbK.xxx,
+                        rgb,
+                        hsv.y);
+                }
+
+                return result;
+            }
+
             half3 ApplyLighting(
                 half3 albedo,
                 half3 normalWS,
@@ -669,6 +754,12 @@ Shader "Custom/Terrain Blend Mobile"
                         noiseFilterWidth,
                         variantVisibility,
                         variantSoftness);
+                    firstColor = ApplySaturation(
+                        firstColor,
+                        SelectTerrainSaturation(terrain.firstId));
+                    firstColor = ApplyHueShift(
+                        firstColor,
+                        SelectTerrainHueShift(terrain.firstId));
                     half3 secondColor = ResolveTerrain(
                         input.uv,
                         terrain.secondId,
@@ -676,22 +767,34 @@ Shader "Custom/Terrain Blend Mobile"
                         noiseFilterWidth,
                         variantVisibility,
                         variantSoftness);
+                    secondColor = ApplySaturation(
+                        secondColor,
+                        SelectTerrainSaturation(terrain.secondId));
+                    secondColor = ApplyHueShift(
+                        secondColor,
+                        SelectTerrainHueShift(terrain.secondId));
                     half3 terrainColor = lerp(
                         firstColor,
                         secondColor,
                         terrain.secondBlend);
                     albedo = terrainColor;
 
+                    // LOD0 近景只显示地表层，避免 Control Map 过滤产生的
+                    // 微小覆盖缺口让 Bottom Base 漏出来。进入 LOD1 后再逐渐
+                    // 恢复原有的 Bottom 覆盖关系。
+                    half bottomCoverage =
+                        (1.0h - terrain.coverage) *
+                        saturate((half)lod.noiseMip);
                     [branch]
-                    if (terrain.coverage < 0.999h)
+                    if (bottomCoverage > 0.001h)
                     {
                         albedo = lerp(
+                            terrainColor,
                             SampleBottom(
                                 input.uv,
                                 packedNoise,
                                 bottomUvDetail),
-                            terrainColor,
-                            terrain.coverage);
+                            bottomCoverage);
                     }
 
                     [branch]
@@ -735,10 +838,12 @@ Shader "Custom/Terrain Blend Mobile"
 
                 albedo *= _GlobalTint.rgb;
                 albedo = ApplySaturation(albedo, _Saturation);
-                albedo = ApplyLighting(
-                    albedo,
-                    normalize(input.normalWS),
-                    input.positionWS);
+                #if !defined(_SLG_UNLIT)
+                    albedo = ApplyLighting(
+                        albedo,
+                        normalize(input.normalWS),
+                        input.positionWS);
+                #endif
                 albedo = MixFog(albedo, input.fogFactor);
                 return half4(albedo, 1.0h);
             }

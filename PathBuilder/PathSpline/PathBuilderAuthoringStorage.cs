@@ -4,6 +4,7 @@ using System.IO;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using Object = UnityEngine.Object;
 
 namespace ZXXTools.PathBuilder
@@ -113,6 +114,17 @@ namespace ZXXTools.PathBuilder
             PathBuildMode mode,
             out PathSpline builder)
         {
+            if (!TryRestoreSelected(out builder)
+                || builder.mode != mode)
+            {
+                builder = null;
+                return false;
+            }
+            return true;
+        }
+
+        public static bool TryRestoreSelected(out PathSpline builder)
+        {
             builder = null;
             Transform selected = Selection.activeTransform;
             if (!IsValidSceneTransform(selected))
@@ -123,14 +135,145 @@ namespace ZXXTools.PathBuilder
                 return false;
 
             builder = LoadSession(sessionId);
-            if (!builder || builder.mode != mode)
+            if (!builder)
             {
                 builder = null;
                 return false;
             }
 
+            Transform previewRoot = FindPreviewRoot(anchor, builder.mode);
+            bool selectedAuthoringRoot = selected == anchor;
+            bool selectedGeneratedObject = previewRoot
+                && (selected == previewRoot || selected.IsChildOf(previewRoot));
+            if (!selectedAuthoringRoot && !selectedGeneratedObject)
+            {
+                builder = null;
+                return false;
+            }
+
+            Transform boundAnchor = IsValidSceneTransform(builder.Anchor)
+                ? builder.Anchor
+                : FindAnchor(sessionId);
+            if (boundAnchor && boundAnchor != anchor)
+            {
+                return TryForkDuplicatedSession(
+                    builder, anchor, sessionId, out builder);
+            }
+
             Bind(builder, anchor);
             return true;
+        }
+
+        public static bool IsAuthoringHierarchy(Transform transform)
+        {
+            return IsValidSceneTransform(transform)
+                && FindMarkedAncestor(transform, out _) != null;
+        }
+
+        public static List<PathSpline> GetSelectedBuilders(PathBuildMode mode)
+        {
+            List<PathSpline> result = new List<PathSpline>();
+            HashSet<int> anchors = new HashSet<int>();
+            Transform[] selectedTransforms = Selection.transforms;
+            for (int i = 0; i < selectedTransforms.Length; i++)
+            {
+                Transform selected = selectedTransforms[i];
+                if (!IsValidSceneTransform(selected))
+                    continue;
+
+                Transform anchor = FindMarkedAncestor(
+                    selected,
+                    out string sessionId);
+                // Batch operations intentionally accept only the authoring roots.
+                // Selecting generated children must not silently include a path.
+                if (!anchor || selected != anchor
+                    || string.IsNullOrEmpty(sessionId)
+                    || !anchors.Add(anchor.GetInstanceID()))
+                {
+                    continue;
+                }
+
+                PathSpline builder = LoadSession(sessionId);
+                if (!builder || builder.mode != mode)
+                    continue;
+
+                if (IsValidSceneTransform(builder.Anchor)
+                    && builder.Anchor != anchor)
+                {
+                    if (!TryForkDuplicatedSession(
+                        builder,
+                        anchor,
+                        sessionId,
+                        out builder))
+                    {
+                        continue;
+                    }
+                }
+                else
+                {
+                    Bind(builder, anchor);
+                }
+                result.Add(builder);
+            }
+
+            return result;
+        }
+
+        public static List<PathSpline> GetSceneBuilders(
+            PathBuildMode mode,
+            Scene scene)
+        {
+            List<PathSpline> result = new List<PathSpline>();
+            if (!scene.IsValid())
+                return result;
+
+            HashSet<int> anchors = new HashSet<int>();
+            Transform[] transforms = Resources.FindObjectsOfTypeAll<Transform>();
+            for (int i = 0; i < transforms.Length; i++)
+            {
+                Transform marker = transforms[i];
+                if (!IsValidSceneTransform(marker)
+                    || marker.gameObject.scene != scene
+                    || !marker.parent
+                    || !marker.name.StartsWith(
+                        MarkerPrefix,
+                        StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                Transform anchor = marker.parent;
+                if (!anchors.Add(anchor.GetInstanceID()))
+                    continue;
+                string sessionId = marker.name.Substring(MarkerPrefix.Length);
+                PathSpline builder = LoadSession(sessionId);
+                if (!builder || builder.mode != mode)
+                    continue;
+
+                if (IsValidSceneTransform(builder.Anchor)
+                    && builder.Anchor != anchor)
+                {
+                    if (!TryForkDuplicatedSession(
+                        builder,
+                        anchor,
+                        sessionId,
+                        out builder))
+                    {
+                        continue;
+                    }
+                }
+                else
+                {
+                    Bind(builder, anchor);
+                }
+                result.Add(builder);
+            }
+
+            result.Sort((left, right) => string.Compare(
+                left && left.Anchor ? left.Anchor.name : string.Empty,
+                right && right.Anchor ? right.Anchor.name : string.Empty,
+                StringComparison.OrdinalIgnoreCase));
+            return result;
         }
 
         public static bool TryRestore(
@@ -255,6 +398,7 @@ namespace ZXXTools.PathBuilder
 
             string markerName = MarkerPrefix + sessionId;
             Transform[] transforms = Resources.FindObjectsOfTypeAll<Transform>();
+            Transform best = null;
             for (int i = 0; i < transforms.Length; i++)
             {
                 Transform marker = transforms[i];
@@ -264,9 +408,152 @@ namespace ZXXTools.PathBuilder
                 {
                     continue;
                 }
-                return marker.parent;
+                Transform candidate = marker.parent;
+                if (!best
+                    || candidate.gameObject.scene.handle
+                        < best.gameObject.scene.handle
+                    || (candidate.gameObject.scene.handle
+                            == best.gameObject.scene.handle
+                        && candidate.GetSiblingIndex()
+                            < best.GetSiblingIndex()))
+                {
+                    best = candidate;
+                }
             }
-            return null;
+            return best;
+        }
+
+        private static bool TryForkDuplicatedSession(
+            PathSpline source,
+            Transform duplicatedAnchor,
+            string formerSessionId,
+            out PathSpline fork)
+        {
+            fork = null;
+            if (!source || !IsValidSceneTransform(duplicatedAnchor))
+                return false;
+
+            try
+            {
+                fork = Object.Instantiate(source);
+                fork.name = source.name + " Copy";
+                fork.Anchor = null;
+                fork.GeneratedRoot = null;
+                string newSessionId = fork.RegenerateSessionId();
+
+                MakePreviewResourcesIndependent(
+                    FindPreviewRoot(duplicatedAnchor, source.mode));
+                ReplaceMarker(
+                    duplicatedAnchor,
+                    formerSessionId,
+                    newSessionId);
+                Bind(fork, duplicatedAnchor);
+                Save(fork);
+
+                Debug.Log(
+                    $"[Path Builder] 已为复制的路径创建独立会话："
+                    + $"{duplicatedAnchor.name}",
+                    duplicatedAnchor);
+                return true;
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception, duplicatedAnchor);
+                if (fork && !EditorUtility.IsPersistent(fork))
+                    Object.DestroyImmediate(fork);
+                fork = null;
+                return false;
+            }
+        }
+
+        private static void ReplaceMarker(
+            Transform anchor,
+            string formerSessionId,
+            string newSessionId)
+        {
+            string formerName = MarkerPrefix + formerSessionId;
+            string newName = MarkerPrefix + newSessionId;
+            for (int i = 0; i < anchor.childCount; i++)
+            {
+                Transform child = anchor.GetChild(i);
+                if (child.name != formerName)
+                    continue;
+
+                Undo.RecordObject(child.gameObject, "Fork Path Builder Session");
+                child.name = newName;
+                child.gameObject.hideFlags = HideFlags.HideInHierarchy
+                    | HideFlags.DontSaveInBuild;
+                EditorUtility.SetDirty(child.gameObject);
+                EditorSceneManager.MarkSceneDirty(anchor.gameObject.scene);
+                return;
+            }
+
+            EnsureMarker(anchor, newSessionId);
+        }
+
+        private static void MakePreviewResourcesIndependent(Transform preview)
+        {
+            if (!preview)
+                return;
+
+            Dictionary<Mesh, Mesh> meshes = new Dictionary<Mesh, Mesh>();
+            MeshFilter[] filters = preview.GetComponentsInChildren<MeshFilter>(true);
+            for (int i = 0; i < filters.Length; i++)
+            {
+                Mesh source = filters[i].sharedMesh;
+                if (!source || AssetDatabase.Contains(source))
+                    continue;
+                if (!meshes.TryGetValue(source, out Mesh copy))
+                {
+                    copy = Object.Instantiate(source);
+                    copy.name = source.name;
+                    copy.hideFlags = source.hideFlags;
+                    meshes.Add(source, copy);
+                }
+                Undo.RecordObject(filters[i], "Fork Path Builder Preview");
+                filters[i].sharedMesh = copy;
+            }
+
+            MeshCollider[] colliders = preview
+                .GetComponentsInChildren<MeshCollider>(true);
+            for (int i = 0; i < colliders.Length; i++)
+            {
+                Mesh source = colliders[i].sharedMesh;
+                if (!source || !meshes.TryGetValue(source, out Mesh copy))
+                    continue;
+                Undo.RecordObject(colliders[i], "Fork Path Builder Preview");
+                colliders[i].sharedMesh = copy;
+            }
+
+            Dictionary<Material, Material> materials =
+                new Dictionary<Material, Material>();
+            Renderer[] renderers = preview.GetComponentsInChildren<Renderer>(true);
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                Material[] shared = renderers[i].sharedMaterials;
+                bool changed = false;
+                for (int materialIndex = 0;
+                    materialIndex < shared.Length;
+                    materialIndex++)
+                {
+                    Material source = shared[materialIndex];
+                    if (!source || AssetDatabase.Contains(source))
+                        continue;
+                    if (!materials.TryGetValue(source, out Material copy))
+                    {
+                        copy = Object.Instantiate(source);
+                        copy.name = source.name;
+                        copy.hideFlags = source.hideFlags;
+                        materials.Add(source, copy);
+                    }
+                    shared[materialIndex] = copy;
+                    changed = true;
+                }
+                if (!changed)
+                    continue;
+                Undo.RecordObject(renderers[i], "Fork Path Builder Preview");
+                renderers[i].sharedMaterials = shared;
+            }
         }
 
         private static Transform FindMarkedAncestor(

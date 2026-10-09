@@ -138,6 +138,10 @@ namespace SelfShadowBakerTool.Editor
             }
             if (removeIdx >= 0) _targets.RemoveAt(removeIdx);
             if (GUILayout.Button(Content("+ Add", "添加"))) _targets.Add(null);
+            EditorGUILayout.HelpBox(
+                "列表中的场景对象按实际位置互相遮挡，阴影 / AO / 反光分别写入各自的 UV2 贴图。\n" +
+                "Project 中的 Prefab 资源仍单独烘焙；需要互相影响时，请先放进场景再多选填入。",
+                MessageType.None);
 
             int valid = 0;
             var disabledModels = new List<string>(); // "FBX名 ← 目标名"
@@ -437,8 +441,23 @@ namespace SelfShadowBakerTool.Editor
         // ---------------------------------------------------------- Bake logic
         void DoBatchBake(bool bakeShadow, bool bakeAO, bool bakeFill)
         {
-            var valid = _targets.FindAll(t => t != null);
+            var valid = new List<GameObject>();
+            foreach (var target in _targets)
+                if (target != null && !valid.Contains(target)) valid.Add(target);
             if (valid.Count == 0) return;
+
+            var sceneOccluders = new List<MeshRenderer>();
+            var seenRenderers = new HashSet<MeshRenderer>();
+            var nameCounts = new Dictionary<string, int>(System.StringComparer.OrdinalIgnoreCase);
+            foreach (var target in valid)
+            {
+                string name = SelfShadowBakerCore.SanitizeFileName(target.name);
+                nameCounts.TryGetValue(name, out int count);
+                nameCounts[name] = count + 1;
+                if (!target.scene.IsValid()) continue;
+                foreach (var renderer in target.GetComponentsInChildren<MeshRenderer>(false))
+                    if (seenRenderers.Add(renderer)) sceneOccluders.Add(renderer);
+            }
 
             _previews.Clear();
             int success = 0;
@@ -450,7 +469,13 @@ namespace SelfShadowBakerTool.Editor
                     var target = valid[i];
                     EditorUtility.DisplayProgressBar("Self Shadow Baker",
                         $"{target.name} ({i + 1}/{valid.Count})", (float)i / valid.Count);
-                    if (BakeOneTarget(target, bakeShadow, bakeAO, bakeFill, out string err)) success++;
+                    string assetName = SelfShadowBakerCore.SanitizeFileName(target.name);
+                    if (nameCounts[assetName] > 1)
+                    {
+                        string id = GlobalObjectId.GetGlobalObjectIdSlow(target).ToString();
+                        assetName += "_" + Hash128.Compute(id).ToString();
+                    }
+                    if (BakeOneTarget(target, sceneOccluders, assetName, bakeShadow, bakeAO, bakeFill, out string err)) success++;
                     else failures.Add($"{target.name}: {err}");
                 }
             }
@@ -472,10 +497,11 @@ namespace SelfShadowBakerTool.Editor
 
         // scene object: use the live renderers (world transforms are correct);
         // prefab asset: load contents to read its renderers.
-        bool BakeOneTarget(GameObject target, bool bakeShadow, bool bakeAO, bool bakeFill, out string error)
+        bool BakeOneTarget(GameObject target, List<MeshRenderer> sceneOccluders, string assetName,
+            bool bakeShadow, bool bakeAO, bool bakeFill, out string error)
         {
             error = null;
-            bool isSceneObject = target.scene.IsValid() && !string.IsNullOrEmpty(target.scene.name);
+            bool isSceneObject = target.scene.IsValid();
             GameObject loadedPrefab = null;
             var renderers = new List<MeshRenderer>();
 
@@ -503,6 +529,7 @@ namespace SelfShadowBakerTool.Editor
             var settings = new SelfShadowBakeSettings
             {
                 Renderers = renderers,
+                Occluders = isSceneObject ? sceneOccluders : null,
                 LightDirection = ResolveLightDirection(),
                 BakeShadow = bakeShadow,
                 BakeAO = bakeAO,
@@ -523,12 +550,15 @@ namespace SelfShadowBakerTool.Editor
                 DilatePixels = _dilate,
                 FlipV = _flipV,
                 OutputFolder = _outputFolder,
-                AssetName = target.name,
+                AssetName = assetName,
             };
 
-            var result = SelfShadowBakerCore.Bake(settings, out error);
-
-            if (loadedPrefab != null) PrefabUtility.UnloadPrefabContents(loadedPrefab);
+            SelfShadowBakeResult result;
+            try { result = SelfShadowBakerCore.Bake(settings, out error); }
+            finally
+            {
+                if (loadedPrefab != null) PrefabUtility.UnloadPrefabContents(loadedPrefab);
+            }
 
             if (result != null)
             {

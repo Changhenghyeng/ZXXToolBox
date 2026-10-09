@@ -35,7 +35,7 @@ namespace FogOfWarTool.Editor
         private float _debugGridThickness = 0.02f;
         private bool _forceSquareCells = true;
         private PivotChoice _pivot = PivotChoice.BottomLeft;
-        private string _assetFolder = "Assets/FogOfWar";
+        private string _assetFolder = "Assets/LocalArtRes/FogOfWar";
 
         private enum PivotChoice
         {

@@ -1,5 +1,14 @@
 # Changelog
 
+
+## [Unreleased] — 2026-10-09
+
+- 从当前项目同步最新个人工具代码，并沿文件迁移历史补齐工具箱外的运行时脚本与 Shader。
+- 新增 RockTools、SLGCityEditor、CardGroundBaker 及批量处理工具源码。
+- 补齐自定义 Lit 深度透明、建筑面片、河流/瀑布、地形、烘焙光照/植物风动 Shader 及配套 ShaderGUI、HLSL。
+- 保留两个程序集 GUID 元数据及 ToonOutline 的必要 include，新增源码位置索引和操作说明。
+- 排除其他作者工具、模型、贴图、场景、Prefab 和生成配置。
+
 ## [v0.5.0] — 2026-08-24
 
 ### 新增工具
@@ -113,3 +122,4 @@
 - **21 个编辑器工具**：ZXXToolBox（主面板）及全套工具集
 - **9 个 Shader**：阴影、植被、水面、描边、模糊、剪影、迷雾、Light Cookie 等
 - **2 个运行时组件**：DayChangeTransitionController、FogGridClickSystem
+

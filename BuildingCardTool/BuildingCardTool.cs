@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text.RegularExpressions;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -17,9 +18,13 @@ public sealed class BuildingCardTool : EditorWindow
     private const string PrefsKey = "BuildingCardTool.Settings";
     private const string PanelRatioPrefsKey = PrefsKey + ".PanelRatio";
     private const string UnityPreviewPrefsKey = PrefsKey + ".UnityPreview";
+    private const string AdvancedSettingsPrefsKey = PrefsKey + ".AdvancedSettings";
     private const string WorkspacePrefsKey = PrefsKey + ".Workspace";
+    private const int CurrentWorkspaceVersion = 2;
+    private const int MaxRecognizedGridDimension = 100;
     private const string ScenePreviewRootName = "Building Card Preview";
     private const int MaxAnalysisDimension = 1024;
+    private const float GroundEdgeFitTolerance = 3f;
     private const float SplitterWidth = 6f;
     private const float MinimumLeftPanelWidth = 300f;
     private const float MinimumPreviewPanelWidth = 260f;
@@ -36,6 +41,9 @@ public sealed class BuildingCardTool : EditorWindow
         public Vector2 manualLeftPoint;
         public Vector2 manualRightPoint;
         public Vector2 manualFarPoint;
+        [NonSerialized] public bool useExactGroundSize;
+        [NonSerialized] public float exactGroundWidth;
+        [NonSerialized] public float exactGroundDepth;
         [NonSerialized] public AnalysisResult result;
         [NonSerialized] public string generationError;
     }
@@ -57,6 +65,7 @@ public sealed class BuildingCardTool : EditorWindow
     [Serializable]
     private sealed class WorkspaceState
     {
+        public int version;
         public string referenceCameraGlobalId;
         public int referenceCameraInstanceId;
         public int previewIndex = -1;
@@ -65,6 +74,7 @@ public sealed class BuildingCardTool : EditorWindow
         public bool spineLoop = true;
         public int spineGridWidth = 1;
         public int spineGridDepth = 1;
+        public int sourceMode;
         public bool spineUseManualGroundPoints;
         public Vector2 spineManualNearPoint;
         public Vector2 spineManualLeftPoint;
@@ -111,6 +121,7 @@ public sealed class BuildingCardTool : EditorWindow
         public float slope;
         public float intercept;
         public float residual;
+        public float coverage;
     }
 
     private struct OutputGeometry
@@ -151,7 +162,16 @@ public sealed class BuildingCardTool : EditorWindow
     private readonly Settings settings = new Settings();
     private readonly BuildingCardAtlasPanel atlasPanel = new BuildingCardAtlasPanel();
 
+    private readonly List<GameObject> existingPrefabs = new List<GameObject>();
+    private Camera existingPrefabCamera;
+    private Rect existingPrefabListRect;
     private Camera referenceCamera;
+    private GameObject prefabToEdit;
+    private GameObject loadedEditingPrefab;
+    private bool saveEditedPrefabAsNew = true;
+    private Texture2D loadedEditingTexture;
+    private bool analysisRotationOverrideActive;
+    private Quaternion analysisRotationOverride;
     private SkeletonDataAsset spineDataAsset;
     private string spineAnimation = string.Empty;
     private bool spineLoop = true;
@@ -174,11 +194,12 @@ public sealed class BuildingCardTool : EditorWindow
     private Vector2 spineManualLeftPoint;
     private Vector2 spineManualRightPoint;
     private Vector2 spineManualFarPoint;
-    private Vector2 scroll;
     private Vector2 leftPanelScroll;
+    private SourceMode sourceMode;
     private float leftPanelRatio = 0.54f;
     private bool draggingPanelSplitter;
     private bool useUnityPreview;
+    private bool advancedSettingsExpanded;
     private int previewIndex = -1;
     private int draggingEntryIndex = -1;
     private PreviewPoint draggingPoint;
@@ -189,6 +210,7 @@ public sealed class BuildingCardTool : EditorWindow
     private double analysisDueTime;
 
     private enum PreviewPoint { None, Near, Left, Right, Far, Center }
+    private enum SourceMode { Image, Spine }
 
     public static void ShowWindow()
     {
@@ -204,9 +226,10 @@ public sealed class BuildingCardTool : EditorWindow
         LoadWorkspaceState();
         leftPanelRatio = Mathf.Clamp(EditorPrefs.GetFloat(PanelRatioPrefsKey, leftPanelRatio), 0.2f, 0.8f);
         useUnityPreview = EditorPrefs.GetBool(UnityPreviewPrefsKey, true);
+        advancedSettingsExpanded = EditorPrefs.GetBool(AdvancedSettingsPrefsKey, false);
         if (entries.Count > 0 && referenceCamera != null)
             ScheduleAnalysis(null, true, 0.05f);
-        if (spineDataAsset != null)
+        if (sourceMode == SourceMode.Spine && spineDataAsset != null)
             ScheduleSpinePreviewRefresh();
     }
 
@@ -220,6 +243,7 @@ public sealed class BuildingCardTool : EditorWindow
         SaveWorkspaceState();
         EditorPrefs.SetFloat(PanelRatioPrefsKey, leftPanelRatio);
         EditorPrefs.SetBool(UnityPreviewPrefsKey, useUnityPreview);
+        EditorPrefs.SetBool(AdvancedSettingsPrefsKey, advancedSettingsExpanded);
         if (analysisUpdateRegistered)
         {
             EditorApplication.update -= ProcessScheduledAnalysis;
@@ -241,10 +265,19 @@ public sealed class BuildingCardTool : EditorWindow
         leftPanelScroll = EditorGUILayout.BeginScrollView(leftPanelScroll, false, false);
         DrawSettings();
         EditorGUILayout.Space(4);
-        DrawInputToolbar();
-        DrawEntries();
-        DrawSpineInput();
-        atlasPanel.Draw(settings.outputFolder);
+        DrawExistingPrefabRefactor();
+        EditorGUILayout.Space(4);
+        DrawSourceModeSelector();
+        if (sourceMode == SourceMode.Image)
+        {
+            DrawInputToolbar();
+            DrawEntries();
+            atlasPanel.Draw(settings.outputFolder);
+        }
+        else
+        {
+            DrawSpineInput();
+        }
         EditorGUILayout.EndScrollView();
         EditorGUILayout.EndVertical();
 
@@ -267,6 +300,28 @@ public sealed class BuildingCardTool : EditorWindow
         DrawSignature();
         EditorGUILayout.EndVertical();
         EditorGUILayout.EndHorizontal();
+    }
+
+    private void DrawSourceModeSelector()
+    {
+        var selected = GUILayout.Toolbar((int)sourceMode, new[] { "Image", "Spine" }, GUILayout.Height(26f));
+        if (selected == (int)sourceMode) return;
+
+        sourceMode = (SourceMode)selected;
+        atlasPanel.HidePreview();
+        if (sourceMode == SourceMode.Image)
+        {
+            ClearSpinePreview();
+            if (entries.Count > 0)
+                previewIndex = Mathf.Clamp(previewIndex < 0 ? 0 : previewIndex, 0, entries.Count - 1);
+        }
+        else
+        {
+            previewIndex = -1;
+            if (spineDataAsset != null) ScheduleSpinePreviewRefresh();
+        }
+        SaveWorkspaceState();
+        Repaint();
     }
 
     private void HandlePanelSplitter(Rect splitterRect, float panelsWidth, float minLeft, float minPreview)
@@ -379,17 +434,25 @@ public sealed class BuildingCardTool : EditorWindow
         EditorGUI.BeginChangeCheck();
         referenceCamera = (Camera)EditorGUILayout.ObjectField(Content("Reference Camera", "拖入用于还原建筑面片角度的正交相机。工具会读取它的旋转与地面投影关系。"), referenceCamera, typeof(Camera), true);
         DrawFloatWithUnit(Content("Cell Size", "一个 SLG 格子在 Unity 世界中的边长。建筑的 BoxCollider 宽度和深度由格子数乘以该值计算。"), ref settings.cellWorldSize, "m");
-        settings.bodyAlphaThreshold = EditorGUILayout.Slider(Content("Body Alpha", "Alpha 高于该值的像素视为建筑实体，会参与地面点、缩放和碰撞高度计算；较低 Alpha 只作为阴影显示。"), settings.bodyAlphaThreshold, 0.5f, 1f);
-        DrawFloatWithUnit(Content("Height Padding", "在自动拟合出的点击碰撞高度上额外增加的余量。"), ref settings.clickHeightPadding, "m");
-        DrawFloatWithUnit(Content("Horizontal Padding", "在格子定义的 X/Z 碰撞尺寸外侧增加的余量。"), ref settings.clickHorizontalPadding, "m");
-        DrawFloatWithUnit(Content("Ground Margin", "底面短边每侧的世界间距。默认 0 m；正值会以底面中心等比缩小 Visual 与 BoxCollider，短边两侧各精确留出该距离；长边按同一比例变化以保持图片不变形。"), ref settings.visualMargin, "m");
+        advancedSettingsExpanded = EditorGUILayout.Foldout(advancedSettingsExpanded, "Advanced", true);
+        if (advancedSettingsExpanded)
+        {
+            EditorGUI.indentLevel++;
+            settings.bodyAlphaThreshold = EditorGUILayout.Slider(Content("Body Alpha", "Alpha 高于该值的像素视为建筑实体，会参与地面点、缩放和碰撞高度计算；较低 Alpha 只作为阴影显示。"), settings.bodyAlphaThreshold, 0.5f, 1f);
+            DrawFloatWithUnit(Content("Height Padding", "在自动拟合出的点击碰撞高度上额外增加的余量。"), ref settings.clickHeightPadding, "m");
+            DrawFloatWithUnit(Content("Horizontal Padding", "在格子定义的 X/Z 碰撞尺寸外侧增加的余量。"), ref settings.clickHorizontalPadding, "m");
+            DrawFloatWithUnit(Content("Ground Margin", "底面短边每侧的世界间距。默认 0 m；正值会以底面中心等比缩小 Visual 与 BoxCollider，短边两侧各精确留出该距离；长边按同一比例变化以保持图片不变形。"), ref settings.visualMargin, "m");
+            settings.placePrefabsInScene = EditorGUILayout.Toggle(Content("Place In Scene", "开启后，预制体会放入当前场景的 Building Card Preview 节点并沿 X 轴排列；同名预览实例会被替换，不影响该节点外的正式建筑。"), settings.placePrefabsInScene);
+            EditorGUI.indentLevel--;
+        }
         settings.clickHeightPadding = Mathf.Max(0f, settings.clickHeightPadding);
         settings.clickHorizontalPadding = Mathf.Max(0f, settings.clickHorizontalPadding);
         settings.visualMargin = Mathf.Max(0f, settings.visualMargin);
-        settings.placePrefabsInScene = EditorGUILayout.Toggle(Content("Place In Scene", "开启后，预制体会放入当前场景的 Building Card Preview 节点并沿 X 轴排列；同名预览实例会被替换，不影响该节点外的正式建筑。"), settings.placePrefabsInScene);
-
         EditorGUILayout.BeginHorizontal();
-        settings.outputFolder = EditorGUILayout.TextField(Content("Output Folder", "预制体、材质和 Mesh 的保存目录。必须位于项目的 Assets 文件夹内。"), settings.outputFolder);
+        var outputFolder = EditorGUILayout.TextField(Content("Output Folder", "预制体、材质和 Mesh 的保存目录。必须位于项目的 Assets 文件夹内；粘贴项目内的绝对路径时会自动转换为 Assets/...。"), settings.outputFolder);
+        settings.outputFolder = TryNormalizeOutputFolder(outputFolder, out var normalizedOutputFolder)
+            ? normalizedOutputFolder
+            : outputFolder;
         if (GUILayout.Button(Content("Browse", "选择位于当前 Unity 项目 Assets 下的输出目录。"), GUILayout.Width(66)))
             SelectOutputFolder();
         EditorGUILayout.EndHorizontal();
@@ -401,10 +464,519 @@ public sealed class BuildingCardTool : EditorWindow
             SaveSettings();
             if (referenceCamera != previousCamera) SaveWorkspaceState();
             ScheduleAnalysis(null, true);
-            if (spineDataAsset != null)
+            if (sourceMode == SourceMode.Spine && spineDataAsset != null)
                 ScheduleSpinePreviewRefresh();
             else if (spinePreviewActive)
                 ClearSpinePreview();
+        }
+    }
+
+    private void DrawExistingPrefabRefactor()
+    {
+        EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+        EditorGUILayout.LabelField("Refactor Existing Prefabs", EditorStyles.boldLabel);
+
+        existingPrefabListRect = EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+        EditorGUILayout.LabelField(
+            existingPrefabs.Count == 0 ? "Drop Prefabs / Folders / Scene Instances Here" : "Prefabs  (drop more anywhere in this list)",
+            EditorStyles.miniBoldLabel);
+        for (var i = 0; i < existingPrefabs.Count; i++)
+        {
+            EditorGUILayout.BeginHorizontal();
+            existingPrefabs[i] = (GameObject)EditorGUILayout.ObjectField(
+                existingPrefabs[i], typeof(GameObject), false);
+            if (GUILayout.Button("×", GUILayout.Width(24f)))
+            {
+                existingPrefabs.RemoveAt(i);
+                i--;
+            }
+            EditorGUILayout.EndHorizontal();
+        }
+        EditorGUILayout.BeginHorizontal();
+        if (GUILayout.Button("Add Current Selection", EditorStyles.miniButtonLeft))
+            AddExistingPrefabObjects(Selection.objects);
+        using (new EditorGUI.DisabledScope(existingPrefabs.Count == 0))
+            if (GUILayout.Button("Clear", EditorStyles.miniButtonRight)) existingPrefabs.Clear();
+        EditorGUILayout.EndHorizontal();
+        EditorGUILayout.EndVertical();
+        HandleExistingPrefabDrop(existingPrefabListRect);
+
+        existingPrefabCamera = (Camera)EditorGUILayout.ObjectField(
+            Content("Target Camera", "面片会改为正对这台相机，并重新识别建筑底面，让建筑落地点对齐 BoxCollider 的地面中心。"),
+            existingPrefabCamera, typeof(Camera), true);
+        EditorGUILayout.HelpBox(
+            "支持批量混合普通 Mesh 面片和 Spine。按现有 BoxCollider X/Z 尺寸重算 Visual 缩放与底面位置；BoxCollider、Mesh、材质、UV、SkeletonData、Atlas 与动画保持不变。",
+            MessageType.Info);
+
+        using (new EditorGUI.DisabledScope(!HasExistingPrefabs() || existingPrefabCamera == null))
+        {
+            if (GUILayout.Button(Content("Refactor All Prefabs", "批量直接保存到当前 Prefab。不会修改碰撞体和渲染资源。"), GUILayout.Height(28f)))
+                EditorApplication.delayCall += RefactorExistingPrefabs;
+        }
+        EditorGUILayout.EndVertical();
+    }
+
+    private void HandleExistingPrefabDrop(Rect listRect)
+    {
+        var evt = Event.current;
+        if (!listRect.Contains(evt.mousePosition) ||
+            (evt.type != EventType.DragUpdated && evt.type != EventType.DragPerform))
+            return;
+
+        var hasPrefabOrFolder = false;
+        for (var i = 0; i < DragAndDrop.objectReferences.Length; i++)
+        {
+            if (CanAddExistingPrefabObject(DragAndDrop.objectReferences[i]))
+            {
+                hasPrefabOrFolder = true;
+                break;
+            }
+        }
+        if (!hasPrefabOrFolder) return;
+
+        DragAndDrop.visualMode = DragAndDropVisualMode.Copy;
+        if (evt.type == EventType.DragPerform)
+        {
+            DragAndDrop.AcceptDrag();
+            AddExistingPrefabObjects(DragAndDrop.objectReferences);
+        }
+        evt.Use();
+    }
+
+    private static bool CanAddExistingPrefabObject(UnityEngine.Object asset)
+    {
+        if (ResolveExistingPrefabAsset(asset) != null) return true;
+        var path = AssetDatabase.GetAssetPath(asset);
+        return !string.IsNullOrEmpty(path) && AssetDatabase.IsValidFolder(path);
+    }
+
+    private void AddExistingPrefabObjects(UnityEngine.Object[] assets)
+    {
+        if (assets == null) return;
+        for (var i = 0; i < assets.Length; i++)
+        {
+            var prefabAsset = ResolveExistingPrefabAsset(assets[i]);
+            if (prefabAsset != null)
+            {
+                if (!existingPrefabs.Contains(prefabAsset)) existingPrefabs.Add(prefabAsset);
+                continue;
+            }
+
+            var folderPath = AssetDatabase.GetAssetPath(assets[i]);
+            if (string.IsNullOrEmpty(folderPath) || !AssetDatabase.IsValidFolder(folderPath)) continue;
+            var prefabGuids = AssetDatabase.FindAssets("t:Prefab", new[] { folderPath });
+            for (var prefabIndex = 0; prefabIndex < prefabGuids.Length; prefabIndex++)
+            {
+                var prefabPath = AssetDatabase.GUIDToAssetPath(prefabGuids[prefabIndex]);
+                var folderPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+                if (IsPersistentPrefab(folderPrefab) && !existingPrefabs.Contains(folderPrefab))
+                    existingPrefabs.Add(folderPrefab);
+            }
+        }
+    }
+
+    private static GameObject ResolveExistingPrefabAsset(UnityEngine.Object asset)
+    {
+        var gameObject = asset as GameObject;
+        if (gameObject == null) return null;
+        if (IsPersistentPrefab(gameObject)) return gameObject;
+        if (!PrefabUtility.IsPartOfPrefabInstance(gameObject)) return null;
+
+        var instanceRoot = PrefabUtility.GetOutermostPrefabInstanceRoot(gameObject);
+        if (instanceRoot == null) return null;
+        var prefabPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(instanceRoot);
+        if (string.IsNullOrEmpty(prefabPath)) return null;
+        var prefabAsset = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+        return IsPersistentPrefab(prefabAsset) ? prefabAsset : null;
+    }
+
+    private static bool IsPersistentPrefab(GameObject prefab)
+    {
+        return prefab != null && EditorUtility.IsPersistent(prefab) &&
+               PrefabUtility.GetPrefabAssetType(prefab) != PrefabAssetType.NotAPrefab;
+    }
+
+    private bool HasExistingPrefabs()
+    {
+        for (var i = 0; i < existingPrefabs.Count; i++)
+            if (IsPersistentPrefab(existingPrefabs[i])) return true;
+        return false;
+    }
+
+    private void RefactorExistingPrefabs()
+    {
+        if (existingPrefabCamera == null) return;
+
+        var uniquePrefabs = new List<GameObject>();
+        for (var i = 0; i < existingPrefabs.Count; i++)
+        {
+            var prefab = existingPrefabs[i];
+            if (IsPersistentPrefab(prefab) && !uniquePrefabs.Contains(prefab)) uniquePrefabs.Add(prefab);
+        }
+        if (uniquePrefabs.Count == 0) return;
+
+        var errors = new List<string>();
+        var successCount = 0;
+        try
+        {
+            for (var i = 0; i < uniquePrefabs.Count; i++)
+            {
+                var prefab = uniquePrefabs[i];
+                EditorUtility.DisplayProgressBar(
+                    "Refactor Building Card Prefabs", prefab.name, (float)i / uniquePrefabs.Count);
+                if (TryRefactorExistingPrefab(prefab, out var error))
+                    successCount++;
+                else
+                    errors.Add(prefab.name + "：" + error);
+            }
+            AssetDatabase.SaveAssets();
+        }
+        finally
+        {
+            EditorUtility.ClearProgressBar();
+        }
+
+        var message = "完成 " + successCount + " / " + uniquePrefabs.Count + " 个 Prefab。";
+        var shownErrorCount = Mathf.Min(8, errors.Count);
+        for (var i = 0; i < shownErrorCount; i++) message += "\n• " + errors[i];
+        if (errors.Count > shownErrorCount) message += "\n• 其余 " + (errors.Count - shownErrorCount) + " 项请查看 Console。";
+        EditorUtility.DisplayDialog("Building Card", message, "确定");
+    }
+
+    private bool TryRefactorExistingPrefab(GameObject prefab, out string error)
+    {
+        error = null;
+        var prefabPath = AssetDatabase.GetAssetPath(prefab);
+        if (string.IsNullOrEmpty(prefabPath) || !IsPersistentPrefab(prefab))
+        {
+            error = "不是 Project 中可编辑的 Prefab 资源。";
+            return false;
+        }
+
+        GameObject contents = null;
+        try
+        {
+            contents = PrefabUtility.LoadPrefabContents(prefabPath);
+            var collider = FindRefactorCollider(contents);
+            var visual = FindRefactorVisual(contents);
+            if (collider == null)
+                throw new InvalidOperationException("Prefab 中没有找到唯一的 BoxCollider。");
+            if (visual == null)
+                throw new InvalidOperationException("Prefab 中没有找到唯一的普通面片或 Spine Visual。");
+
+            if (!BuildingCardMetadataStore.TryLoad(prefabPath, out var refactorMetadata))
+                refactorMetadata = new BuildingCardAssetMetadata();
+            var rememberSourceTransform = !refactorMetadata.hasRefactorSourceTransform ||
+                                          !refactorMetadata.hasRefactorSourcePosition;
+            var sourceRotation = rememberSourceTransform
+                ? visual.transform.rotation
+                : refactorMetadata.refactorSourceRotation;
+            var sourceScale = rememberSourceTransform
+                ? visual.transform.localScale
+                : refactorMetadata.refactorSourceScale;
+            var sourcePosition = rememberSourceTransform
+                ? visual.transform.position
+                : refactorMetadata.refactorSourcePosition;
+            if (rememberSourceTransform &&
+                Quaternion.Angle(visual.transform.rotation, existingPrefabCamera.transform.rotation) < 0.1f)
+                throw new InvalidOperationException(
+                    "Visual 已与 Target Camera 同朝向，但 Prefab 没有原始 Transform 记录；疑似已手动修改，已安全跳过，避免再次缩小。");
+
+            var desiredWorldRotation = existingPrefabCamera.transform.rotation;
+            var visualScaleFactor = CalculateInscribedFootprintScaleFactor(
+                sourceRotation, desiredWorldRotation, collider);
+            var centerAnchor = collider.transform.TransformPoint(new Vector3(
+                collider.center.x, collider.center.y - collider.size.y * 0.5f, collider.center.z));
+            var groundRotationDelta = CalculateGroundRotationDelta(
+                sourceRotation, desiredWorldRotation, collider.transform.up);
+            var visualUnits = FindRefactorVisualUnits(contents, visual.transform);
+            if (visualUnits.Count == 0)
+                throw new InvalidOperationException("Prefab 中没有找到可变换的视觉对象。");
+
+            var rememberVisualTransforms = refactorMetadata.refactorVisualTransforms == null ||
+                                           refactorMetadata.refactorVisualTransforms.Count == 0;
+            if (rememberVisualTransforms)
+            {
+                refactorMetadata.refactorVisualTransforms = CaptureRefactorVisualTransforms(
+                    contents.transform, visualUnits);
+                // Prefabs processed by an older tool version already have the card's true source
+                // transform in metadata. Use it instead of capturing the processed card again.
+                if (!rememberSourceTransform && visual.transform.parent == contents.transform)
+                {
+                    var visualPath = AnimationUtility.CalculateTransformPath(
+                        visual.transform, contents.transform);
+                    var visualRecord = refactorMetadata.refactorVisualTransforms.Find(
+                        item => item.path == visualPath);
+                    if (visualRecord != null)
+                    {
+                        visualRecord.localPosition = contents.transform.InverseTransformPoint(sourcePosition);
+                        visualRecord.localRotation = Quaternion.Inverse(contents.transform.rotation) * sourceRotation;
+                        visualRecord.localScale = sourceScale;
+                    }
+                }
+            }
+
+            ApplyRefactorVisualTransforms(contents.transform,
+                refactorMetadata.refactorVisualTransforms, centerAnchor,
+                groundRotationDelta, visualScaleFactor);
+            // 3D companions use only the ground-plane yaw above and remain upright. The card uses
+            // the full camera rotation for both position and rotation, keeping its authored ground
+            // anchor fixed instead of changing pitch around the wrong world-space position.
+            var cardRotationDelta = desiredWorldRotation * Quaternion.Inverse(sourceRotation);
+            visual.transform.position = centerAnchor +
+                                        cardRotationDelta *
+                                        ((sourcePosition - centerAnchor) * visualScaleFactor);
+            visual.transform.rotation = desiredWorldRotation;
+            visual.transform.localScale = sourceScale * visualScaleFactor;
+
+            if (PrefabUtility.SaveAsPrefabAsset(contents, prefabPath) == null)
+                throw new InvalidOperationException("Prefab 保存失败。");
+            if (rememberSourceTransform || rememberVisualTransforms)
+            {
+                refactorMetadata.hasRefactorSourceTransform = true;
+                refactorMetadata.hasRefactorSourcePosition = true;
+                refactorMetadata.refactorSourceRotation = sourceRotation;
+                refactorMetadata.refactorSourceScale = sourceScale;
+                refactorMetadata.refactorSourcePosition = sourcePosition;
+                BuildingCardMetadataStore.Save(prefabPath, refactorMetadata);
+            }
+            var appliedScaleFactor = CalculateInscribedFootprintScaleFactor(
+                sourceRotation, existingPrefabCamera.transform.rotation, collider);
+            var visualType = visual.GetComponent<SkeletonRenderer>() != null ? "Spine" : "Mesh";
+            Debug.Log("[BuildingCardTool] 已重构 " + visualType +
+                " Visual Transform（内接缩放系数 " + appliedScaleFactor.ToString("0.####") +
+                "，视觉对象 " + refactorMetadata.refactorVisualTransforms.Count +
+                " 个），碰撞体 / 渲染资源未修改：" + prefabPath,
+                prefab);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            error = exception.Message;
+            Debug.LogError("[BuildingCardTool] 已有 Prefab 重构失败：" + prefabPath + "\n" + exception, prefab);
+            return false;
+        }
+        finally
+        {
+            if (contents != null) PrefabUtility.UnloadPrefabContents(contents);
+        }
+    }
+
+    private static List<Transform> FindRefactorVisualUnits(GameObject root, Transform cardVisual)
+    {
+        var units = new List<Transform>();
+        var cardUnit = cardVisual;
+        while (cardUnit.parent != null && cardUnit.parent != root.transform)
+            cardUnit = cardUnit.parent;
+
+        for (var childIndex = 0; childIndex < root.transform.childCount; childIndex++)
+        {
+            var child = root.transform.GetChild(childIndex);
+            if (child == cardUnit || child.GetComponentsInChildren<Renderer>(true).Length > 0)
+                units.Add(child);
+        }
+        return units;
+    }
+
+    private static List<BuildingCardRefactorTransform> CaptureRefactorVisualTransforms(
+        Transform root, List<Transform> units)
+    {
+        var records = new List<BuildingCardRefactorTransform>(units.Count);
+        for (var i = 0; i < units.Count; i++)
+        {
+            var unit = units[i];
+            records.Add(new BuildingCardRefactorTransform
+            {
+                path = AnimationUtility.CalculateTransformPath(unit, root),
+                localPosition = unit.localPosition,
+                localRotation = unit.localRotation,
+                localScale = unit.localScale
+            });
+        }
+        return records;
+    }
+
+    private static void ApplyRefactorVisualTransforms(Transform root,
+        List<BuildingCardRefactorTransform> records, Vector3 centerAnchor,
+        Quaternion groundRotationDelta, float scaleFactor)
+    {
+        if (records == null || records.Count == 0)
+            throw new InvalidOperationException("没有记录视觉对象的原始 Transform。");
+
+        for (var i = 0; i < records.Count; i++)
+        {
+            var record = records[i];
+            var unit = root.Find(record.path);
+            if (unit == null)
+                throw new InvalidOperationException("找不到视觉对象：" + record.path);
+            var parent = unit.parent;
+            var sourceWorldPosition = parent == null
+                ? record.localPosition
+                : parent.TransformPoint(record.localPosition);
+            var sourceWorldRotation = parent == null
+                ? record.localRotation
+                : parent.rotation * record.localRotation;
+
+            unit.position = centerAnchor +
+                            groundRotationDelta * ((sourceWorldPosition - centerAnchor) * scaleFactor);
+            unit.rotation = groundRotationDelta * sourceWorldRotation;
+            unit.localScale = record.localScale * scaleFactor;
+        }
+    }
+
+    private static Quaternion CalculateGroundRotationDelta(
+        Quaternion sourceRotation, Quaternion targetRotation, Vector3 groundNormal)
+    {
+        var sourceForward = Vector3.ProjectOnPlane(sourceRotation * Vector3.forward, groundNormal);
+        var targetForward = Vector3.ProjectOnPlane(targetRotation * Vector3.forward, groundNormal);
+        if (sourceForward.sqrMagnitude < 0.000001f || targetForward.sqrMagnitude < 0.000001f)
+            return Quaternion.identity;
+        var angle = Vector3.SignedAngle(sourceForward, targetForward, groundNormal);
+        return Quaternion.AngleAxis(angle, groundNormal);
+    }
+
+    private static float CalculateInscribedFootprintScaleFactor(
+        Quaternion sourceRotation, Quaternion targetRotation, BoxCollider collider)
+    {
+        var groundNormal = collider.transform.up;
+        var sourceForward = Vector3.ProjectOnPlane(sourceRotation * Vector3.forward, groundNormal);
+        var targetForward = Vector3.ProjectOnPlane(targetRotation * Vector3.forward, groundNormal);
+        if (sourceForward.sqrMagnitude < 0.000001f || targetForward.sqrMagnitude < 0.000001f)
+            return 1f;
+
+        var angle = Vector3.Angle(sourceForward, targetForward) * Mathf.Deg2Rad;
+        var cosine = Mathf.Abs(Mathf.Cos(angle));
+        var sine = Mathf.Abs(Mathf.Sin(angle));
+        var width = collider.transform.TransformVector(Vector3.right * collider.size.x).magnitude;
+        var depth = collider.transform.TransformVector(Vector3.forward * collider.size.z).magnitude;
+        if (width < 0.000001f || depth < 0.000001f) return 1f;
+
+        var rotatedWidth = width * cosine + depth * sine;
+        var rotatedDepth = width * sine + depth * cosine;
+        return Mathf.Min(width / rotatedWidth, depth / rotatedDepth);
+    }
+
+    private static BoxCollider FindRefactorCollider(GameObject root)
+    {
+        var rootCollider = root.GetComponent<BoxCollider>();
+        if (rootCollider != null) return rootCollider;
+        var colliders = root.GetComponentsInChildren<BoxCollider>(true);
+        return colliders.Length == 1 ? colliders[0] : null;
+    }
+
+    private static GameObject FindRefactorVisual(GameObject root)
+    {
+        var transforms = root.GetComponentsInChildren<Transform>(true);
+        GameObject onlyCandidate = null;
+        for (var i = 0; i < transforms.Length; i++)
+        {
+            var candidate = transforms[i].gameObject;
+            var renderer = candidate.GetComponent<MeshRenderer>();
+            if (renderer == null) continue;
+            var filter = candidate.GetComponent<MeshFilter>();
+            var isStaticCard = filter != null && filter.sharedMesh != null;
+            var isSpine = candidate.GetComponent<SkeletonRenderer>() != null;
+            if (!isStaticCard && !isSpine) continue;
+            if (string.Equals(candidate.name, "Visual", StringComparison.OrdinalIgnoreCase))
+                return candidate;
+            if (onlyCandidate != null) return null;
+            onlyCandidate = candidate;
+        }
+        return onlyCandidate;
+    }
+
+    private static bool TryPrepareRefactorAnalysis(string prefabPath, GameObject visual,
+        out Texture2D analysisTexture, out bool destroyAnalysisTexture, out Bounds localBounds,
+        out bool isSpine, out Vector2 spineViewCenter, out float spineViewWidth, out float spineViewHeight,
+        out string visualType, out string error)
+    {
+        analysisTexture = null;
+        destroyAnalysisTexture = false;
+        localBounds = new Bounds();
+        isSpine = false;
+        spineViewCenter = Vector2.zero;
+        spineViewWidth = 0f;
+        spineViewHeight = 0f;
+        visualType = "Mesh";
+        error = null;
+
+        var filter = visual.GetComponent<MeshFilter>();
+        var spineRenderer = visual.GetComponent<SkeletonRenderer>();
+        if (spineRenderer == null)
+        {
+            if (filter == null || filter.sharedMesh == null)
+            {
+                error = "普通面片缺少有效的 Mesh。";
+                return false;
+            }
+            localBounds = filter.sharedMesh.bounds;
+            if (BuildingCardMetadataStore.TryLoad(prefabPath, out var metadata) &&
+                !string.IsNullOrEmpty(metadata.sourceTextureGuid))
+            {
+                var sourcePath = AssetDatabase.GUIDToAssetPath(metadata.sourceTextureGuid);
+                analysisTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(sourcePath);
+            }
+            if (analysisTexture == null)
+            {
+                var material = visual.GetComponent<MeshRenderer>().sharedMaterial;
+                var materialTexture = material == null ? null : material.mainTexture as Texture2D;
+                if (materialTexture != null && !BuildingCardAtlasBuilder.IsGeneratedAtlasTexture(materialTexture))
+                    analysisTexture = materialTexture;
+            }
+            if (analysisTexture == null)
+            {
+                error = "找不到原始建筑贴图。图集 Prefab 需要保留 ZXX_BUILDING_CARD sourceTextureGuid。";
+                return false;
+            }
+            return true;
+        }
+
+        isSpine = true;
+        visualType = "Spine";
+        var meshRenderer = visual.GetComponent<MeshRenderer>();
+        var skeletonAnimation = spineRenderer as SkeletonAnimation;
+        if (filter == null || meshRenderer == null || skeletonAnimation == null)
+        {
+            error = "Spine Visual 需要 SkeletonAnimation、MeshFilter 和 MeshRenderer。";
+            return false;
+        }
+
+        // Spine creates its render mesh dynamically. Generate one only long enough to read the
+        // initial animation frame bounds, then restore every serialized renderer reference before
+        // the prefab is saved. SkeletonData, Atlas, materials and animation settings stay shared.
+        var originalMesh = filter.sharedMesh;
+        var originalMaterials = meshRenderer.sharedMaterials;
+        try
+        {
+            spineRenderer.Initialize(true);
+            skeletonAnimation.Update(0f);
+            spineRenderer.LateUpdate();
+            var generatedMesh = filter.sharedMesh;
+            if (!spineRenderer.valid || generatedMesh == null || generatedMesh.vertexCount == 0)
+            {
+                error = "Spine 初始化后没有生成可见 Mesh，请检查 SkeletonData、Atlas 和初始动画。";
+                return false;
+            }
+            localBounds = generatedMesh.bounds;
+            analysisTexture = RenderSpineAnalysisTexture(skeletonAnimation, out spineViewCenter,
+                out spineViewWidth, out spineViewHeight);
+            destroyAnalysisTexture = analysisTexture != null;
+            if (analysisTexture == null)
+            {
+                error = "无法渲染 Spine 初始动画帧。";
+                return false;
+            }
+            return true;
+        }
+        catch (Exception exception)
+        {
+            error = "Spine Bounds 读取失败：" + exception.Message;
+            return false;
+        }
+        finally
+        {
+            filter.sharedMesh = originalMesh;
+            meshRenderer.sharedMaterials = originalMaterials;
         }
     }
 
@@ -441,6 +1013,16 @@ public sealed class BuildingCardTool : EditorWindow
 
     private void DrawInputToolbar()
     {
+        prefabToEdit = (GameObject)EditorGUILayout.ObjectField("编辑已有 Prefab", prefabToEdit, typeof(GameObject), false);
+        using (new EditorGUI.DisabledScope(!IsPersistentPrefab(prefabToEdit)))
+            if (GUILayout.Button("载入 Prefab 到预览")) EditorApplication.delayCall += LoadPrefabForEditing;
+        if (loadedEditingPrefab != null)
+        {
+            EditorGUILayout.LabelField("正在编辑：" + loadedEditingPrefab.name, EditorStyles.miniBoldLabel);
+            saveEditedPrefabAsNew = EditorGUILayout.Toggle("另存为新 Prefab", saveEditedPrefabAsNew);
+            EditorGUILayout.HelpBox("调整右侧地脚点、Grid 和上方参数后点击保存。另存会复制 Mesh，保留当前材质与图集。", MessageType.Info);
+            if (GUILayout.Button("退出 Prefab 编辑")) loadedEditingPrefab = null;
+        }
         EditorGUILayout.BeginHorizontal();
         if (GUILayout.Button(Content("Add Selected", "把 Project 窗口当前选中的 PNG 加入列表，并立即按当前参数自动分析。"), GUILayout.Height(25)))
         {
@@ -466,12 +1048,11 @@ public sealed class BuildingCardTool : EditorWindow
     {
         if (entries.Count == 0)
         {
-            EditorGUILayout.HelpBox("拖入 PNG 后会立刻自动分析。请在列表中填写 Grid W / D（单位：格）；预览中的四个点随时可直接拖动。", MessageType.None);
+            EditorGUILayout.HelpBox("拖入 PNG 后会立刻自动分析。文件名末尾的 宽×深 后缀（如 3X3、3x3、3×3、3*3）会自动填写 Grid，否则默认为 1 × 1；预览控制点可直接拖动。", MessageType.None);
             return;
         }
 
         EditorGUILayout.Space(3);
-        scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.MinHeight(145), GUILayout.MaxHeight(260));
         for (var i = 0; i < entries.Count; i++)
         {
             var entry = entries[i];
@@ -501,7 +1082,9 @@ public sealed class BuildingCardTool : EditorWindow
             else if (replacementTexture != null && replacementTexture != entry.texture &&
                      !entries.Exists(other => other != entry && other.texture == replacementTexture))
             {
+                replacementTexture = EnsureTexturePreservesAspect(replacementTexture);
                 entry.texture = replacementTexture;
+                ApplyGridSizeFromTextureName(entry, replacementTexture.name);
                 entry.useManualGroundPoints = false;
                 entry.generationError = null;
                 entry.result = Analyze(entry);
@@ -556,14 +1139,27 @@ public sealed class BuildingCardTool : EditorWindow
                 SaveWorkspaceState();
             }
         }
-        EditorGUILayout.EndScrollView();
     }
 
     private void DrawSpineInput()
     {
         EditorGUILayout.Space(3f);
         EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+        EditorGUILayout.BeginHorizontal();
         EditorGUILayout.LabelField("Spine Building Prefab", EditorStyles.boldLabel);
+        using (new EditorGUI.DisabledScope(spineDataAsset == null))
+        {
+            if (GUILayout.Button(Content("Clear", "清空当前 Spine 输入，不删除源文件或已生成资源。"), GUILayout.Width(60f)))
+            {
+                spineDataAsset = null;
+                spineAnimation = string.Empty;
+                spineUseManualGroundPoints = false;
+                ClearSpinePreview();
+                SaveWorkspaceState();
+                Repaint();
+            }
+        }
+        EditorGUILayout.EndHorizontal();
 
         EditorGUI.BeginChangeCheck();
         var replacement = (SkeletonDataAsset)EditorGUILayout.ObjectField(
@@ -611,13 +1207,6 @@ public sealed class BuildingCardTool : EditorWindow
                 ClearSpinePreview();
         }
 
-        using (new EditorGUI.DisabledScope(spineDataAsset == null))
-        {
-            GUI.backgroundColor = new Color(0.65f, 0.85f, 1f);
-            if (GUILayout.Button(Content("Generate Spine Prefab", "生成带 SkeletonAnimation 和 BoxCollider 的建筑预制体。"), GUILayout.Height(28f)))
-                EditorApplication.delayCall += GenerateSpinePrefab;
-            GUI.backgroundColor = Color.white;
-        }
         EditorGUILayout.EndVertical();
     }
 
@@ -812,9 +1401,9 @@ public sealed class BuildingCardTool : EditorWindow
 
         var result = spinePreviewEntry?.result;
         var previewMaxHeight = Mathf.Max(120f, position.height - 145f);
-        var rect = GUILayoutUtility.GetAspectRect(
+        var rect = GetAspectFittedPreviewRect(
             Mathf.Max(0.01f, spinePreviewViewWidth / spinePreviewViewHeight),
-            GUILayout.ExpandWidth(true), GUILayout.MaxHeight(previewMaxHeight));
+            previewMaxHeight, previewPanelWidth);
         if (Event.current.type == EventType.Repaint && spinePreviewUtility != null)
         {
             spinePreviewUtility.BeginPreview(rect, GUIStyle.none);
@@ -855,14 +1444,27 @@ public sealed class BuildingCardTool : EditorWindow
 
     private void DrawActions()
     {
-        var canGenerate = entries.Exists(e => e.enabled);
+        var canGenerateImages = entries.Exists(e => e.enabled);
+        var canGenerateSpine = spineDataAsset != null;
+        var canGenerate = sourceMode == SourceMode.Image ? canGenerateImages : canGenerateSpine;
         using (new EditorGUI.DisabledScope(!canGenerate))
         {
             GUI.backgroundColor = new Color(0.65f, 1f, 0.65f);
-            if (GUILayout.Button(Content("Generate", "为勾选项生成预制体、材质和 Mesh；如启用 Place In Scene，也会实例化到当前场景。"), GUILayout.Height(34)))
-                EditorApplication.delayCall += GenerateAll;
+            var tooltip = sourceMode == SourceMode.Image
+                ? "生成所有已勾选的图片建筑；如启用 Place In Scene，也会实例化到当前场景。"
+                : "生成当前 Spine 建筑预制体。";
+            if (GUILayout.Button(Content(loadedEditingPrefab != null && sourceMode == SourceMode.Image ? "保存 Prefab 修改" : "Generate", tooltip), GUILayout.Height(34)))
+                EditorApplication.delayCall += GenerateCurrentSource;
             GUI.backgroundColor = Color.white;
         }
+    }
+
+    private void GenerateCurrentSource()
+    {
+        if (sourceMode == SourceMode.Image)
+            GenerateAll();
+        else
+            GenerateSpinePrefab();
     }
 
     private void DrawPreview(float previewPanelWidth)
@@ -910,10 +1512,9 @@ public sealed class BuildingCardTool : EditorWindow
         if (!string.IsNullOrEmpty(detailsText))
             reservedTextHeight += previewTextStyle.CalcHeight(new GUIContent(detailsText), textWidth) + 2f;
         var previewMaxHeight = Mathf.Max(120f, position.height - 110f - reservedTextHeight);
-        var rect = GUILayoutUtility.GetAspectRect(
-            (float)entry.texture.width / entry.texture.height,
-            GUILayout.ExpandWidth(true),
-            GUILayout.MaxHeight(previewMaxHeight));
+        var rect = GetAspectFittedPreviewRect(
+            (float)entry.texture.width / Mathf.Max(1, entry.texture.height),
+            previewMaxHeight, previewPanelWidth);
         if (useUnityPreview)
             DrawUnityStyleTexturePreview(rect, entry.texture);
         else
@@ -988,10 +1589,9 @@ public sealed class BuildingCardTool : EditorWindow
         EditorGUILayout.EndHorizontal();
 
         var previewMaxHeight = Mathf.Max(120f, position.height - 105f);
-        var rect = GUILayoutUtility.GetAspectRect(
+        var rect = GetAspectFittedPreviewRect(
             (float)texture.width / Mathf.Max(1, texture.height),
-            GUILayout.ExpandWidth(true),
-            GUILayout.MaxHeight(previewMaxHeight));
+            previewMaxHeight, previewPanelWidth);
         if (useUnityPreview)
             DrawUnityStyleTexturePreview(rect, texture);
         else
@@ -1035,6 +1635,31 @@ public sealed class BuildingCardTool : EditorWindow
             EditorPrefs.SetBool(UnityPreviewPrefsKey, useUnityPreview);
         }
         EditorGUILayout.EndHorizontal();
+    }
+
+    private static Rect GetAspectFittedPreviewRect(float aspect, float maxHeight, float panelWidth)
+    {
+        aspect = Mathf.Max(0.0001f, aspect);
+        var availableWidth = Mathf.Max(1f, panelWidth - 12f);
+        var requestedHeight = Mathf.Max(1f, Mathf.Min(maxHeight, availableWidth / aspect));
+        var layoutRect = GUILayoutUtility.GetRect(
+            1f, requestedHeight,
+            GUILayout.ExpandWidth(true),
+            GUILayout.Height(requestedHeight));
+
+        var fitted = layoutRect;
+        var layoutAspect = layoutRect.width / Mathf.Max(1f, layoutRect.height);
+        if (layoutAspect > aspect)
+        {
+            fitted.width = layoutRect.height * aspect;
+            fitted.x = layoutRect.x + (layoutRect.width - fitted.width) * 0.5f;
+        }
+        else
+        {
+            fitted.height = layoutRect.width / aspect;
+            fitted.y = layoutRect.y + (layoutRect.height - fitted.height) * 0.5f;
+        }
+        return fitted;
     }
 
     private static void DrawUnityStyleTexturePreview(Rect rect, Texture2D texture)
@@ -1367,6 +1992,7 @@ public sealed class BuildingCardTool : EditorWindow
         if (obj == null) return;
         if (obj is SkeletonDataAsset skeletonData)
         {
+            sourceMode = SourceMode.Spine;
             spineDataAsset = skeletonData;
             spineUseManualGroundPoints = false;
             var names = GetSpineAnimationNames(spineDataAsset);
@@ -1414,7 +2040,10 @@ public sealed class BuildingCardTool : EditorWindow
             ShowNotification(Content("Atlas output is read-only", "生成的图集不能用于再次生成建筑预制体。"));
             return;
         }
+        texture = EnsureTexturePreservesAspect(texture);
+        sourceMode = SourceMode.Image;
         var entry = new Entry { texture = texture };
+        ApplyGridSizeFromTextureName(entry, texture.name);
         ClearSpinePreview();
         entries.Add(entry);
         entry.result = Analyze(entry);
@@ -1424,14 +2053,91 @@ public sealed class BuildingCardTool : EditorWindow
         Repaint();
     }
 
+    private static void ApplyGridSizeFromTextureName(Entry entry, string textureName)
+    {
+        entry.gridWidth = 1;
+        entry.gridDepth = 1;
+        if (!TryGetGridSizeFromTextureName(textureName, out var width, out var depth)) return;
+
+        entry.gridWidth = width;
+        entry.gridDepth = depth;
+    }
+
+    private static bool TryGetGridSizeFromTextureName(string textureName, out int width, out int depth)
+    {
+        width = 0;
+        depth = 0;
+        if (string.IsNullOrWhiteSpace(textureName)) return false;
+
+        // Do not depend on a specific asset prefix. Only the final filename suffix defines Grid.
+        // The upper bound prevents a filename ending in a texture resolution such as 2048x2048
+        // from becoming Grid data.
+        var matches = Regex.Matches(
+            textureName,
+            @"(?<!\d)(\d{1,3})\s*[xX×＊*]\s*(\d{1,3})\s*$",
+            RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+        for (var i = matches.Count - 1; i >= 0; i--)
+        {
+            var match = matches[i];
+            if (!int.TryParse(match.Groups[1].Value, out var parsedWidth) ||
+                !int.TryParse(match.Groups[2].Value, out var parsedDepth) ||
+                parsedWidth < 1 || parsedDepth < 1 ||
+                parsedWidth > MaxRecognizedGridDimension || parsedDepth > MaxRecognizedGridDimension)
+                continue;
+
+            width = parsedWidth;
+            depth = parsedDepth;
+            return true;
+        }
+        return false;
+    }
+
+    private static Texture2D EnsureTexturePreservesAspect(Texture2D texture)
+    {
+        return EnsureTexturePreservesAspect(texture, out _);
+    }
+
+    private static Texture2D EnsureTexturePreservesAspect(Texture2D texture, out bool reimported)
+    {
+        reimported = false;
+        if (texture == null) return null;
+        var assetPath = AssetDatabase.GetAssetPath(texture);
+        if (string.IsNullOrEmpty(assetPath)) return texture;
+        var importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
+        if (importer == null || importer.npotScale == TextureImporterNPOTScale.None) return texture;
+
+        importer.npotScale = TextureImporterNPOTScale.None;
+        importer.SaveAndReimport();
+        reimported = true;
+        return AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath) ?? texture;
+    }
+
+    private static void RescaleManualGroundPoints(Entry entry, int oldWidth, int oldHeight)
+    {
+        if (entry == null || !entry.useManualGroundPoints || entry.texture == null ||
+            oldWidth < 1 || oldHeight < 1) return;
+        var scale = new Vector2(
+            Mathf.Max(1, entry.texture.width - 1) / (float)Mathf.Max(1, oldWidth - 1),
+            Mathf.Max(1, entry.texture.height - 1) / (float)Mathf.Max(1, oldHeight - 1));
+        entry.manualNearPoint = Vector2.Scale(entry.manualNearPoint, scale);
+        entry.manualLeftPoint = Vector2.Scale(entry.manualLeftPoint, scale);
+        entry.manualRightPoint = Vector2.Scale(entry.manualRightPoint, scale);
+        entry.manualFarPoint = Vector2.Scale(entry.manualFarPoint, scale);
+    }
+
     private void AnalyzeAll()
     {
         CancelScheduledAnalysis();
-        if (!ValidateInputs(false)) return;
+        if (!ValidateAnalysisInputs(false)) return;
         try
         {
             for (var i = 0; i < entries.Count; i++)
             {
+                var oldWidth = entries[i].texture == null ? 0 : entries[i].texture.width;
+                var oldHeight = entries[i].texture == null ? 0 : entries[i].texture.height;
+                entries[i].texture = EnsureTexturePreservesAspect(entries[i].texture, out var reimported);
+                if (reimported)
+                    RescaleManualGroundPoints(entries[i], oldWidth, oldHeight);
                 EditorUtility.DisplayProgressBar("Building Card", "分析 " + entries[i].texture.name, (float)i / entries.Count);
                 entries[i].generationError = null;
                 entries[i].result = Analyze(entries[i]);
@@ -1508,6 +2214,21 @@ public sealed class BuildingCardTool : EditorWindow
             error = "Grid W / D 必须大于 0。";
             return false;
         }
+        if (entry.useExactGroundSize)
+        {
+            if (!IsFinite(entry.exactGroundWidth) || !IsFinite(entry.exactGroundDepth) ||
+                entry.exactGroundWidth <= 0f || entry.exactGroundDepth <= 0f)
+            {
+                error = "Prefab BoxCollider 的 X/Z 尺寸无效。";
+                return false;
+            }
+            geometry.groundWidth = entry.exactGroundWidth;
+            geometry.groundDepth = entry.exactGroundDepth;
+            geometry.scaleFactor = 1f;
+            geometry.colliderWidth = entry.exactGroundWidth;
+            geometry.colliderDepth = entry.exactGroundDepth;
+            return true;
+        }
         if (!IsFinite(settings.cellWorldSize) || settings.cellWorldSize <= 0f)
         {
             error = "Cell Size 必须是大于 0 的有效数值。";
@@ -1557,9 +2278,9 @@ public sealed class BuildingCardTool : EditorWindow
     private AnalysisResult Analyze(Entry entry)
     {
         var result = new AnalysisResult();
-        if (!ValidateInputs(false))
+        if (!ValidateAnalysisInputs(false))
         {
-            result.message = "请先指定正交相机与有效单格长度。";
+            result.message = "请先指定正交相机，并检查 Cell Size 与 Advanced 尺寸参数。";
             return result;
         }
         if (entry.texture == null)
@@ -1635,6 +2356,14 @@ public sealed class BuildingCardTool : EditorWindow
 
             var sourceScaleX = entry.texture.width / (float)width;
             var sourceScaleY = entry.texture.height / (float)height;
+            var projectedX = GroundAxisOnImage(Vector3.right);
+            var projectedZ = GroundAxisOnImage(Vector3.forward);
+            if (projectedX.sqrMagnitude < 0.001f || projectedZ.sqrMagnitude < 0.001f ||
+                Mathf.Abs(Cross(projectedX, projectedZ)) < 0.0001f)
+            {
+                result.message = "相机角度无法投影地面坐标轴。";
+                return result;
+            }
             Vector2 nearCorner;
             Vector2 leftCorner;
             Vector2 rightCorner;
@@ -1668,8 +2397,26 @@ public sealed class BuildingCardTool : EditorWindow
                     return result;
                 }
 
-                var leftLine = FitLine(left);
-                var rightLine = FitLine(right);
+                var leftEstimate = FitLine(left);
+                var rightEstimate = FitLine(right);
+                var leftDirection = new Vector2(1f, leftEstimate.slope);
+                var rightDirection = new Vector2(1f, rightEstimate.slope);
+                var leftIsX = Alignment(leftDirection, projectedX) + Alignment(rightDirection, projectedZ) >=
+                              Alignment(leftDirection, projectedZ) + Alignment(rightDirection, projectedX);
+                var leftAxis = leftIsX ? projectedX : projectedZ;
+                var rightAxis = leftIsX ? projectedZ : projectedX;
+
+                if (!TryFitGroundEdge(left, leftAxis, out var leftLine, out var leftEdgePoints) ||
+                    !TryFitGroundEdge(right, rightAxis, out var rightLine, out var rightEdgePoints))
+                {
+                    // Unusual silhouettes may not expose a long straight ground edge. Preserve the
+                    // previous broad fit as a fallback instead of rejecting an otherwise usable card.
+                    leftLine = leftEstimate;
+                    rightLine = rightEstimate;
+                    leftEdgePoints = left;
+                    rightEdgePoints = right;
+                }
+
                 var slopeDifference = Mathf.Abs(leftLine.slope - rightLine.slope);
                 if (slopeDifference < 0.03f)
                 {
@@ -1682,25 +2429,19 @@ public sealed class BuildingCardTool : EditorWindow
                     0f);
                 nearCorner.y = leftLine.slope * nearCorner.x + leftLine.intercept;
 
-                var leftX = left[0].x;
-                var rightX = right[right.Count - 1].x;
+                var leftX = leftEdgePoints[0].x;
+                var rightX = rightEdgePoints[rightEdgePoints.Count - 1].x;
                 leftCorner = new Vector2(leftX, leftLine.slope * leftX + leftLine.intercept);
                 rightCorner = new Vector2(rightX, rightLine.slope * rightX + rightLine.intercept);
                 farCorner = leftCorner + rightCorner - nearCorner;
-                fitResidual = leftLine.residual + rightLine.residual;
-            }
-            var projectedX = GroundAxisOnImage(Vector3.right);
-            var projectedZ = GroundAxisOnImage(Vector3.forward);
-            if (projectedX.sqrMagnitude < 0.001f || projectedZ.sqrMagnitude < 0.001f)
-            {
-                result.message = "相机角度无法投影地面坐标轴。";
-                return result;
+                var edgeCoverage = (leftLine.coverage + rightLine.coverage) * 0.5f;
+                fitResidual = leftLine.residual + rightLine.residual + (1f - edgeCoverage) * 6f;
             }
 
             // Both automatic detection and hand annotation are fitted to the same projected
             // ground rectangle.  This removes alpha-edge noise and prevents an invalid free
             // quadrilateral from changing the world-space math.
-            if (!TryConstrainFootprint(entry.gridWidth, entry.gridDepth,
+            if (!TryConstrainFootprint(outputGeometry.groundWidth, outputGeometry.groundDepth,
                     ref nearCorner, ref leftCorner, ref rightCorner, ref farCorner, out var pixelsPerWorld))
             {
                 result.message = "底面标注无法拟合为当前相机下的正交网格。";
@@ -1785,7 +2526,22 @@ public sealed class BuildingCardTool : EditorWindow
 
     private Vector2 GroundAxisOnImage(Vector3 axis)
     {
-        return new Vector2(Vector3.Dot(referenceCamera.transform.right, axis), Vector3.Dot(referenceCamera.transform.up, axis));
+        return new Vector2(Vector3.Dot(GetAnalysisRight(), axis), Vector3.Dot(GetAnalysisUp(), axis));
+    }
+
+    private Quaternion GetAnalysisRotation()
+    {
+        return analysisRotationOverrideActive ? analysisRotationOverride : referenceCamera.transform.rotation;
+    }
+
+    private Vector3 GetAnalysisRight()
+    {
+        return GetAnalysisRotation() * Vector3.right;
+    }
+
+    private Vector3 GetAnalysisUp()
+    {
+        return GetAnalysisRotation() * Vector3.up;
     }
 
     /// <summary>
@@ -1794,9 +2550,17 @@ public sealed class BuildingCardTool : EditorWindow
     private bool TryGetConstrainedFootprintBasis(int gridWidth, int gridDepth,
         Vector2 near, Vector2 left, Vector2 right, out Vector2 leftSide, out Vector2 rightSide)
     {
+        return TryGetConstrainedFootprintBasis(
+            gridWidth * settings.cellWorldSize, gridDepth * settings.cellWorldSize,
+            near, left, right, out leftSide, out rightSide);
+    }
+
+    private bool TryGetConstrainedFootprintBasis(float groundWidth, float groundDepth,
+        Vector2 near, Vector2 left, Vector2 right, out Vector2 leftSide, out Vector2 rightSide)
+    {
         leftSide = Vector2.zero;
         rightSide = Vector2.zero;
-        if (referenceCamera == null || gridWidth < 1 || gridDepth < 1) return false;
+        if (referenceCamera == null || groundWidth <= 0f || groundDepth <= 0f) return false;
 
         var projectedX = GroundAxisOnImage(Vector3.right);
         var projectedZ = GroundAxisOnImage(Vector3.forward);
@@ -1810,8 +2574,8 @@ public sealed class BuildingCardTool : EditorWindow
                       Alignment(leftCandidate, projectedZ) + Alignment(rightCandidate, projectedX);
         var leftAxis = leftIsX ? projectedX : projectedZ;
         var rightAxis = leftIsX ? projectedZ : projectedX;
-        var leftLength = (leftIsX ? gridWidth : gridDepth) * settings.cellWorldSize;
-        var rightLength = (leftIsX ? gridDepth : gridWidth) * settings.cellWorldSize;
+        var leftLength = leftIsX ? groundWidth : groundDepth;
+        var rightLength = leftIsX ? groundDepth : groundWidth;
         var leftSign = Vector2.Dot(leftCandidate, leftAxis) < 0f ? -1f : 1f;
         var rightSign = Vector2.Dot(rightCandidate, rightAxis) < 0f ? -1f : 1f;
         leftSide = leftAxis * (leftSign * leftLength);
@@ -1822,11 +2586,11 @@ public sealed class BuildingCardTool : EditorWindow
     /// <summary>
     /// 四点标注点最小二乘拟合到已知网格矩形正射投影，保持两对等边和相机夹角。
     /// </summary>
-    private bool TryConstrainFootprint(int gridWidth, int gridDepth,
+    private bool TryConstrainFootprint(float groundWidth, float groundDepth,
         ref Vector2 near, ref Vector2 left, ref Vector2 right, ref Vector2 far, out float pixelsPerWorld)
     {
         pixelsPerWorld = 0f;
-        if (!TryGetConstrainedFootprintBasis(gridWidth, gridDepth, near, left, right,
+        if (!TryGetConstrainedFootprintBasis(groundWidth, groundDepth, near, left, right,
                 out var leftSide, out var rightSide))
             return false;
 
@@ -1913,7 +2677,7 @@ public sealed class BuildingCardTool : EditorWindow
     private Quaternion GetVisualRotation()
     {
         // The card keeps exactly the authored camera rotation.  The generated material is double-sided.
-        return referenceCamera.transform.rotation;
+        return GetAnalysisRotation();
     }
 
     /// <summary>
@@ -1923,7 +2687,7 @@ public sealed class BuildingCardTool : EditorWindow
         Vector2 footprintCenterPixel, float pixelsPerWorld, float boxWidth, float boxDepth,
         int minBodyY, int maxBodyY, out float bestScore)
     {
-        var verticalPixelsPerWorld = pixelsPerWorld * Mathf.Abs(Vector3.Dot(referenceCamera.transform.up, Vector3.up));
+        var verticalPixelsPerWorld = pixelsPerWorld * Mathf.Abs(Vector3.Dot(GetAnalysisUp(), Vector3.up));
         if (verticalPixelsPerWorld < 0.0001f)
         {
             bestScore = 0f;
@@ -2001,8 +2765,8 @@ public sealed class BuildingCardTool : EditorWindow
     private Vector2 ProjectWorldPoint(Vector3 point, Vector2 footprintCenterPixel, float pixelsPerWorld)
     {
         return footprintCenterPixel + pixelsPerWorld * new Vector2(
-            Vector3.Dot(referenceCamera.transform.right, point),
-            Vector3.Dot(referenceCamera.transform.up, point));
+            Vector3.Dot(GetAnalysisRight(), point),
+            Vector3.Dot(GetAnalysisUp(), point));
     }
 
     private static List<Vector2> ConvexHull(List<Vector2> points)
@@ -2063,6 +2827,57 @@ public sealed class BuildingCardTool : EditorWindow
         return true;
     }
 
+    private static bool TryFitGroundEdge(List<Vector2> points, Vector2 projectedAxis,
+        out Line line, out List<Vector2> inliers)
+    {
+        line = default;
+        inliers = new List<Vector2>();
+        if (points == null || points.Count < 6 || Mathf.Abs(projectedAxis.x) < 0.0001f)
+            return false;
+
+        var slope = projectedAxis.y / projectedAxis.x;
+        var offsets = new List<float>(points.Count);
+        for (var i = 0; i < points.Count; i++)
+            offsets.Add(points[i].y - slope * points[i].x);
+        offsets.Sort();
+
+        var bestStart = 0;
+        var bestCount = 0;
+        var end = 0;
+        var windowSize = GroundEdgeFitTolerance * 2f;
+        for (var start = 0; start < offsets.Count; start++)
+        {
+            if (end < start) end = start;
+            while (end < offsets.Count && offsets[end] - offsets[start] <= windowSize)
+                end++;
+            var count = end - start;
+            if (count <= bestCount) continue;
+            bestStart = start;
+            bestCount = count;
+        }
+        if (bestCount < Mathf.Max(8, Mathf.CeilToInt(points.Count * 0.12f))) return false;
+
+        var intercept = offsets[bestStart + bestCount / 2];
+        var residual = 0f;
+        for (var i = 0; i < points.Count; i++)
+        {
+            var error = Mathf.Abs(points[i].y - (slope * points[i].x + intercept));
+            if (error > GroundEdgeFitTolerance) continue;
+            inliers.Add(points[i]);
+            residual += error;
+        }
+        if (inliers.Count < Mathf.Max(8, Mathf.CeilToInt(points.Count * 0.12f))) return false;
+
+        line = new Line
+        {
+            slope = slope,
+            intercept = intercept,
+            residual = residual / inliers.Count,
+            coverage = inliers.Count / (float)points.Count
+        };
+        return true;
+    }
+
     private static Line FitLine(List<Vector2> points)
     {
         var count = points.Count;
@@ -2083,7 +2898,7 @@ public sealed class BuildingCardTool : EditorWindow
         var residual = 0f;
         for (var i = 0; i < count; i++)
             residual += Mathf.Abs(points[i].y - (slope * points[i].x + intercept));
-        return new Line { slope = slope, intercept = intercept, residual = residual / count };
+        return new Line { slope = slope, intercept = intercept, residual = residual / count, coverage = 1f };
     }
 
     private static Texture2D CreateReadableCopy(Texture source)
@@ -2170,12 +2985,16 @@ public sealed class BuildingCardTool : EditorWindow
             skeletonAnimation.Initialize(true);
             if (!string.IsNullOrEmpty(spineAnimation) && skeletonAnimation.valid)
                 skeletonAnimation.AnimationState.SetAnimation(0, spineAnimation, spineLoop);
+            skeletonAnimation.Update(0f);
             skeletonAnimation.LateUpdate();
 
             var renderer = visual.GetComponent<Renderer>();
             if (renderer == null)
                 throw new InvalidOperationException("生成的 SkeletonAnimation 缺少 Renderer。 ");
             renderer.shadowCastingMode = ShadowCastingMode.Off;
+
+            var collisionSampleTime = SelectSpineMinimumHeightFrame(
+                skeletonAnimation, renderer, spineAnimation, out var collisionSampleCount);
 
             var renderedTexture = RenderSpineAnalysisTexture(skeletonAnimation, out var viewCenter,
                 out var viewWidth, out var viewHeight);
@@ -2215,7 +3034,6 @@ public sealed class BuildingCardTool : EditorWindow
                 collider.center = new Vector3(0f, result.clickCenterY, 0f);
                 collider.size = new Vector3(outputGeometry.colliderWidth, result.clickHeight,
                     outputGeometry.colliderDepth);
-
                 CreateBuildingCardQueueMaterials(renderer, cleanName);
 
                 // A regular card has a fixed quad, so Unity's transparent distance sorting uses a
@@ -2231,6 +3049,8 @@ public sealed class BuildingCardTool : EditorWindow
                 if (prefabAsset == null) throw new InvalidOperationException("Prefab 保存失败：" + prefabPath);
                 Debug.Log("[BuildingCardTool] " + spineDataAsset.name + " → " + prefabPath +
                           " | Animation " + (string.IsNullOrEmpty(spineAnimation) ? "<none>" : spineAnimation) +
+                          " | 最小高度帧 " + collisionSampleTime.ToString("F3") + "s / " +
+                          collisionSampleCount + " samples" +
                           " | 自动比例 " + uniformScale.ToString("F4") +
                           " | 点击盒 " + collider.size.ToString("F2"));
             }
@@ -2244,6 +3064,49 @@ public sealed class BuildingCardTool : EditorWindow
             DestroyImmediate(root);
         }
         return prefabAsset;
+    }
+
+    private static float SelectSpineMinimumHeightFrame(SkeletonAnimation skeletonAnimation,
+        Renderer renderer, string animationName, out int sampleCount)
+    {
+        sampleCount = 1;
+        if (skeletonAnimation == null || renderer == null || string.IsNullOrEmpty(animationName) ||
+            !skeletonAnimation.valid || skeletonAnimation.Skeleton?.Data == null)
+            return 0f;
+
+        var animation = skeletonAnimation.Skeleton.Data.FindAnimation(animationName);
+        if (animation == null || animation.Duration <= 0.0001f) return 0f;
+
+        const float samplesPerSecond = 30f;
+        const int maximumSamples = 600;
+        sampleCount = Mathf.Clamp(Mathf.CeilToInt(animation.Duration * samplesPerSecond) + 1,
+            2, maximumSamples);
+        var bestTime = 0f;
+        var bestHeight = float.MaxValue;
+
+        for (var sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++)
+        {
+            var sampleTime = animation.Duration * sampleIndex / (sampleCount - 1f);
+            ApplySpineAnimationTime(skeletonAnimation, animationName, sampleTime);
+            var height = renderer.bounds.size.y;
+            if (!IsFinite(height) || height <= 0.0001f || height >= bestHeight) continue;
+            bestHeight = height;
+            bestTime = sampleTime;
+        }
+
+        ApplySpineAnimationTime(skeletonAnimation, animationName, bestTime);
+        return bestTime;
+    }
+
+    private static void ApplySpineAnimationTime(SkeletonAnimation skeletonAnimation,
+        string animationName, float time)
+    {
+        skeletonAnimation.AnimationState.ClearTracks();
+        skeletonAnimation.Skeleton.SetToSetupPose();
+        var track = skeletonAnimation.AnimationState.SetAnimation(0, animationName, false);
+        track.TrackTime = time;
+        skeletonAnimation.Update(0f);
+        skeletonAnimation.LateUpdate();
     }
 
     private static Texture2D RenderSpineAnalysisTexture(SkeletonAnimation skeletonAnimation,
@@ -2430,6 +3293,11 @@ public sealed class BuildingCardTool : EditorWindow
     private bool TryPrepareGeneration(out List<Entry> generationEntries)
     {
         generationEntries = new List<Entry>();
+        if (loadedEditingPrefab != null && entries.Count != 1)
+        {
+            EditorUtility.DisplayDialog("Building Card", "编辑已有 Prefab 时请只保留载入的一个条目。", "确定");
+            return false;
+        }
         var errors = new List<string>();
         var outputOwners = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -2561,6 +3429,7 @@ public sealed class BuildingCardTool : EditorWindow
 
     private GameObject CreatePrefab(Entry entry, AnalysisResult result)
     {
+        if (loadedEditingPrefab != null) return SaveEditedPrefab(entry, result);
         var cleanName = SanitizeAssetName(entry.texture.name);
         var prefabPath = GetPrefabPath(entry.texture);
         var materialPath = settings.outputFolder + "/Materials/M_" + cleanName + ".mat";
@@ -2609,7 +3478,6 @@ public sealed class BuildingCardTool : EditorWindow
             var renderer = visual.AddComponent<MeshRenderer>();
             renderer.sharedMaterial = material;
             renderer.shadowCastingMode = ShadowCastingMode.Off;
-
             // Transparent MeshRenderers are sorted from Renderer.bounds.center. Keep the soft
             // alpha edge, but make that comparison point the building's ground Root instead of
             // the visual image centre (which moves with transparent padding and building height).
@@ -2620,6 +3488,7 @@ public sealed class BuildingCardTool : EditorWindow
                 throw new InvalidOperationException("Prefab 保存失败：" + prefabPath);
             BuildingCardMetadataStore.RecordGeneratedPrefab(
                 prefabPath, entry.texture, material, entry.gridWidth, entry.gridDepth);
+            SaveEditingParameters(prefabPath, entry);
             Debug.Log("[BuildingCardTool] " + entry.texture.name +
                 " → " + prefabPath +
                 " | 原点像素 " + result.rootPixel.ToString("F1") +
@@ -2630,6 +3499,171 @@ public sealed class BuildingCardTool : EditorWindow
             DestroyImmediate(root);
         }
         return prefabAsset;
+    }
+
+    private void LoadPrefabForEditing()
+    {
+        if (!IsPersistentPrefab(prefabToEdit)) return;
+        var path = AssetDatabase.GetAssetPath(prefabToEdit);
+        var visual = FindRefactorVisual(prefabToEdit);
+        if (visual == null || visual.GetComponent<SkeletonRenderer>() != null)
+        {
+            EditorUtility.DisplayDialog("Building Card", "此入口支持普通图片面片 Prefab。", "确定");
+            return;
+        }
+        Texture2D texture = null;
+        BuildingCardMetadataStore.TryLoad(path, out var metadata);
+        if (metadata != null)
+            texture = AssetDatabase.LoadAssetAtPath<Texture2D>(AssetDatabase.GUIDToAssetPath(metadata.sourceTextureGuid ?? string.Empty));
+        if (texture == null)
+        {
+            var material = visual.GetComponent<MeshRenderer>().sharedMaterial;
+            texture = material == null ? null : material.mainTexture as Texture2D;
+            if (texture != null && BuildingCardAtlasBuilder.IsGeneratedAtlasTexture(texture)) texture = null;
+        }
+        if (texture == null)
+        {
+            EditorUtility.DisplayDialog("Building Card", "找不到原始建筑贴图，请先恢复 Prefab 的源贴图引用。", "确定");
+            return;
+        }
+        var entry = new Entry { texture = texture };
+        ApplyGridSizeFromTextureName(entry, texture.name);
+        if (metadata != null && metadata.gridWidth > 0 && metadata.gridDepth > 0)
+        {
+            entry.gridWidth = metadata.gridWidth;
+            entry.gridDepth = metadata.gridDepth;
+        }
+        if (metadata != null && !string.IsNullOrEmpty(metadata.editSettingsJson))
+        {
+            JsonUtility.FromJsonOverwrite(metadata.editSettingsJson, settings);
+            var saved = string.IsNullOrEmpty(metadata.editPointsJson) ? null : JsonUtility.FromJson<SavedEntry>(metadata.editPointsJson);
+            if (saved != null)
+            {
+                entry.useManualGroundPoints = saved.useManualGroundPoints;
+                entry.manualNearPoint = saved.manualNearPoint;
+                entry.manualLeftPoint = saved.manualLeftPoint;
+                entry.manualRightPoint = saved.manualRightPoint;
+                entry.manualFarPoint = saved.manualFarPoint;
+            }
+            if (GlobalObjectId.TryParse(metadata.editCameraId, out var cameraId))
+            {
+                var camera = GlobalObjectId.GlobalObjectIdentifierToObjectSlow(cameraId) as Camera;
+                if (camera != null) referenceCamera = camera;
+            }
+        }
+        else
+        {
+            EditorUtility.DisplayDialog("Building Card", "旧 Prefab 未记录完整生成参数。已载入原贴图和可用 Grid；请确认 Reference Camera、Cell Size、Advanced 参数，并在右侧核对地脚点后保存。", "确定");
+        }
+        CancelScheduledAnalysis();
+        ClearSpinePreview();
+        entries.Clear();
+        entries.Add(entry);
+        previewIndex = 0;
+        sourceMode = SourceMode.Image;
+        loadedEditingPrefab = prefabToEdit;
+        loadedEditingTexture = texture;
+        entry.result = Analyze(entry);
+        SaveWorkspaceState();
+        Repaint();
+    }
+
+    private void SaveEditingParameters(string path, Entry entry)
+    {
+        if (!BuildingCardMetadataStore.TryLoad(path, out var metadata)) metadata = new BuildingCardAssetMetadata();
+        metadata.sourceTextureGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(entry.texture));
+        metadata.gridWidth = entry.gridWidth;
+        metadata.gridDepth = entry.gridDepth;
+        metadata.editSettingsJson = JsonUtility.ToJson(settings);
+        metadata.editPointsJson = JsonUtility.ToJson(new SavedEntry
+        {
+            useManualGroundPoints = entry.useManualGroundPoints,
+            manualNearPoint = entry.manualNearPoint, manualLeftPoint = entry.manualLeftPoint,
+            manualRightPoint = entry.manualRightPoint, manualFarPoint = entry.manualFarPoint
+        });
+        metadata.editCameraId = referenceCamera == null ? string.Empty : GlobalObjectId.GetGlobalObjectIdSlow(referenceCamera).ToString();
+        BuildingCardMetadataStore.Save(path, metadata);
+    }
+
+    private GameObject SaveEditedPrefab(Entry entry, AnalysisResult result)
+    {
+        if (entries.Count != 1) throw new InvalidOperationException("编辑已有 Prefab 时请只保留载入的一个条目。");
+        if (entry.texture != loadedEditingTexture)
+            throw new InvalidOperationException("此编辑入口保留现有材质和图集，请保留载入的原始贴图。");
+        if (!TryGetOutputGeometry(entry, out var geometry, out var error)) throw new InvalidOperationException(error);
+        var sourcePath = AssetDatabase.GetAssetPath(loadedEditingPrefab);
+        var destination = sourcePath;
+        if (saveEditedPrefabAsNew)
+        {
+            destination = EditorUtility.SaveFilePanelInProject("另存 Building Card", loadedEditingPrefab.name + "_Edited", "prefab", "选择新 Prefab 的位置");
+            if (string.IsNullOrEmpty(destination)) throw new OperationCanceledException("已取消另存。");
+            if (AssetDatabase.LoadMainAssetAtPath(destination) != null)
+                throw new InvalidOperationException("另存路径已存在，请选择新名称。");
+        }
+        var root = PrefabUtility.LoadPrefabContents(sourcePath);
+        Mesh meshCopy = null;
+        string meshPath = null;
+        var savedSuccessfully = false;
+        try
+        {
+            var visual = FindRefactorVisual(root);
+            var collider = FindRefactorCollider(root);
+            if (visual == null || collider == null || visual.transform.parent != root.transform || collider.transform != root.transform)
+                throw new InvalidOperationException("需要 Root 上的 BoxCollider 和直接子物体 Visual。");
+            if (root.transform.localScale != Vector3.one || Quaternion.Angle(root.transform.rotation, Quaternion.identity) > 0.01f)
+                throw new InvalidOperationException("Root 旋转需为零、缩放需为一。");
+            var filter = visual.GetComponent<MeshFilter>();
+            var sourceMesh = filter.sharedMesh;
+            if (sourceMesh == null || sourceMesh.vertexCount != 4 || sourceMesh.uv.Length != 4)
+                throw new InvalidOperationException("需要原工具生成的四顶点面片及 UV0。");
+            var vertices = sourceMesh.vertices;
+            for (var i = 0; i < vertices.Length; i++)
+                if (Mathf.Abs(Mathf.Abs(vertices[i].x) - 0.5f) > 0.001f || Mathf.Abs(Mathf.Abs(vertices[i].y) - 0.5f) > 0.001f || Mathf.Abs(vertices[i].z) > 0.001f)
+                    throw new InvalidOperationException("此 Mesh 不是工具生成的标准单位面片。");
+            var uv = sourceMesh.uv;
+            var min = uv[0]; var max = uv[0];
+            for (var i = 1; i < uv.Length; i++) { min = Vector2.Min(min, uv[i]); max = Vector2.Max(max, uv[i]); }
+            var cropMin = Vector2.Scale(min, new Vector2(entry.texture.width - 1, entry.texture.height - 1));
+            var cropMax = Vector2.Scale(max, new Vector2(entry.texture.width - 1, entry.texture.height - 1));
+            var pixelSize = cropMax - cropMin + Vector2.one;
+            var pixelCenter = (cropMin + cropMax) * 0.5f;
+            var rotation = GetVisualRotation();
+            visual.transform.localRotation = rotation;
+            visual.transform.localScale = new Vector3(pixelSize.x * result.worldPerSourcePixel * geometry.scaleFactor,
+                pixelSize.y * result.worldPerSourcePixel * geometry.scaleFactor, 1f);
+            var anchor = new Vector3((result.nearCorner.x - pixelCenter.x) * result.worldPerSourcePixel,
+                (result.nearCorner.y - pixelCenter.y) * result.worldPerSourcePixel, 0f);
+            visual.transform.localPosition = -result.colliderCenterFromRoot * geometry.scaleFactor -
+                rotation * (anchor * geometry.scaleFactor) + Vector3.up * (result.visualGroundLift * geometry.scaleFactor);
+            collider.center = new Vector3(0f, result.clickCenterY, 0f);
+            collider.size = new Vector3(geometry.colliderWidth, result.clickHeight, geometry.colliderDepth);
+            meshCopy = Instantiate(sourceMesh);
+            meshPath = AssetDatabase.GenerateUniqueAssetPath(Path.ChangeExtension(destination, null) + "_Mesh.asset");
+            AssetDatabase.CreateAsset(meshCopy, meshPath);
+            filter.sharedMesh = meshCopy;
+            var localRoot = visual.transform.InverseTransformPoint(root.transform.position);
+            var extents = Vector3.zero;
+            foreach (var vertex in vertices)
+            {
+                var distance = vertex - localRoot;
+                extents = Vector3.Max(extents, new Vector3(Mathf.Abs(distance.x), Mathf.Abs(distance.y), Mathf.Abs(distance.z)));
+            }
+            meshCopy.bounds = new Bounds(localRoot, Vector3.Max(extents, Vector3.one * 0.0001f) * 2f);
+            EditorUtility.SetDirty(meshCopy);
+            var prefab = PrefabUtility.SaveAsPrefabAsset(root, destination);
+            if (prefab == null) throw new InvalidOperationException("Prefab 保存失败。");
+            savedSuccessfully = true;
+            if (BuildingCardMetadataStore.TryLoad(sourcePath, out var metadata)) BuildingCardMetadataStore.Save(destination, metadata);
+            SaveEditingParameters(destination, entry);
+            loadedEditingPrefab = prefab;
+            prefabToEdit = prefab;
+            return prefab;
+        }
+        finally
+        {
+            PrefabUtility.UnloadPrefabContents(root);
+            if (!savedSuccessfully && meshPath != null) AssetDatabase.DeleteAsset(meshPath);
+        }
     }
 
     private string GetPrefabPath(Texture2D texture)
@@ -2716,22 +3750,69 @@ public sealed class BuildingCardTool : EditorWindow
         return material;
     }
 
-    private bool ValidateInputs(bool showDialog)
+    private bool ValidateAnalysisInputs(bool showDialog)
     {
         var valid = referenceCamera != null && referenceCamera.orthographic &&
                     IsFinite(settings.cellWorldSize) && settings.cellWorldSize > 0f &&
                     IsFinite(settings.bodyAlphaThreshold) && settings.bodyAlphaThreshold > 0f && settings.bodyAlphaThreshold <= 1f &&
                     IsFinite(settings.visualMargin) && settings.visualMargin >= 0f &&
                     IsFinite(settings.clickHorizontalPadding) && settings.clickHorizontalPadding >= 0f &&
-                    IsFinite(settings.clickHeightPadding) && settings.clickHeightPadding >= 0f &&
-                    !string.IsNullOrEmpty(settings.outputFolder) &&
-                    (settings.outputFolder == "Assets" || settings.outputFolder.StartsWith("Assets/", StringComparison.Ordinal));
+                    IsFinite(settings.clickHeightPadding) && settings.clickHeightPadding >= 0f;
         if (!valid && showDialog)
             EditorUtility.DisplayDialog(
                 "Building Card",
-                "请指定正交参考相机；尺寸参数必须有效；Output Folder 必须位于 Assets 下。",
+                "请指定正交参考相机，且 Cell Size 与 Advanced 中的尺寸参数必须有效。",
                 "确定");
         return valid;
+    }
+
+    private bool ValidateInputs(bool showDialog)
+    {
+        var valid = ValidateAnalysisInputs(false);
+        if (TryNormalizeOutputFolder(settings.outputFolder, out var normalizedOutputFolder))
+            settings.outputFolder = normalizedOutputFolder;
+        else
+            valid = false;
+
+        if (!valid && showDialog)
+            EditorUtility.DisplayDialog(
+                "Building Card",
+                "请指定正交参考相机，确保尺寸参数有效，并把 Output Folder 设置在当前项目的 Assets 文件夹内。",
+                "确定");
+        return valid;
+    }
+
+    private static bool TryNormalizeOutputFolder(string folder, out string assetFolder)
+    {
+        assetFolder = folder;
+        if (string.IsNullOrWhiteSpace(folder)) return false;
+
+        try
+        {
+            var assetsPath = Path.GetFullPath(Application.dataPath).Replace('\\', '/').TrimEnd('/');
+            var projectPath = Path.GetDirectoryName(assetsPath)?.Replace('\\', '/').TrimEnd('/');
+            if (string.IsNullOrEmpty(projectPath)) return false;
+
+            var normalizedInput = folder.Trim().Replace('\\', '/').TrimEnd('/');
+            var fullPath = Path.IsPathRooted(normalizedInput)
+                ? Path.GetFullPath(normalizedInput)
+                : Path.GetFullPath(Path.Combine(projectPath, normalizedInput));
+            fullPath = fullPath.Replace('\\', '/').TrimEnd('/');
+
+            if (string.Equals(fullPath, assetsPath, StringComparison.OrdinalIgnoreCase))
+            {
+                assetFolder = "Assets";
+                return true;
+            }
+            if (!fullPath.StartsWith(assetsPath + "/", StringComparison.OrdinalIgnoreCase)) return false;
+
+            assetFolder = "Assets" + fullPath.Substring(assetsPath.Length);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private void EnsureOutputFolders()
@@ -2774,6 +3855,7 @@ public sealed class BuildingCardTool : EditorWindow
             spineLoop = saved.spineLoop;
             spineGridWidth = Mathf.Max(1, saved.spineGridWidth);
             spineGridDepth = Mathf.Max(1, saved.spineGridDepth);
+            sourceMode = (SourceMode)Mathf.Clamp(saved.sourceMode, 0, 1);
             spineUseManualGroundPoints = saved.spineUseManualGroundPoints;
             spineManualNearPoint = saved.spineManualNearPoint;
             spineManualLeftPoint = saved.spineManualLeftPoint;
@@ -2800,10 +3882,15 @@ public sealed class BuildingCardTool : EditorWindow
                         manualRightPoint = savedEntry.manualRightPoint,
                         manualFarPoint = savedEntry.manualFarPoint
                     };
+                    if (saved.version < CurrentWorkspaceVersion &&
+                        entry.gridWidth == 1 && entry.gridDepth == 1)
+                        ApplyGridSizeFromTextureName(entry, texture.name);
                     entries.Add(entry);
                 }
             }
             previewIndex = entries.Count == 0 ? -1 : Mathf.Clamp(saved.previewIndex, 0, entries.Count - 1);
+            if (saved.version < CurrentWorkspaceVersion)
+                SaveWorkspaceState();
         }
         catch (Exception exception)
         {
@@ -2815,11 +3902,13 @@ public sealed class BuildingCardTool : EditorWindow
     {
         var saved = new WorkspaceState
         {
+            version = CurrentWorkspaceVersion,
             previewIndex = previewIndex,
             spineAnimation = spineAnimation,
             spineLoop = spineLoop,
             spineGridWidth = spineGridWidth,
             spineGridDepth = spineGridDepth,
+            sourceMode = (int)sourceMode,
             spineUseManualGroundPoints = spineUseManualGroundPoints,
             spineManualNearPoint = spineManualNearPoint,
             spineManualLeftPoint = spineManualLeftPoint,
@@ -2870,7 +3959,9 @@ public sealed class BuildingCardTool : EditorWindow
             settings.clickHorizontalPadding = saved.clickHorizontalPadding;
             settings.visualMargin = saved.visualMargin;
             settings.placePrefabsInScene = saved.placePrefabsInScene;
-            settings.outputFolder = saved.outputFolder;
+            settings.outputFolder = TryNormalizeOutputFolder(saved.outputFolder, out var normalizedOutputFolder)
+                ? normalizedOutputFolder
+                : saved.outputFolder;
         }
         catch { }
     }

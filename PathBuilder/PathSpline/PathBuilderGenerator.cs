@@ -15,7 +15,6 @@ internal static class PathBuilderGenerator
     private const float RiverCurvatureSafety = 0.9f;
     private const float RiverBankTaperPerMeter = 0.35f;
     private const float MinimumRiverHalfWidth = 0.005f;
-    private const int MountainCardsPerMesh = 16000;
     private const int MaximumMountainPlacements = 100000;
     private const float MountainDecalMaximumStretchFactor = 4f;
 
@@ -35,6 +34,7 @@ internal static class PathBuilderGenerator
 
     private struct MountainCardPlacement
     {
+        public Object sourceAsset;
         public Texture2D texture;
         public Rect uv;
         public Vector2 pivot;
@@ -42,11 +42,21 @@ internal static class PathBuilderGenerator
         public float width;
         public float height;
         public bool flipX;
+        public bool flipY;
         public int sequence;
     }
 
     public static bool Rebuild(PathSpline builder, bool logWarnings = true)
     {
+        return Rebuild(builder, logWarnings, out _);
+    }
+
+    public static bool Rebuild(
+        PathSpline builder,
+        bool logWarnings,
+        out bool previewPostProcessSucceeded)
+    {
+        previewPostProcessSucceeded = true;
         if (!builder || !builder.Anchor)
             return false;
 
@@ -97,6 +107,25 @@ internal static class PathBuilderGenerator
             else
             {
                 built = BuildRiver(builder, root, arcTable, logWarnings);
+            }
+
+            if (built
+                && builder.mode == PathBuildMode.Mountain
+                && output.type == PathOutputType.Scatter
+                && builder.mountainBakeOutput == MountainBakeOutput.GroundDecal
+                && builder.mountainFlattenPreview)
+            {
+                previewPostProcessSucceeded =
+                    builder.mountainFlattenTarget
+                        == MountainFlattenTarget.WorldPlane
+                        ? TryBakeMountainCardsToGroundQuads(
+                            builder, root.transform)
+                        : TryBakeMountainCardsToGroundDecals(
+                            builder,
+                            root.transform,
+                            false,
+                            false,
+                            logWarnings);
             }
         }
         catch (Exception exception)
@@ -169,19 +198,6 @@ internal static class PathBuilderGenerator
             return false;
         }
 
-        string prefabOutputFolder = null;
-        if (mountain
-            && !TryEnsureAssetFolder(
-                builder.prefabOutputFolder,
-                out prefabOutputFolder,
-                out string prefabFolderError))
-        {
-            Debug.LogError(
-                $"[Path Builder] Prefab 输出路径无效：{prefabFolderError}",
-                builder);
-            return false;
-        }
-
         if (!builder.GeneratedRoot && !Rebuild(builder))
             return false;
 
@@ -229,12 +245,18 @@ internal static class PathBuilderGenerator
 
         if (mountain)
         {
-            if (builder.mountainBakeOutput == MountainBakeOutput.GroundDecal
-                && !TryBakeMountainCardsToGroundDecals(builder, root))
+            if (builder.mountainBakeOutput == MountainBakeOutput.GroundDecal)
             {
-                DestroyIndependentMountainBakeRoot(root);
-                Undo.CollapseUndoOperations(undoGroup);
-                return false;
+                bool groundDecalOk = builder.mountainFlattenTarget
+                    == MountainFlattenTarget.WorldPlane
+                        ? TryBakeMountainCardsToGroundQuads(builder, root)
+                        : TryBakeMountainCardsToGroundDecals(builder, root);
+                if (!groundDecalOk)
+                {
+                    DestroyIndependentMountainBakeRoot(root);
+                    Undo.CollapseUndoOperations(undoGroup);
+                    return false;
+                }
             }
             ApplySharedMountainDecalMaterials(builder, root);
         }
@@ -269,7 +291,7 @@ internal static class PathBuilderGenerator
             if (!HasPersistentMountainOutputDependencies(root))
             {
                 Debug.LogError(
-                    "[Path Builder] 山脉网格或材质未能保存，已取消 Prefab 烘焙。",
+                    "[Path Builder] 山脉网格或材质未能保存，已取消山脉烘焙。",
                     builder);
                 DestroyIndependentMountainBakeRoot(root);
                 DeleteCreatedMountainAssets(createdMountainAssetPaths);
@@ -290,18 +312,6 @@ internal static class PathBuilderGenerator
         Undo.SetTransformParent(root, anchor.parent, "Bake Path Builder");
 
         AssetDatabase.SaveAssets();
-        if (mountain && !TrySaveMountainPrefab(
-            builder,
-            root,
-            anchor,
-            createdMountainAssetPaths,
-            prefabOutputFolder))
-        {
-            DestroyIndependentMountainBakeRoot(root);
-            DeleteCreatedMountainAssets(createdMountainAssetPaths);
-            Undo.CollapseUndoOperations(undoGroup);
-            return false;
-        }
 
         if (keepAuthoring)
         {
@@ -333,25 +343,46 @@ internal static class PathBuilderGenerator
         return true;
     }
 
+    private static bool HasGeneratedMountainCardOutput(Transform root)
+    {
+        MeshFilter[] filters = root.GetComponentsInChildren<MeshFilter>(true);
+        for (int i = 0; i < filters.Length; i++)
+        {
+            if (IsGeneratedMountainOutputMesh(filters[i].sharedMesh))
+                return true;
+        }
+        return false;
+    }
+
     private static bool TryCreateIndependentMountainBakeRoot(
         PathSpline source,
         out Transform root)
     {
         root = null;
-        PathSpline bakeBuilder = Object.Instantiate(source);
-        if (!bakeBuilder)
+        if (!source || !source.Anchor)
             return false;
 
-        bakeBuilder.hideFlags = HideFlags.HideAndDontSave;
-        bakeBuilder.Anchor = source.Anchor;
-        bakeBuilder.GeneratedRoot = null;
-        bakeBuilder.MountainFacingCamera =
-            PathBuilderAuthoringStorage.ResolveMountainFacingCamera(source);
-        bool built = Rebuild(bakeBuilder);
-        if (built)
-            root = bakeBuilder.GeneratedRoot;
-        bakeBuilder.GeneratedRoot = null;
-        Object.DestroyImmediate(bakeBuilder);
+        // Bake 必须从未压平的原始卡片重新生成。不能复制当前 Preview：
+        // 开启 Flatten Preview 时，Preview 已经是水平面片，再压平一次会把
+        // localScale.y=1 错当成卡片高度，最终 Bake 成很扁的固定深度条。
+        GameObject copy = new GameObject(MountainRootName);
+        if (!copy)
+            return false;
+        copy.transform.SetParent(source.Anchor, false);
+        copy.SetActive(true);
+        root = copy.transform;
+
+        List<PathSample> arcTable = PathSplineUtility.BuildArcTable(source);
+        bool built = arcTable.Count >= 2
+            && arcTable[arcTable.Count - 1].distance > 0.001f
+            && BuildMountains(source, root, arcTable, true);
+        if (!built)
+        {
+            DestroyGeneratedPreviewResources(root);
+            Object.DestroyImmediate(copy);
+            root = null;
+            return false;
+        }
 
         if (root && root.childCount > 0)
             return true;
@@ -392,7 +423,7 @@ internal static class PathBuilderGenerator
         return root.childCount > 0;
     }
 
-    private static bool TrySaveMountainPrefab(
+    private static bool TrySaveMountainCardPrefabs(
         PathSpline builder,
         Transform root,
         Transform anchor,
@@ -401,31 +432,148 @@ internal static class PathBuilderGenerator
     {
         EnsureAssetFolder(prefabOutputFolder);
         string safeName = MakeSafeFileName(anchor.gameObject.name);
-        string assetPath = AssetDatabase.GenerateUniqueAssetPath(
-            $"{prefabOutputFolder}/{safeName}_Mountains.prefab");
-        createdAssetPaths.Add(assetPath);
-        GameObject prefabAsset;
-        try
+
+        // 一个材质球只生成一个面片 Prefab。随后再用这个 Prefab 的实例
+        // 还原每张山图的位置、旋转和缩放。
+        Dictionary<Material, List<MeshFilter>> groups =
+            new Dictionary<Material, List<MeshFilter>>();
+        MeshFilter[] filters = root.GetComponentsInChildren<MeshFilter>(true);
+        for (int i = 0; i < filters.Length; i++)
         {
-            prefabAsset = PrefabUtility.SaveAsPrefabAssetAndConnect(
-                root.gameObject,
-                assetPath,
-                InteractionMode.UserAction);
-        }
-        catch (Exception exception)
-        {
-            Debug.LogException(exception, builder);
-            return false;
-        }
-        if (!prefabAsset)
-        {
-            Debug.LogError(
-                $"[Path Builder] 无法创建山脉 Prefab：{assetPath}",
-                builder);
-            return false;
+            MeshFilter filter = filters[i];
+            Mesh mesh = filter.sharedMesh;
+            if (!mesh || !IsGeneratedMountainOutputMesh(mesh))
+                continue;
+            MeshRenderer renderer = filter.GetComponent<MeshRenderer>();
+            Material material = renderer ? renderer.sharedMaterial : null;
+            if (!material)
+                continue;
+            if (!groups.TryGetValue(material, out List<MeshFilter> group))
+            {
+                group = new List<MeshFilter>();
+                groups.Add(material, group);
+            }
+            group.Add(filter);
         }
 
-        EditorGUIUtility.PingObject(prefabAsset);
+        // 只有 Prefab 型山、没有面片卡片时保持旧行为：整座山打包成一个预制体。
+        if (groups.Count == 0)
+        {
+            string singlePrefabPath = AssetDatabase.GenerateUniqueAssetPath(
+                $"{prefabOutputFolder}/{safeName}_Mountains.prefab");
+            createdAssetPaths.Add(singlePrefabPath);
+            GameObject singlePrefab;
+            try
+            {
+                singlePrefab = PrefabUtility.SaveAsPrefabAssetAndConnect(
+                    root.gameObject,
+                    singlePrefabPath,
+                    InteractionMode.UserAction);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception, builder);
+                return false;
+            }
+            if (!singlePrefab)
+            {
+                Debug.LogError(
+                    $"[Path Builder] 无法创建山脉 Prefab：{singlePrefabPath}",
+                    builder);
+                return false;
+            }
+            EditorGUIUtility.PingObject(singlePrefab);
+            return true;
+        }
+
+        foreach (KeyValuePair<Material, List<MeshFilter>> materialGroup in groups)
+        {
+            Material material = materialGroup.Key;
+            if (!material || !AssetDatabase.Contains(material))
+            {
+                Debug.LogError(
+                    "[Path Builder] 面片材质未能保存为资产，无法创建预制体。",
+                    builder);
+                return false;
+            }
+
+            List<MeshFilter> instances = materialGroup.Value;
+            Mesh quad = instances.Count > 0 ? instances[0].sharedMesh : null;
+            if (!quad)
+                continue;
+            for (int i = 1; i < instances.Count; i++)
+            {
+                if (instances[i].sharedMesh != quad)
+                {
+                    Debug.LogError(
+                        $"[Path Builder] 材质 {material.name} 对应了不同 UV 网格，"
+                        + "无法按一个材质生成一个预制体。",
+                        builder);
+                    return false;
+                }
+            }
+
+            string prefabPath = AssetDatabase.GenerateUniqueAssetPath(
+                $"{prefabOutputFolder}/{safeName}_"
+                + $"{MakeSafeFileName(material.name)}.prefab");
+            createdAssetPaths.Add(prefabPath);
+
+            // 第一步：先把这个材质球对应的单位面片保存为 Prefab 资产。
+            GameObject prefabGo = new GameObject(material.name);
+            MeshFilter prefabFilter = prefabGo.AddComponent<MeshFilter>();
+            MeshRenderer prefabRenderer = prefabGo.AddComponent<MeshRenderer>();
+            prefabFilter.sharedMesh = quad;
+            prefabRenderer.sharedMaterial = material;
+            prefabRenderer.shadowCastingMode = ShadowCastingMode.Off;
+            prefabRenderer.receiveShadows = false;
+
+            GameObject prefabAsset;
+            try
+            {
+                prefabAsset = PrefabUtility.SaveAsPrefabAsset(
+                    prefabGo, prefabPath);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception, builder);
+                Object.DestroyImmediate(prefabGo);
+                return false;
+            }
+            Object.DestroyImmediate(prefabGo);
+
+            if (!prefabAsset)
+            {
+                Debug.LogError(
+                    $"[Path Builder] 无法创建面片预制体：{prefabPath}",
+                    builder);
+                return false;
+            }
+
+            EditorGUIUtility.PingObject(prefabAsset);
+
+            // 第二步：再用该 Prefab 的实例摆山。
+            for (int i = 0; i < instances.Count; i++)
+            {
+                Transform oldTransform = instances[i].transform;
+                Vector3 worldPosition = oldTransform.position;
+                Quaternion worldRotation = oldTransform.rotation;
+                Vector3 localScale = oldTransform.localScale;
+                Transform parent = oldTransform.parent;
+                string oldName = oldTransform.gameObject.name;
+
+                GameObject newInstance =
+                    (GameObject)PrefabUtility.InstantiatePrefab(
+                        prefabAsset, parent);
+                newInstance.transform.SetPositionAndRotation(
+                    worldPosition, worldRotation);
+                newInstance.transform.localScale = localScale;
+                newInstance.name = oldName;
+
+                Undo.RegisterCreatedObjectUndo(
+                    newInstance, "Create Mountain Card Instance");
+                Object.DestroyImmediate(oldTransform.gameObject);
+            }
+        }
         return true;
     }
 
@@ -518,6 +666,7 @@ internal static class PathBuilderGenerator
             : assetOutputFolder + "/Materials";
         EnsureAssetFolder(materialOutputFolder);
         string safeName = MakeSafeFileName(builder.Anchor.gameObject.name);
+        HashSet<Mesh> savedMeshes = new HashSet<Mesh>();
         for (int i = 0; i < filters.Length; i++)
         {
             Mesh mesh = filters[i].sharedMesh;
@@ -527,6 +676,8 @@ internal static class PathBuilderGenerator
             {
                 continue;
             }
+            if (!savedMeshes.Add(mesh))
+                continue;
 
             string assetPath = AssetDatabase.GenerateUniqueAssetPath(
                 $"{assetOutputFolder}/{safeName}_{mesh.name.Replace("_Preview", string.Empty)}.asset");
@@ -567,7 +718,7 @@ internal static class PathBuilderGenerator
         }
     }
 
-    private static bool TryBakeMountainCardsToGroundDecals(
+    private static bool TryBakeMountainCardsToGroundQuads(
         PathSpline builder,
         Transform root)
     {
@@ -594,11 +745,253 @@ internal static class PathBuilderGenerator
                 builder);
             return false;
         }
-        if (builder.mountainDecalSurfaceMask.value == 0)
+
+        Vector3 cameraRight = camera.transform.right.normalized;
+        Vector3 cameraUp = camera.transform.up.normalized;
+        Vector3 cameraForward = camera.transform.forward.normalized;
+        float groundHeight = builder.mountainWorldPlaneHeight;
+
+        // 沿相机视线投到水平面，而不是简单丢掉 Y 分量。
+        // 例如相机俯角 45° 时，卡片高度在地面的长度是 1.414 倍，
+        // 旧公式会错误地算成 0.707 倍。
+        Vector3 projectedRight = ProjectAxisToHorizontalPlane(
+            cameraRight, cameraForward);
+        Vector3 projectedUp = ProjectAxisToHorizontalPlane(
+            cameraUp, cameraForward);
+        if (projectedRight.sqrMagnitude < 0.000001f
+            || projectedUp.sqrMagnitude < 0.000001f)
         {
             Debug.LogWarning(
-                "[Path Builder] 山脉贴花的地表层为空。",
+                "[Path Builder] 相机方向无法转换为有效的地面贴花缩放。",
                 builder);
+            return false;
+        }
+
+        // 烘焙输出改用共享的 XZ 水平网格，Transform 只保留 Y 旋转。
+        Quaternion groundRotation = Quaternion.LookRotation(
+            projectedUp.normalized,
+            Vector3.up);
+        float rightSign = Vector3.Dot(
+                groundRotation * Vector3.right,
+                projectedRight)
+            >= 0f ? 1f : -1f;
+
+        MeshFilter[] filters = root.GetComponentsInChildren<MeshFilter>(true);
+        int processed = 0;
+
+        for (int i = 0; i < filters.Length; i++)
+        {
+            MeshFilter filter = filters[i];
+            Mesh sourceMesh = filter.sharedMesh;
+            if (!sourceMesh || !IsGeneratedMountainCardMesh(sourceMesh))
+                continue;
+
+            Transform t = filter.transform;
+            Vector3 center = t.position;
+            float distance = (groundHeight - center.y) / cameraForward.y;
+            Vector3 flatCenter = center + cameraForward * distance;
+            flatCenter.y = groundHeight;
+
+            Vector3 scale = t.localScale;
+            Vector3 groundScale = new Vector3(
+                scale.x * projectedRight.magnitude * rightSign,
+                1f,
+                scale.y * projectedUp.magnitude);
+
+            t.SetPositionAndRotation(flatCenter, groundRotation);
+            t.localScale = groundScale;
+            filter.sharedMesh = GetOrCreateHorizontalMountainCardMesh(
+                sourceMesh);
+            EditorUtility.SetDirty(filter);
+            processed++;
+        }
+
+        // 只有 Prefab 型山、没有面片卡片时，保持原样继续烘焙。
+        return processed > 0 || root.childCount > 0;
+    }
+
+    private static Vector3 ProjectAxisToHorizontalPlane(
+        Vector3 axis,
+        Vector3 projectionDirection)
+    {
+        return axis - projectionDirection
+            * (axis.y / projectionDirection.y);
+    }
+
+    private static Mesh GetOrCreateHorizontalMountainCardMesh(
+        Mesh sourceMesh)
+    {
+        string sourcePath = AssetDatabase.GetAssetPath(sourceMesh);
+        string outputPath = string.Empty;
+        if (!string.IsNullOrEmpty(sourcePath))
+        {
+            string directory = Path.GetDirectoryName(sourcePath)
+                ?.Replace('\\', '/');
+            string fileName = Path.GetFileNameWithoutExtension(sourcePath)
+                .Replace("MountainCards_", "MountainDecal_")
+                .Replace("MountainCard_", "MountainDecal_");
+            outputPath = $"{directory}/{fileName}.asset";
+            Mesh existing = AssetDatabase.LoadAssetAtPath<Mesh>(outputPath);
+            if (existing)
+                return existing;
+        }
+
+        Mesh horizontalMesh = Object.Instantiate(sourceMesh);
+        horizontalMesh.name = sourceMesh.name
+            .Replace("MountainCards_", "MountainDecals_")
+            .Replace("MountainCard_", "MountainDecals_")
+            .Replace("_Preview", string.Empty);
+        Vector3[] vertices = horizontalMesh.vertices;
+        Vector3[] normals = new Vector3[vertices.Length];
+        Vector4[] tangents = new Vector4[vertices.Length];
+        for (int i = 0; i < vertices.Length; i++)
+        {
+            Vector3 vertex = vertices[i];
+            vertices[i] = new Vector3(vertex.x, 0f, vertex.y);
+            normals[i] = Vector3.up;
+            tangents[i] = new Vector4(1f, 0f, 0f, -1f);
+        }
+        int[] triangles = horizontalMesh.triangles;
+        for (int i = 0; i + 2 < triangles.Length; i += 3)
+        {
+            int swap = triangles[i + 1];
+            triangles[i + 1] = triangles[i + 2];
+            triangles[i + 2] = swap;
+        }
+        horizontalMesh.vertices = vertices;
+        horizontalMesh.normals = normals;
+        horizontalMesh.tangents = tangents;
+        horizontalMesh.triangles = triangles;
+        horizontalMesh.RecalculateBounds();
+
+        if (!string.IsNullOrEmpty(outputPath))
+        {
+            horizontalMesh.hideFlags = HideFlags.None;
+            AssetDatabase.CreateAsset(horizontalMesh, outputPath);
+        }
+        else
+        {
+            horizontalMesh.hideFlags = HideFlags.DontSaveInBuild;
+        }
+        return horizontalMesh;
+    }
+
+    private static void BakeMountainCardTiltIntoMesh(
+        MeshFilter filter,
+        Vector3 worldForward)
+    {
+        if (!filter || !filter.sharedMesh)
+            return;
+
+        Transform transform = filter.transform;
+        Matrix4x4 formerLocalToWorld = transform.localToWorldMatrix;
+        Mesh formerMesh = filter.sharedMesh;
+        Mesh bakedMesh = AssetDatabase.Contains(formerMesh)
+            ? Object.Instantiate(formerMesh)
+            : formerMesh;
+
+        Vector3 localForward = transform.parent
+            ? transform.parent.InverseTransformDirection(worldForward)
+            : worldForward;
+        localForward.y = 0f;
+        float yaw = localForward.sqrMagnitude > 0.000001f
+            ? Mathf.Atan2(localForward.x, localForward.z) * Mathf.Rad2Deg
+            : 0f;
+        transform.localRotation = Quaternion.Euler(0f, yaw, 0f);
+
+        Matrix4x4 newWorldToLocal = transform.worldToLocalMatrix;
+        Matrix4x4 formerNormalToWorld = formerLocalToWorld.inverse.transpose;
+        Matrix4x4 newNormalToLocal = transform.localToWorldMatrix.transpose;
+        Vector3[] vertices = bakedMesh.vertices;
+        Vector3[] normals = bakedMesh.normals;
+        Vector4[] tangents = bakedMesh.tangents;
+        for (int i = 0; i < vertices.Length; i++)
+        {
+            vertices[i] = newWorldToLocal.MultiplyPoint3x4(
+                formerLocalToWorld.MultiplyPoint3x4(vertices[i]));
+            if (normals != null && normals.Length == vertices.Length)
+            {
+                Vector3 worldNormal = formerNormalToWorld
+                    .MultiplyVector(normals[i]).normalized;
+                normals[i] = newNormalToLocal
+                    .MultiplyVector(worldNormal).normalized;
+            }
+            if (tangents != null && tangents.Length == vertices.Length)
+            {
+                Vector3 formerTangent = new Vector3(
+                    tangents[i].x,
+                    tangents[i].y,
+                    tangents[i].z);
+                Vector3 worldTangent = formerLocalToWorld
+                    .MultiplyVector(formerTangent).normalized;
+                Vector3 localTangent = newWorldToLocal
+                    .MultiplyVector(worldTangent).normalized;
+                tangents[i] = new Vector4(
+                    localTangent.x,
+                    localTangent.y,
+                    localTangent.z,
+                    tangents[i].w);
+            }
+        }
+
+        bakedMesh.name = formerMesh.name
+            .Replace("MountainCards_", "MountainDecals_")
+            .Replace("MountainCard_", "MountainDecals_")
+            .Replace("_Preview", string.Empty)
+            + "_Preview";
+        bakedMesh.vertices = vertices;
+        if (normals != null && normals.Length == vertices.Length)
+            bakedMesh.normals = normals;
+        if (tangents != null && tangents.Length == vertices.Length)
+            bakedMesh.tangents = tangents;
+        bakedMesh.RecalculateBounds();
+        if (!AssetDatabase.Contains(bakedMesh))
+            bakedMesh.hideFlags = HideFlags.DontSaveInBuild;
+        filter.sharedMesh = bakedMesh;
+        EditorUtility.SetDirty(filter);
+    }
+
+    private static bool TryBakeMountainCardsToGroundDecals(
+        PathSpline builder,
+        Transform root,
+        bool showProgress = true,
+        bool useUndo = true,
+        bool logWarnings = true)
+    {
+        Camera camera =
+            PathBuilderAuthoringStorage.ResolveMountainFacingCamera(builder);
+        if (!camera)
+        {
+            if (logWarnings)
+                Debug.LogWarning(
+                    "[Path Builder] 烘焙地面贴花前必须指定一个正交摄像机。",
+                    builder);
+            return false;
+        }
+        if (!camera.orthographic)
+        {
+            if (logWarnings)
+                Debug.LogWarning(
+                    "[Path Builder] 山脉地面贴花只支持正交摄像机。",
+                    builder);
+            return false;
+        }
+        if (camera.transform.forward.y >= -0.01f)
+        {
+            if (logWarnings)
+                Debug.LogWarning(
+                    "[Path Builder] 指定摄像机必须朝向地面，才能烘焙山脉贴花。",
+                    builder);
+            return false;
+        }
+        if (builder.mountainFlattenTarget
+                == MountainFlattenTarget.SurfaceColliders
+            && builder.mountainDecalSurfaceMask.value == 0)
+        {
+            if (logWarnings)
+                Debug.LogWarning(
+                    "[Path Builder] 山脉贴花的地表层为空。",
+                    builder);
             return false;
         }
 
@@ -612,9 +1005,10 @@ internal static class PathBuilderGenerator
                 continue;
             if (mesh.vertexCount % 4 != 0)
             {
-                Debug.LogWarning(
-                    $"[Path Builder] {mesh.name} 不是有效的山脉面片网格。",
-                    builder);
+                if (logWarnings)
+                    Debug.LogWarning(
+                        $"[Path Builder] {mesh.name} 不是有效的山脉面片网格。",
+                        builder);
                 return false;
             }
             cardFilters.Add(filters[i]);
@@ -645,6 +1039,7 @@ internal static class PathBuilderGenerator
                     sourceMesh,
                     ref processedCards,
                     totalCards,
+                    showProgress,
                     out Mesh decalMesh,
                     out int meshValidCards,
                     out int meshSkippedCards,
@@ -653,15 +1048,17 @@ internal static class PathBuilderGenerator
                     DestroyMountainDecalProjections(projections);
                     if (canceled)
                     {
-                        Debug.Log(
-                            "[Path Builder] 已取消山脉地面贴花烘焙。",
-                            builder);
+                        if (logWarnings)
+                            Debug.Log(
+                                "[Path Builder] 已取消山脉地面贴花烘焙。",
+                                builder);
                     }
                     else
                     {
-                        Debug.LogWarning(
-                            $"[Path Builder] 无法把 {sourceMesh.name} 投射到地表。",
-                            builder);
+                        if (logWarnings)
+                            Debug.LogWarning(
+                                $"[Path Builder] 无法把 {sourceMesh.name} 投射到地表。",
+                                builder);
                     }
                     return false;
                 }
@@ -678,15 +1075,17 @@ internal static class PathBuilderGenerator
         }
         finally
         {
-            EditorUtility.ClearProgressBar();
+            if (showProgress)
+                EditorUtility.ClearProgressBar();
         }
 
         if (validCards == 0)
         {
             DestroyMountainDecalProjections(projections);
-            Debug.LogWarning(
-                "[Path Builder] 没有山脉面片命中地表。请检查地表层和 Collider。",
-                builder);
+            if (logWarnings)
+                Debug.LogWarning(
+                    "[Path Builder] 没有山脉面片命中地表。请检查地表层和 Collider。",
+                    builder);
             return false;
         }
 
@@ -706,18 +1105,31 @@ internal static class PathBuilderGenerator
                 {
                     unusedMaterials.Add(renderer.sharedMaterial);
                 }
-                Undo.DestroyObjectImmediate(projection.filter.gameObject);
+                DestroyMountainProjectionObject(
+                    projection.filter.gameObject,
+                    useUndo);
                 continue;
             }
 
-            Undo.RecordObject(projection.filter, "Bake Mountain Ground Decal");
+            if (useUndo)
+            {
+                Undo.RecordObject(
+                    projection.filter,
+                    "Bake Mountain Ground Decal");
+            }
             projection.filter.sharedMesh = projection.decalMesh;
+            Vector3 flatForward = ProjectAxisToHorizontalPlane(
+                camera.transform.up.normalized,
+                camera.transform.forward.normalized);
+            BakeMountainCardTiltIntoMesh(
+                projection.filter,
+                flatForward.normalized);
             EditorUtility.SetDirty(projection.filter);
         }
         foreach (Mesh sourceMesh in sourceMeshes)
         {
             if (sourceMesh && !AssetDatabase.Contains(sourceMesh))
-                Undo.DestroyObjectImmediate(sourceMesh);
+                DestroyMountainProjectionObject(sourceMesh, useUndo);
         }
         HashSet<Material> retainedMaterials = new HashSet<Material>();
         Renderer[] remainingRenderers =
@@ -736,16 +1148,29 @@ internal static class PathBuilderGenerator
         foreach (Material material in unusedMaterials)
         {
             if (material && !retainedMaterials.Contains(material))
-                Undo.DestroyObjectImmediate(material);
+                DestroyMountainProjectionObject(material, useUndo);
         }
 
         if (skippedCards > 0)
         {
-            Debug.LogWarning(
-                $"[Path Builder] 地面贴花已生成；跳过 {skippedCards} 张未完整命中地表的山图。",
-                root);
+            if (logWarnings)
+                Debug.LogWarning(
+                    $"[Path Builder] 地面贴花已生成；跳过 {skippedCards} 张未完整命中地表的山图。",
+                    root);
         }
         return true;
+    }
+
+    private static void DestroyMountainProjectionObject(
+        Object target,
+        bool useUndo)
+    {
+        if (!target)
+            return;
+        if (useUndo)
+            Undo.DestroyObjectImmediate(target);
+        else
+            Object.DestroyImmediate(target);
     }
 
     private static bool TryProjectMountainCardMesh(
@@ -755,6 +1180,7 @@ internal static class PathBuilderGenerator
         Mesh sourceMesh,
         ref int processedCards,
         int totalCards,
+        bool showProgress,
         out Mesh decalMesh,
         out int validCards,
         out int skippedCards,
@@ -791,7 +1217,7 @@ internal static class PathBuilderGenerator
 
         for (int card = 0; card < cardCount; card++)
         {
-            if ((card & 31) == 0)
+            if (showProgress && (card & 31) == 0)
             {
                 float progress = totalCards > 0
                     ? processedCards / (float)totalCards
@@ -805,12 +1231,14 @@ internal static class PathBuilderGenerator
             }
 
             int sourceIndex = card * 4;
+            bool worldPlane = builder.mountainFlattenTarget
+                == MountainFlattenTarget.WorldPlane;
             bool allCornersHit = true;
             for (int corner = 0; corner < 4; corner++)
             {
                 sourcePositions[corner] = filter.transform.TransformPoint(
                     sourceVertices[sourceIndex + corner]);
-                if (!TryRaycastMountainDecalSurface(
+                if (!worldPlane && !TryRaycastMountainDecalSurface(
                     builder,
                     sourcePositions[corner],
                     cameraForward,
@@ -830,16 +1258,42 @@ internal static class PathBuilderGenerator
 
             for (int corner = 0; corner < 4; corner++)
             {
+                if (worldPlane)
+                {
+                    float distance = (builder.mountainWorldPlaneHeight
+                        - sourcePositions[corner].y) / cameraForward.y;
+                    Vector3 flatWorldPosition = sourcePositions[corner]
+                        + cameraForward * distance;
+                    flatWorldPosition.y = builder.mountainWorldPlaneHeight;
+                    corners[corner] = new MountainDecalVertex
+                    {
+                        worldPosition = flatWorldPosition,
+                        worldNormal = Vector3.up
+                    };
+                    continue;
+                }
+
+                Vector3 surfaceNormal = hits[corner].normal.normalized;
+                Vector3 towardCamera = -cameraForward;
+                // A ground decal must stay on the upper-facing hemisphere.
+                // A tilted camera can otherwise accept a normal whose Y is
+                // negative simply because its horizontal component faces it.
+                if (surfaceNormal.y < -0.0001f
+                    || (Mathf.Abs(surfaceNormal.y) <= 0.0001f
+                        && Vector3.Dot(surfaceNormal, towardCamera) < 0f))
+                {
+                    surfaceNormal = -surfaceNormal;
+                }
                 Vector3 worldPosition = hits[corner].point
-                    + hits[corner].normal
+                    + surfaceNormal
                         * builder.mountainDecalSurfaceOffset;
                 corners[corner] = new MountainDecalVertex
                 {
                     worldPosition = worldPosition,
-                    worldNormal = hits[corner].normal
+                    worldNormal = surfaceNormal
                 };
             }
-            if (!IsMountainDecalQuadContinuous(
+            if (!worldPlane && !IsMountainDecalQuadContinuous(
                 corners[0],
                 corners[1],
                 corners[2],
@@ -856,23 +1310,23 @@ internal static class PathBuilderGenerator
             {
                 Vector3 tangentWorld = Vector3.ProjectOnPlane(
                     cameraRight,
-                    hits[corner].normal);
+                    corners[corner].worldNormal);
                 if (tangentWorld.sqrMagnitude < 0.000001f)
                 {
                     tangentWorld = Vector3.Cross(
-                        hits[corner].normal,
+                        corners[corner].worldNormal,
                         cameraForward);
                 }
                 tangentWorld.Normalize();
-                Vector3 localTangent = filter.transform
-                    .InverseTransformDirection(tangentWorld)
+                Vector3 localTangent = filter.transform.worldToLocalMatrix
+                    .MultiplyVector(tangentWorld).normalized;
+                Vector3 localNormal = filter.transform.localToWorldMatrix
+                    .transpose.MultiplyVector(corners[corner].worldNormal)
                     .normalized;
                 corners[corner].index = vertices.Count;
                 vertices.Add(filter.transform.InverseTransformPoint(
                     corners[corner].worldPosition));
-                normals.Add(filter.transform
-                    .InverseTransformDirection(hits[corner].normal)
-                    .normalized);
+                normals.Add(localNormal);
                 tangents.Add(new Vector4(
                     localTangent.x,
                     localTangent.y,
@@ -1049,18 +1503,19 @@ internal static class PathBuilderGenerator
     private static bool IsGeneratedMountainCardMesh(Mesh mesh)
     {
         return mesh
-            && mesh.name.StartsWith(
-                "MountainCards_",
-                StringComparison.Ordinal);
-    }
-
-    private static bool IsGeneratedMountainOutputMesh(Mesh mesh)
-    {
-        return mesh
             && (mesh.name.StartsWith(
                     "MountainCards_",
                     StringComparison.Ordinal)
                 || mesh.name.StartsWith(
+                    "MountainCard_",
+                    StringComparison.Ordinal));
+    }
+
+    private static bool IsGeneratedMountainOutputMesh(Mesh mesh)
+    {
+        return IsGeneratedMountainCardMesh(mesh)
+            || (mesh
+                && mesh.name.StartsWith(
                     "MountainDecals_",
                     StringComparison.Ordinal));
     }
@@ -1157,7 +1612,7 @@ internal static class PathBuilderGenerator
                             horizontalScale,
                             verticalScale,
                             random,
-                            createdCount))
+                            placementIndex))
                         {
                             createdCount++;
                         }
@@ -1252,11 +1707,81 @@ internal static class PathBuilderGenerator
             position,
             rotation * entry.prefab.transform.rotation);
         Vector3 baseScale = entry.prefab.transform.localScale;
-        instance.transform.localScale = new Vector3(
+        Vector3 generatedScale = new Vector3(
             baseScale.x * horizontalScale,
             baseScale.y * verticalScale,
             baseScale.z * horizontalScale);
-        instance.name = $"{entry.prefab.name}_{index:D3}";
+        instance.transform.localScale = generatedScale;
+        if (builder.TryGetMountainInstanceOverride(
+            index,
+            out MountainInstanceOverride saved))
+        {
+            Vector3 generatedLocalPosition = instance.transform.localPosition;
+            if (!saved.relativeTransform)
+            {
+                if (saved.overridePosition)
+                    saved.localPosition -= generatedLocalPosition;
+                if (saved.overrideScale)
+                {
+                    saved.scale = DivideScale(saved.scale, generatedScale);
+                }
+                saved.relativeTransform = true;
+                EditorUtility.SetDirty(builder);
+            }
+            if (saved.overridePosition)
+            {
+                instance.transform.localPosition =
+                    generatedLocalPosition + saved.localPosition;
+            }
+            if (saved.overrideScale)
+            {
+                instance.transform.localScale =
+                    Vector3.Scale(generatedScale, saved.scale);
+            }
+        }
+        instance.name = $"{entry.prefab.name}__PBM_{index:D5}";
+        instance.transform.hasChanged = false;
+        return true;
+    }
+
+    private static Vector3 DivideScale(Vector3 value, Vector3 divisor)
+    {
+        return new Vector3(
+            Mathf.Abs(divisor.x) > 0.000001f ? value.x / divisor.x : 1f,
+            Mathf.Abs(divisor.y) > 0.000001f ? value.y / divisor.y : 1f,
+            Mathf.Abs(divisor.z) > 0.000001f ? value.z / divisor.z : 1f);
+    }
+
+    internal static bool TryGetMountainInstanceIndex(
+        PathSpline builder,
+        Transform selected,
+        out Transform instance,
+        out int placementIndex)
+    {
+        instance = null;
+        placementIndex = -1;
+        if (!builder || !builder.GeneratedRoot || !selected)
+            return false;
+
+        Transform candidate = selected;
+        while (candidate && candidate.parent != builder.GeneratedRoot)
+            candidate = candidate.parent;
+        if (!candidate || candidate.parent != builder.GeneratedRoot)
+            return false;
+
+        const string marker = "__PBM_";
+        int markerIndex = candidate.name.LastIndexOf(
+            marker,
+            StringComparison.Ordinal);
+        if (markerIndex < 0
+            || !int.TryParse(
+                candidate.name.Substring(markerIndex + marker.Length),
+                out placementIndex))
+        {
+            return false;
+        }
+
+        instance = candidate;
         return true;
     }
 
@@ -1309,6 +1834,9 @@ internal static class PathBuilderGenerator
                 : 1f;
         }
 
+        placement.sourceAsset = entry.sourceType == MountainSourceType.SpriteCard
+            ? (Object)entry.sprite
+            : entry.texture;
         placement.texture = texture;
         placement.uv = uv;
         placement.pivot = pivot;
@@ -1316,8 +1844,10 @@ internal static class PathBuilderGenerator
         placement.width = builder.mountainCardHeight
             * aspect * horizontalScale;
         placement.height = builder.mountainCardHeight * verticalScale;
-        placement.flipX = builder.mountainCardRandomFlip
-            && random.NextDouble() < 0.5;
+        placement.flipX = builder.mountainCardFlipX
+            || (builder.mountainCardRandomFlip && random.NextDouble() < 0.5);
+        placement.flipY = builder.mountainCardFlipY
+            || (builder.mountainCardRandomFlipY && random.NextDouble() < 0.5);
         return true;
     }
 
@@ -1352,272 +1882,189 @@ internal static class PathBuilderGenerator
 
         Vector3 cameraRight = camera.transform.right.normalized;
         Vector3 cameraUp = camera.transform.up.normalized;
-        Vector3 cameraForward = camera.transform.forward.normalized;
-        Vector3 cameraNormal = -camera.transform.forward.normalized;
-        Dictionary<Texture2D, Material> materials =
-            new Dictionary<Texture2D, Material>();
-        int meshIndex = 0;
+        Dictionary<Object, GameObject> sourcePrefabs =
+            new Dictionary<Object, GameObject>();
+        int createdCount = 0;
 
-        if (builder.mountainCardSortingMode
-            == MountainCardSortingMode.AccurateBackToFront)
+        // 先为输入的每个 Sprite / Texture 建立稳定的 Mesh + Material Prefab，
+        // 再用这些 Prefab 实例摆山。Preview 与 Bake 使用同一套源资产。
+        for (int i = 0; i < placements.Count; i++)
         {
-            List<MountainCardPlacement> sorted =
-                new List<MountainCardPlacement>(placements);
-            SortMountainCardsBackToFront(sorted, cameraForward);
-            int batchCount = CountMountainCardBatches(sorted);
-            int batchIndex = 0;
-            int start = 0;
-            while (start < sorted.Count)
+            MountainCardPlacement placement = placements[i];
+            if (!sourcePrefabs.TryGetValue(
+                placement.sourceAsset,
+                out GameObject sourcePrefab))
             {
-                Texture2D texture = sorted[start].texture;
-                int count = 1;
-                while (start + count < sorted.Count
-                    && count < MountainCardsPerMesh
-                    && sorted[start + count].texture == texture)
-                {
-                    count++;
-                }
-
-                Material material = GetOrCreateMountainCardMaterial(
+                sourcePrefab = GetOrCreateMountainCardSourcePrefab(
                     builder,
-                    texture,
-                    materials);
-                if (material)
-                {
-                    int sortingOrder = Mathf.Clamp(
-                        batchIndex - batchCount / 2,
-                        short.MinValue,
-                        short.MaxValue);
-                    CreateMountainCardMesh(
-                        builder,
-                        root,
-                        texture,
-                        material,
-                        sorted,
-                        start,
-                        count,
-                        cameraRight,
-                        cameraUp,
-                        cameraNormal,
-                        meshIndex++,
-                        sortingOrder);
-                }
-                start += count;
-                batchIndex++;
-            }
-        }
-        else
-        {
-            Dictionary<Texture2D, List<MountainCardPlacement>> groups =
-                new Dictionary<Texture2D, List<MountainCardPlacement>>();
-            for (int i = 0; i < placements.Count; i++)
-            {
-                MountainCardPlacement placement = placements[i];
-                if (!groups.TryGetValue(
+                    placement.sourceAsset,
                     placement.texture,
-                    out List<MountainCardPlacement> group))
-                {
-                    group = new List<MountainCardPlacement>();
-                    groups.Add(placement.texture, group);
-                }
-                group.Add(placement);
+                    placement.uv);
+                if (sourcePrefab)
+                    sourcePrefabs.Add(placement.sourceAsset, sourcePrefab);
             }
+            if (!sourcePrefab)
+                continue;
 
-            foreach (KeyValuePair<Texture2D, List<MountainCardPlacement>> pair
-                in groups)
-            {
-                SortMountainCardsBackToFront(pair.Value, cameraForward);
-                Material material = GetOrCreateMountainCardMaterial(
-                    builder,
-                    pair.Key,
-                    materials);
-                if (!material)
-                    continue;
+            // 卡片几何中心 = 放置锚点偏移半个宽高（对象原点居中，视觉位置不变）。
+            Vector3 center = placement.position
+                + cameraRight
+                    * ((0.5f - placement.pivot.x) * placement.width)
+                + cameraUp
+                    * ((0.5f - placement.pivot.y) * placement.height);
 
-                for (int start = 0;
-                    start < pair.Value.Count;
-                    start += MountainCardsPerMesh)
-                {
-                    int count = Mathf.Min(
-                        MountainCardsPerMesh,
-                        pair.Value.Count - start);
-                    CreateMountainCardMesh(
-                        builder,
-                        root,
-                        pair.Key,
-                        material,
-                        pair.Value,
-                        start,
-                        count,
-                        cameraRight,
-                        cameraUp,
-                        cameraNormal,
-                        meshIndex++,
-                        0);
-                }
-            }
+            GameObject cardObject = InstantiateSmart(sourcePrefab);
+            if (!cardObject)
+                continue;
+            cardObject.transform.SetParent(root, false);
+            cardObject.transform.position = center;
+            cardObject.transform.right = cameraRight;
+            cardObject.transform.up = cameraUp;
+            cardObject.transform.localScale = new Vector3(
+                placement.flipX ? -placement.width : placement.width,
+                placement.flipY ? -placement.height : placement.height,
+                1f);
+            cardObject.name = $"{sourcePrefab.name}__PBM_{placement.sequence:D5}";
+            cardObject.transform.hasChanged = false;
+            createdCount++;
         }
-        return meshIndex > 0;
+        return createdCount > 0;
     }
 
-    private static void SortMountainCardsBackToFront(
-        List<MountainCardPlacement> placements,
-        Vector3 cameraForward)
-    {
-        placements.Sort((left, right) =>
-        {
-            float leftDepth = Vector3.Dot(left.position, cameraForward);
-            float rightDepth = Vector3.Dot(right.position, cameraForward);
-            int depthOrder = rightDepth.CompareTo(leftDepth);
-            return depthOrder != 0
-                ? depthOrder
-                : left.sequence.CompareTo(right.sequence);
-        });
-    }
-
-    private static int CountMountainCardBatches(
-        IList<MountainCardPlacement> placements)
-    {
-        int batchCount = 0;
-        int start = 0;
-        while (start < placements.Count)
-        {
-            Texture2D texture = placements[start].texture;
-            int count = 1;
-            while (start + count < placements.Count
-                && count < MountainCardsPerMesh
-                && placements[start + count].texture == texture)
-            {
-                count++;
-            }
-            start += count;
-            batchCount++;
-        }
-        return batchCount;
-    }
-
-    private static Material GetOrCreateMountainCardMaterial(
+    private static GameObject GetOrCreateMountainCardSourcePrefab(
         PathSpline builder,
+        Object sourceAsset,
         Texture2D texture,
-        IDictionary<Texture2D, Material> materials)
+        Rect uv)
     {
-        if (materials.TryGetValue(texture, out Material material))
-            return material;
-
-        material = CreateMountainCardMaterial(builder, texture);
-        if (material)
-            materials.Add(texture, material);
-        return material;
-    }
-
-    private static void CreateMountainCardMesh(
-        PathSpline builder,
-        Transform root,
-        Texture2D texture,
-        Material material,
-        IList<MountainCardPlacement> placements,
-        int start,
-        int count,
-        Vector3 cameraRight,
-        Vector3 cameraUp,
-        Vector3 cameraNormal,
-        int meshIndex,
-        int sortingOrder)
-    {
-        Vector3[] vertices = new Vector3[count * 4];
-        Vector3[] normals = new Vector3[count * 4];
-        Vector4[] tangents = new Vector4[count * 4];
-        Vector2[] uv = new Vector2[count * 4];
-        Color[] colors = new Color[count * 4];
-        int[] triangles = new int[count * 6];
-        Vector3 localNormal =
-            root.InverseTransformDirection(cameraNormal).normalized;
-        Vector3 localRight =
-            root.InverseTransformDirection(cameraRight).normalized;
-        Vector4 tangent = new Vector4(
-            localRight.x,
-            localRight.y,
-            localRight.z,
-            -1f);
-
-        for (int i = 0; i < count; i++)
+        if (!builder || !sourceAsset || !texture)
+            return null;
+        if (!TryEnsureAssetFolder(
+            builder.generatedAssetOutputFolder,
+            out string modelFolder,
+            out string modelFolderError))
         {
-            MountainCardPlacement placement = placements[start + i];
-            float left = -placement.pivot.x * placement.width;
-            float right = (1f - placement.pivot.x) * placement.width;
-            float bottom = -placement.pivot.y * placement.height;
-            float top = (1f - placement.pivot.y) * placement.height;
-            Vector3 bottomLeft = placement.position
-                + cameraRight * left + cameraUp * bottom;
-            Vector3 topLeft = placement.position
-                + cameraRight * left + cameraUp * top;
-            Vector3 topRight = placement.position
-                + cameraRight * right + cameraUp * top;
-            Vector3 bottomRight = placement.position
-                + cameraRight * right + cameraUp * bottom;
-
-            int vertex = i * 4;
-            vertices[vertex] = root.InverseTransformPoint(bottomLeft);
-            vertices[vertex + 1] = root.InverseTransformPoint(topLeft);
-            vertices[vertex + 2] = root.InverseTransformPoint(topRight);
-            vertices[vertex + 3] = root.InverseTransformPoint(bottomRight);
-            for (int corner = 0; corner < 4; corner++)
-            {
-                normals[vertex + corner] = localNormal;
-                tangents[vertex + corner] = tangent;
-                colors[vertex + corner] = builder.mountainCardColor;
-            }
-
-            float uLeft = placement.flipX
-                ? placement.uv.xMax
-                : placement.uv.xMin;
-            float uRight = placement.flipX
-                ? placement.uv.xMin
-                : placement.uv.xMax;
-            uv[vertex] = new Vector2(uLeft, placement.uv.yMin);
-            uv[vertex + 1] = new Vector2(uLeft, placement.uv.yMax);
-            uv[vertex + 2] = new Vector2(uRight, placement.uv.yMax);
-            uv[vertex + 3] = new Vector2(uRight, placement.uv.yMin);
-
-            int triangle = i * 6;
-            triangles[triangle] = vertex;
-            triangles[triangle + 1] = vertex + 1;
-            triangles[triangle + 2] = vertex + 2;
-            triangles[triangle + 3] = vertex;
-            triangles[triangle + 4] = vertex + 2;
-            triangles[triangle + 5] = vertex + 3;
+            Debug.LogError(
+                $"[Path Builder] 面片模型输出路径无效：{modelFolderError}",
+                builder);
+            return null;
+        }
+        if (!TryEnsureAssetFolder(
+            builder.prefabOutputFolder,
+            out string prefabFolder,
+            out string prefabFolderError))
+        {
+            Debug.LogError(
+                $"[Path Builder] 面片 Prefab 输出路径无效：{prefabFolderError}",
+                builder);
+            return null;
         }
 
+        Material material = builder.mountainDecalSet
+            && AssetDatabase.Contains(builder.mountainDecalSet)
+                ? GetOrCreateSharedMountainDecalMaterial(
+                    builder.mountainDecalSet,
+                    texture)
+                : GetOrCreateAutomaticSharedMountainMaterial(builder, texture);
+        if (!material)
+            return null;
+
+        string sourceKey = GetStableMountainMaterialAssetKey(sourceAsset);
+        string materialKey = GetStableMountainMaterialAssetKey(material);
+        string colorKey = ColorUtility.ToHtmlStringRGBA(
+            builder.mountainCardColor);
+        string uvKey = $"{uv.xMin:R}|{uv.yMin:R}|{uv.xMax:R}|{uv.yMax:R}";
+        string key = sourceKey + "|" + materialKey + "|" + colorKey
+            + "|" + uvKey;
+        string hash = Hash128.Compute(key).ToString().Substring(0, 16);
+        string safeName = MakeSafeFileName(sourceAsset.name);
+        string meshPath = $"{modelFolder}/MountainCard_{safeName}_{hash}.asset";
+        string prefabPath = $"{prefabFolder}/MountainCard_{safeName}_{hash}.prefab";
+
+        Mesh mesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
+        if (!mesh)
+        {
+            mesh = CreateCardQuadMesh(
+                uv,
+                builder.mountainCardColor,
+                $"MountainCards_{safeName}_{hash}",
+                HideFlags.None);
+            AssetDatabase.CreateAsset(mesh, meshPath);
+        }
+
+        GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(
+            prefabPath);
+        if (!prefab)
+        {
+            GameObject source = new GameObject($"MountainCard_{safeName}");
+            MeshFilter filter = source.AddComponent<MeshFilter>();
+            MeshRenderer renderer = source.AddComponent<MeshRenderer>();
+            filter.sharedMesh = mesh;
+            renderer.sharedMaterial = material;
+            renderer.shadowCastingMode = ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+            prefab = PrefabUtility.SaveAsPrefabAsset(source, prefabPath);
+            Object.DestroyImmediate(source);
+        }
+        return prefab;
+    }
+
+    private static Mesh CreateCardQuadMesh(
+        Rect uv,
+        Color vertexColor,
+        string meshName,
+        HideFlags hideFlags)
+    {
+        float uLeft = uv.xMin;
+        float uRight = uv.xMax;
+        float vBottom = uv.yMin;
+        float vTop = uv.yMax;
+
+        // 单位 quad：以 (0,0,0) 为中心、宽高各 1，本地 +X 向右、+Y 向上、
+        // 法线 +Z。对象原点即卡片自身几何中心。
         Mesh mesh = new Mesh
         {
-            name = $"MountainCards_{texture.name}_{meshIndex:D2}_Preview",
-            indexFormat = vertices.Length > 65535
-                ? IndexFormat.UInt32
-                : IndexFormat.UInt16,
-            hideFlags = HideFlags.DontSaveInBuild
+            name = meshName,
+            hideFlags = hideFlags
         };
-        mesh.vertices = vertices;
-        mesh.normals = normals;
-        mesh.tangents = tangents;
-        mesh.uv = uv;
-        mesh.colors = colors;
-        mesh.triangles = triangles;
+        mesh.vertices = new Vector3[]
+        {
+            new Vector3(-0.5f, -0.5f, 0f),
+            new Vector3( 0.5f, -0.5f, 0f),
+            new Vector3( 0.5f,  0.5f, 0f),
+            new Vector3(-0.5f,  0.5f, 0f)
+        };
+        mesh.normals = new Vector3[]
+        {
+            Vector3.forward,
+            Vector3.forward,
+            Vector3.forward,
+            Vector3.forward
+        };
+        mesh.tangents = new Vector4[]
+        {
+            new Vector4(1f, 0f, 0f, -1f),
+            new Vector4(1f, 0f, 0f, -1f),
+            new Vector4(1f, 0f, 0f, -1f),
+            new Vector4(1f, 0f, 0f, -1f)
+        };
+        mesh.uv = new Vector2[]
+        {
+            new Vector2(uLeft, vBottom),
+            new Vector2(uRight, vBottom),
+            new Vector2(uRight, vTop),
+            new Vector2(uLeft, vTop)
+        };
+        mesh.colors = new Color[]
+        {
+            vertexColor,
+            vertexColor,
+            vertexColor,
+            vertexColor
+        };
+        mesh.triangles = new int[] { 0, 1, 2, 0, 2, 3 };
         mesh.RecalculateBounds();
-
-        GameObject cardObject = new GameObject(
-            $"Mountain Cards - {texture.name} {meshIndex:D2}");
-        cardObject.transform.SetParent(root, false);
-        MeshFilter filter = cardObject.AddComponent<MeshFilter>();
-        MeshRenderer renderer = cardObject.AddComponent<MeshRenderer>();
-        filter.sharedMesh = mesh;
-        renderer.sharedMaterial = material;
-        renderer.sortingLayerID = builder.mountainCardSortingLayerId;
-        renderer.sortingOrder = Mathf.Clamp(
-            builder.mountainCardSortingOrder + sortingOrder,
-            short.MinValue,
-            short.MaxValue);
-        renderer.shadowCastingMode = ShadowCastingMode.Off;
-        renderer.receiveShadows = false;
+        return mesh;
     }
 
     private static Material CreateMountainCardMaterial(
@@ -1656,18 +2103,14 @@ internal static class PathBuilderGenerator
         if (material.HasProperty("_Cull"))
             material.SetFloat("_Cull", 0f);
 
-        ConfigureMountainCardTransparency(
-            material,
-            builder.mountainDecalSet
-                ? builder.mountainDecalSet.renderQueue
-                : builder.mountainCardRenderQueue);
+        ConfigureMountainCardTransparency(material);
         return material;
     }
 
-    private static void ConfigureMountainCardTransparency(
-        Material material,
-        int renderQueue)
+    private static void ConfigureMountainCardTransparency(Material material)
     {
+        // 渲染队列不再由工具写死，完全交给 baseMaterial 自身的 renderQueue。
+        ConfigureMountainCardDoubleSided(material);
         if (material.HasProperty("_Surface"))
             material.SetFloat("_Surface", 1f);
         if (material.HasProperty("_Blend"))
@@ -1688,7 +2131,30 @@ internal static class PathBuilderGenerator
         material.DisableKeyword("_ALPHAMODULATE_ON");
         material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
         material.SetOverrideTag("RenderType", "Transparent");
-        material.renderQueue = Mathf.Clamp(renderQueue, 2501, 3999);
+    }
+
+    private static void ConfigureMountainCardDoubleSided(Material material)
+    {
+        if (!material)
+            return;
+
+        // URP Lit / Unlit, Shader Graph and common custom shaders use
+        // different property names for face culling. Set every supported
+        // variant so both preview and baked mountain cards remain two-sided.
+        if (material.HasProperty("_Cull"))
+            material.SetFloat("_Cull", (float)CullMode.Off);
+        if (material.HasProperty("_CullMode"))
+            material.SetFloat("_CullMode", (float)CullMode.Off);
+        if (material.HasProperty("_CullModeForward"))
+            material.SetFloat("_CullModeForward", (float)CullMode.Off);
+        if (material.HasProperty("_DoubleSidedEnable"))
+            material.SetFloat("_DoubleSidedEnable", 1f);
+        if (material.HasProperty("_DoubleSidedNormalMode"))
+            material.SetFloat("_DoubleSidedNormalMode", 0f);
+
+        material.doubleSidedGI = true;
+        material.EnableKeyword("_DOUBLESIDED_ON");
+        material.EnableKeyword("_DOUBLE_SIDED_ON");
     }
 
     private static void ApplySharedMountainDecalMaterials(
@@ -1697,7 +2163,10 @@ internal static class PathBuilderGenerator
     {
         MountainDecalSet decalSet = builder.mountainDecalSet;
         if (!decalSet || !AssetDatabase.Contains(decalSet))
+        {
+            ApplyAutomaticSharedMountainMaterials(builder, root);
             return;
+        }
 
         Dictionary<Texture2D, Material> sharedMaterials =
             new Dictionary<Texture2D, Material>();
@@ -1744,6 +2213,129 @@ internal static class PathBuilderGenerator
                 Undo.DestroyObjectImmediate(material);
         }
         EditorUtility.SetDirty(decalSet);
+    }
+
+    private static void ApplyAutomaticSharedMountainMaterials(
+        PathSpline builder,
+        Transform root)
+    {
+        Dictionary<Texture2D, Material> sharedMaterials =
+            new Dictionary<Texture2D, Material>();
+        HashSet<Material> temporaryMaterials = new HashSet<Material>();
+        MeshRenderer[] renderers =
+            root.GetComponentsInChildren<MeshRenderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            MeshRenderer renderer = renderers[i];
+            MeshFilter filter = renderer.GetComponent<MeshFilter>();
+            if (!filter || !IsGeneratedMountainOutputMesh(filter.sharedMesh))
+                continue;
+
+            Material formerMaterial = renderer.sharedMaterial;
+            Texture2D texture = GetMountainCardTexture(formerMaterial);
+            if (!texture)
+                continue;
+            if (!sharedMaterials.TryGetValue(texture, out Material sharedMaterial))
+            {
+                sharedMaterial = GetOrCreateAutomaticSharedMountainMaterial(
+                    builder,
+                    texture);
+                if (!sharedMaterial)
+                    continue;
+                sharedMaterials.Add(texture, sharedMaterial);
+            }
+
+            Undo.RecordObject(renderer, "Use Shared Mountain Material");
+            renderer.sharedMaterial = sharedMaterial;
+            EditorUtility.SetDirty(renderer);
+            if (formerMaterial
+                && formerMaterial != sharedMaterial
+                && !AssetDatabase.Contains(formerMaterial))
+            {
+                temporaryMaterials.Add(formerMaterial);
+            }
+        }
+
+        foreach (Material material in temporaryMaterials)
+        {
+            if (material)
+                Undo.DestroyObjectImmediate(material);
+        }
+    }
+
+    private static Material GetOrCreateAutomaticSharedMountainMaterial(
+        PathSpline builder,
+        Texture2D texture)
+    {
+        if (!builder || !texture)
+            return null;
+
+        string textureKey = GetStableMountainMaterialAssetKey(texture);
+        Material template = builder.mountainCardMaterial;
+        string templateKey = template
+            ? GetStableMountainMaterialAssetKey(template)
+            : "URP_Unlit_Default";
+        string key = textureKey + "|" + templateKey;
+        string hash = Hash128.Compute(key).ToString().Substring(0, 16);
+        string safeTextureName = MakeSafeFileName(texture.name);
+        string materialFolder = ResolveMountainMaterialOutputFolder(builder);
+        EnsureAssetFolder(materialFolder);
+        string assetPath = $"{materialFolder}/"
+            + $"Mountain_{safeTextureName}_{hash}.mat";
+
+        Material material = AssetDatabase.LoadAssetAtPath<Material>(assetPath);
+        if (!material)
+        {
+            material = CreateMountainCardMaterial(builder, texture);
+            if (!material)
+                return null;
+            material.name = $"Mountain Shared - {texture.name}";
+            material.hideFlags = HideFlags.None;
+            AssetDatabase.CreateAsset(material, assetPath);
+        }
+        else
+        {
+            ConfigureMountainCardDoubleSided(material);
+            ConfigureMountainCardTransparency(material);
+            EditorUtility.SetDirty(material);
+        }
+        return material;
+    }
+
+    private static string ResolveMountainMaterialOutputFolder(PathSpline builder)
+    {
+        string folder;
+        if (!string.IsNullOrWhiteSpace(builder.mountainMaterialOutputFolder))
+        {
+            folder = builder.mountainMaterialOutputFolder;
+        }
+        else
+        {
+            folder = builder.generatedAssetOutputFolder;
+            if (string.IsNullOrWhiteSpace(folder))
+                folder = PathSpline.DefaultGeneratedAssetFolder;
+            folder = folder.EndsWith("/Models", StringComparison.OrdinalIgnoreCase)
+                ? folder.Substring(0, folder.Length - "/Models".Length)
+                    + "/Materials"
+                : folder + "/Materials";
+        }
+
+        if (TryNormalizeAssetFolder(folder, out string normalized, out _))
+            return normalized;
+        return folder;
+    }
+
+    private static string GetStableMountainMaterialAssetKey(Object asset)
+    {
+        if (asset
+            && AssetDatabase.TryGetGUIDAndLocalFileIdentifier(
+                asset,
+                out string guid,
+                out long localId))
+        {
+            return guid + ":" + localId;
+        }
+        return asset ? asset.name : "None";
     }
 
     internal static void RefreshMountainDecalSetMaterials(
@@ -1863,7 +2455,7 @@ internal static class PathBuilderGenerator
             material.SetColor("_Color", Color.white);
         if (material.HasProperty("_Cull"))
             material.SetFloat("_Cull", 0f);
-        ConfigureMountainCardTransparency(material, decalSet.renderQueue);
+        ConfigureMountainCardTransparency(material);
         EditorUtility.SetDirty(material);
         EditorUtility.SetDirty(decalSet);
         return material;

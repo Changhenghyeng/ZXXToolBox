@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace ArtCode
@@ -46,11 +47,18 @@ namespace ArtCode
         private float[] transitionStartValues;
         private float[] transitionElapsedValues;
         private bool[] transitionActive;
+        private readonly List<int> debugRegionIds = new List<int>();
+        private readonly List<List<Vector2Int>> debugRegionCells = new List<List<Vector2Int>>();
+        private readonly List<Vector2Int> debugMainCityCells = new List<Vector2Int>();
+        private int debugClearedRegionCount;
+        private bool debugMappingReady;
 
         public int Columns { get { return columns; } }
         public int Rows { get { return rows; } }
         public Vector2 WorldOrigin { get { return worldOrigin; } }
         public Vector2 WorldSize { get { return worldSize; } }
+        /// <summary>返回雾网格世界范围使用的锚点类型。</summary>
+        public PivotType GridPivotType { get { return pivotType; } }
         public float CellWidth { get { return worldSize.x / Mathf.Max(1, columns); } }
         public float CellHeight { get { return worldSize.y / Mathf.Max(1, rows); } }
 
@@ -112,13 +120,79 @@ namespace ArtCode
 
         private void Update()
         {
-            if (handleMouseInput)
-            {
-                if (Input.GetMouseButtonDown(0)) TryClick(Input.mousePosition, false);
-                if (Input.GetMouseButtonDown(1)) TryClick(Input.mousePosition, true);
-            }
-
+            // 鼠标左右键显隐雾气仅用于编辑器演示，运行时关闭该交互；程序接口仍保留给主城状态同步使用。
+            // 临时 A/N/B 区域雾气测试入口暂时注释，后续定位问题时再启用。
+            // if (debugMappingReady)
+            // {
+            //     if (Input.GetKeyDown(KeyCode.A)) ResetTemporaryRegionFog();
+            //     if (Input.GetKeyDown(KeyCode.N)) ClearNextTemporaryRegionFog();
+            //     if (Input.GetKeyDown(KeyCode.B)) RestorePreviousTemporaryRegionFog();
+            // }
             UpdateTransitions();
+        }
+
+        /// <summary>配置临时区域雾气定位工具；区域顺序由主城系统按 regionId 升序传入。</summary>
+        public void ConfigureTemporaryRegionDebug(IList<int> regionIds, IList<IList<Vector2Int>> regionCells, IList<Vector2Int> mainCityCells)
+        {
+            debugRegionIds.Clear();
+            debugRegionCells.Clear();
+            debugMainCityCells.Clear();
+            if (regionIds != null && regionCells != null)
+            {
+                int count = Mathf.Min(regionIds.Count, regionCells.Count);
+                for (int index = 0; index < count; index++)
+                {
+                    debugRegionIds.Add(regionIds[index]);
+                    debugRegionCells.Add(regionCells[index] == null ? new List<Vector2Int>() : new List<Vector2Int>(regionCells[index]));
+                }
+            }
+            if (mainCityCells != null) debugMainCityCells.AddRange(mainCityCells);
+            debugClearedRegionCount = 0;
+            debugMappingReady = debugRegionIds.Count > 0;
+            UnityEngine.Debug.Log($"[FogDebug] 映射已配置 regions={debugRegionIds.Count}, mainCityCells={debugMainCityCells.Count}");
+        }
+
+        /// <summary>临时调试键 A：主城清雾，所有外围区域显示雾气。</summary>
+        private void ResetTemporaryRegionFog()
+        {
+            ShowAll();
+            SetCellsVisible(debugMainCityCells, false);
+            debugClearedRegionCount = 0;
+            UnityEngine.Debug.Log("[FogDebug] A：已显示所有外围区域雾气");
+        }
+
+        /// <summary>临时调试键 N：按 regionId 升序清除下一个区域的雾气。</summary>
+        private void ClearNextTemporaryRegionFog()
+        {
+            if (debugClearedRegionCount >= debugRegionIds.Count) return;
+            int index = debugClearedRegionCount++;
+            SetCellsVisible(debugRegionCells[index], false);
+            UnityEngine.Debug.Log($"[FogDebug] N：清除 regionId={debugRegionIds[index]}，cells={FormatCells(debugRegionCells[index])}");
+        }
+
+        /// <summary>临时调试键 B：恢复上一个由 N 清除的区域雾气。</summary>
+        private void RestorePreviousTemporaryRegionFog()
+        {
+            if (debugClearedRegionCount <= 0) return;
+            int index = --debugClearedRegionCount;
+            SetCellsVisible(debugRegionCells[index], true);
+            UnityEngine.Debug.Log($"[FogDebug] B：恢复 regionId={debugRegionIds[index]}，cells={FormatCells(debugRegionCells[index])}");
+        }
+
+        /// <summary>批量设置调试区域对应的雾格显示状态。</summary>
+        private void SetCellsVisible(IList<Vector2Int> cells, bool visible)
+        {
+            if (cells == null) return;
+            foreach (Vector2Int cell in cells) SetCellVisible(cell.x, cell.y, visible);
+        }
+
+        /// <summary>格式化调试日志中的雾格坐标。</summary>
+        private static string FormatCells(IList<Vector2Int> cells)
+        {
+            if (cells == null || cells.Count == 0) return "none";
+            List<string> values = new List<string>(cells.Count);
+            foreach (Vector2Int cell in cells) values.Add($"({cell.x},{cell.y})");
+            return string.Join(",", values);
         }
 
         public void Configure(int columnCount, int rowCount, Vector2 origin, Vector2 size, float height, PivotType pivot)
@@ -130,6 +204,12 @@ namespace ArtCode
             gridHeight = height;
             pivotType = pivot;
             ResetMaskData(true);
+        }
+
+        /// <summary>更新雾网格逻辑世界原点并保留当前雾气遮罩，用于与运行时地面网格校准。</summary>
+        public void SetWorldOrigin(Vector2 origin)
+        {
+            worldOrigin = origin;
         }
 
         public void SetMaskPreview(Material material, Renderer[] renderers)
@@ -197,6 +277,27 @@ namespace ArtCode
             int index = ToIndex(x, y);
             StartCellTransition(index, visible ? 1f : 0f);
             FillCellPixels(x, y);
+            ApplyMask();
+        }
+
+        /// <summary>
+        /// 批量设置雾格目标状态，并沿用鼠标编辑使用的逐格渐隐/溶解过渡。
+        /// 目标数组按 y * Columns + x 排列，长度不足或超出的部分会被忽略。
+        /// </summary>
+        public void SetVisibilityTargets(bool[] targets)
+        {
+            EnsureMask();
+            if (targets == null) return;
+
+            int count = Mathf.Min(targets.Length, maskRData.Length);
+            for (int index = 0; index < count; index++)
+            {
+                int x = index % columns;
+                int y = index / columns;
+                StartCellTransition(index, targets[index] ? 1f : 0f);
+                FillCellPixels(x, y);
+            }
+
             ApplyMask();
         }
 

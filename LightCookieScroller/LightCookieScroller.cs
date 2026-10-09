@@ -1,4 +1,7 @@
 using UnityEngine;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 [RequireComponent(typeof(Light))]
 public class LightCookieScroller : MonoBehaviour
@@ -102,4 +105,28 @@ public class LightCookieScroller : MonoBehaviour
         if (cookieTexture != null && cookieTexture.wrapMode != TextureWrapMode.Repeat)
             Debug.LogWarning("LightCookieScroller: Cookie 纹理 Wrap Mode 不是 Repeat，滚动可能不正常。请在纹理导入设置中改为 Repeat。", cookieTexture);
     }
+
+#if UNITY_EDITOR
+    public static void AddToSelectedLights()
+    {
+        var targets = new System.Collections.Generic.List<GameObject>();
+        foreach (var go in Selection.gameObjects ?? new GameObject[0])
+        {
+            if (go.GetComponent<Light>() != null && go.GetComponent<LightCookieScroller>() == null)
+                targets.Add(go);
+        }
+
+        if (targets.Count == 0)
+        {
+            EditorUtility.DisplayDialog("Light Cookie Scroller",
+                "请在 Hierarchy 中选中至少一个带 Light 组件、且未挂载 LightCookieScroller 的物体。", "确定");
+            return;
+        }
+
+        foreach (var go in targets)
+            Undo.AddComponent<LightCookieScroller>(go);
+
+        Debug.Log($"LightCookieScroller: 已添加到 {targets.Count} 个物体。");
+    }
+#endif
 }

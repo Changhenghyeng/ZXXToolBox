@@ -16,7 +16,7 @@ public sealed class CaptureHelper : EditorWindow
     private static readonly (string file, string steps, Action open)[] List =
     {
         ("ProcGen",              "1.拖入目标模型  2.设置散布参数  3.添加Prefab插槽  4.点Generate",                    ProcGen.ProcGenWindow.Open),
-        ("WallBuilder",          "1.选模式  2.拖入墙段Prefab  3.设尺寸段数  4.Build Walls",                            WallBuilderTool.ShowWindow),
+        ("PathBuilder",          "1.选择类型  2.绘制或设置路径  3.调整生成参数  4.预览或生成",                        PathBuilderWindow.ShowWindow),
         ("FogOfWar",             "1.Fit选区自动算范围  2.设行列数  3.Create Clickable Fog Grid",                        FogOfWarTool.Editor.FogOfWarToolWindow.Open),
         ("DayChangeTransition",  "1.指定主光源  2.调过渡时长  3.Create/Repair Setup  4.预览",                           DayChangeTransitionTool.Editor.DayChangeTransitionToolWindow.Open),
         ("BuildingCard",         "1.拖入正交相机+CellSize  2.拖入建筑PNG  3.填Grid WxD  4.拖角点校准  5.Generate",     BuildingCardTool.ShowWindow),

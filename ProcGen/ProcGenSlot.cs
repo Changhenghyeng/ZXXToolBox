@@ -65,8 +65,65 @@ namespace ProcGen
         [Tooltip("材质覆盖。留空则使用 prefab 原本的材质。填入后会覆盖所有子 Renderer 的全部材质")]
         public Material overrideMaterial = null;
 
+        [Header("组群制作")]
+        [Tooltip("确认生成后的组群父节点名称。留空时使用 Slot 名称")]
+        public string groupParentName = "";
+
+        [Tooltip("一次组群中生成的物体数量")]
+        public int groupObjectCount = 5;
+
+        [Tooltip("组群在 XZ 平面上的分布半径 (米)")]
+        public float groupRadius = 2f;
+
+        [Tooltip("组群内物体中心之间的最小距离 (米)。0 表示不限制")]
+        public float groupMinSpacing = 0.5f;
+
+        [Tooltip("组群内物体的随机缩放最小值")]
+        public float groupScaleMin = 0.8f;
+
+        [Tooltip("组群内物体的随机缩放最大值")]
+        public float groupScaleMax = 1.2f;
+
+        [Tooltip("开启后可分别设置 X/Y/Z 三个轴的随机缩放范围；关闭时使用统一缩放系数")]
+        public bool groupSeparateAxisScale = false;
+
+        public float groupScaleXMin = 0.8f;
+        public float groupScaleXMax = 1.2f;
+        public float groupScaleYMin = 0.8f;
+        public float groupScaleYMax = 1.2f;
+        public float groupScaleZMin = 0.8f;
+        public float groupScaleZMax = 1.2f;
+
+        [Tooltip("组群内物体的随机 Y 旋转最小角度")]
+        public float groupRotationMin = 0f;
+
+        [Tooltip("组群内物体的随机 Y 旋转最大角度")]
+        public float groupRotationMax = 360f;
+
+        [Tooltip("组群随机种子。相同参数和种子会生成相同组合")]
+        public int groupSeed = 12345;
+
+        [Tooltip("组群内每个物体有 50% 概率沿 X 轴随机翻转")]
+        public bool groupRandomFlipX = false;
+
+        [Tooltip("组群内每个物体有 50% 概率沿 Y 轴随机翻转")]
+        public bool groupRandomFlipY = false;
+
+        [Tooltip("组群内每个物体有 50% 概率沿 Z 轴随机翻转")]
+        public bool groupRandomFlipZ = false;
+
+        [Tooltip("组群内所有物体始终沿 X 轴翻转；开启后优先于随机 X 翻转")]
+        public bool groupFixedFlipX = false;
+
+        [Tooltip("组群内所有物体始终沿 Y 轴翻转；开启后优先于随机 Y 翻转")]
+        public bool groupFixedFlipY = false;
+
+        [Tooltip("组群内所有物体始终沿 Z 轴翻转；开启后优先于随机 Z 翻转")]
+        public bool groupFixedFlipZ = false;
+
         // UI 折叠状态
         [System.NonSerialized] public bool foldout = true;
         [System.NonSerialized] public bool rendererListFoldout = false;
+        [System.NonSerialized] public bool groupComposerFoldout = false;
     }
 }

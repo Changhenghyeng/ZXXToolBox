@@ -17,7 +17,7 @@ namespace SLGMapTileCutter.Editor
     /// </summary>
     public sealed class SLGMapTileMapAsset : ScriptableObject
     {
-        public const int CurrentVersion = 5;
+        public const int CurrentVersion = 6;
         public int version;
 
         public Texture2D lineTexture;
@@ -32,6 +32,7 @@ namespace SLGMapTileCutter.Editor
 
         public float darkThreshold;
         public int closeRadius;
+        public bool enclosedRegionsOnly;
         public float skeletonSimplifyTolerance;
         public float skeletonSmoothing;
         public float tileGap;

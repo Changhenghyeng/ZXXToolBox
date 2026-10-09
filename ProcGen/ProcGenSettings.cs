@@ -33,6 +33,17 @@ namespace ProcGen
         [Tooltip("每个候选点放置失败的最大重试次数")]
         public int maxRetriesPerPoint = 5;
 
+        [Header("场景物体避让")]
+        [Tooltip("生成时需要避开的场景物体。拖入父物体后会自动包含它的所有子物体")]
+        [System.NonSerialized]
+        public List<GameObject> avoidanceObjects = new List<GameObject>();
+
+        [HideInInspector]
+        public List<string> avoidanceObjectGlobalIds = new List<string>();
+
+        [Tooltip("在场景物体包围盒外额外保留的安全距离 (米)")]
+        public float avoidancePadding = 0f;
+
         [Header("调试设置")]
         [Tooltip("开启调试可视化（Scene视图显示）")]
         public bool showDebugGizmos = false;

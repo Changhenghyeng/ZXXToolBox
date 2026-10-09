@@ -98,6 +98,12 @@ namespace ZXXTools.PathBuilder
         CameraFacingCards
     }
 
+    public enum MountainFlattenTarget
+    {
+        WorldPlane,
+        SurfaceColliders
+    }
+
     [Serializable]
     public sealed class PathKnot
     {
@@ -140,6 +146,17 @@ namespace ZXXTools.PathBuilder
         public Sprite sprite;
         public Texture2D texture;
         [Min(0f)] public float weight = 1f;
+    }
+
+    [Serializable]
+    public sealed class MountainInstanceOverride
+    {
+        public int placementIndex;
+        public bool relativeTransform;
+        public bool overridePosition;
+        public Vector3 localPosition;
+        public bool overrideScale;
+        public Vector3 scale = Vector3.one;
     }
 
     // Kept only so scenes created before the unified source list can migrate
@@ -238,6 +255,9 @@ namespace ZXXTools.PathBuilder
         public List<MountainSourceEntry> mountainSources =
             new List<MountainSourceEntry>();
         [SerializeField, HideInInspector]
+        private List<MountainInstanceOverride> mountainInstanceOverrides =
+            new List<MountainInstanceOverride>();
+        [SerializeField, HideInInspector]
         private List<MountainPrefabEntry> mountainPrefabs =
             new List<MountainPrefabEntry>();
         public int randomSeed = 12345;
@@ -267,6 +287,9 @@ namespace ZXXTools.PathBuilder
         public MountainCardPivot mountainCardPivot =
             MountainCardPivot.BottomCenter;
         public bool mountainCardRandomFlip = true;
+        public bool mountainCardFlipX;
+        public bool mountainCardFlipY;
+        public bool mountainCardRandomFlipY;
         public Color mountainCardColor = Color.white;
         public MountainCardSortingMode mountainCardSortingMode =
             MountainCardSortingMode.AccurateBackToFront;
@@ -277,7 +300,11 @@ namespace ZXXTools.PathBuilder
         [Header("Mountain Bake")]
         public MountainBakeOutput mountainBakeOutput =
             MountainBakeOutput.GroundDecal;
+        public bool mountainFlattenPreview;
         public bool keepMountainAuthoringAfterBake = true;
+        public MountainFlattenTarget mountainFlattenTarget =
+            MountainFlattenTarget.WorldPlane;
+        public float mountainWorldPlaneHeight;
         public LayerMask mountainDecalSurfaceMask = ~0;
         [Min(0.1f)] public float mountainDecalProjectionDistance = 2000f;
         [HideInInspector, Min(0.1f)]
@@ -288,6 +315,8 @@ namespace ZXXTools.PathBuilder
         public string generatedAssetOutputFolder =
             DefaultGeneratedAssetFolder;
         public string prefabOutputFolder = DefaultPrefabOutputFolder;
+        [Tooltip("面片山共享材质保存目录；留空则跟随 Asset Folder 的 Materials 子目录")]
+        public string mountainMaterialOutputFolder;
 
         [Header("River")]
         public RibbonPathPreset ribbonPreset = RibbonPathPreset.River;
@@ -359,6 +388,12 @@ namespace ZXXTools.PathBuilder
         {
             if (string.IsNullOrEmpty(sessionId))
                 sessionId = Guid.NewGuid().ToString("N");
+            return sessionId;
+        }
+
+        internal string RegenerateSessionId()
+        {
+            sessionId = Guid.NewGuid().ToString("N");
             return sessionId;
         }
 
@@ -448,6 +483,11 @@ namespace ZXXTools.PathBuilder
                 edgePrefabs = new List<PathEdgePrefabEntry>();
             if (mountainSources == null)
                 mountainSources = new List<MountainSourceEntry>();
+            if (mountainInstanceOverrides == null)
+            {
+                mountainInstanceOverrides =
+                    new List<MountainInstanceOverride>();
+            }
             EnsureOutputStack();
             MigrateLegacyMountainSources();
             spacingRange = OrderedPositiveRange(spacingRange, 0.05f);
@@ -476,6 +516,96 @@ namespace ZXXTools.PathBuilder
             mountainDecalSurfaceOffset = Mathf.Max(
                 0f,
                 mountainDecalSurfaceOffset);
+        }
+
+        internal bool TryGetMountainInstanceOverride(
+            int placementIndex,
+            out MountainInstanceOverride result)
+        {
+            if (mountainInstanceOverrides != null)
+            {
+                for (int i = 0; i < mountainInstanceOverrides.Count; i++)
+                {
+                    MountainInstanceOverride item =
+                        mountainInstanceOverrides[i];
+                    if (item != null && item.placementIndex == placementIndex)
+                    {
+                        result = item;
+                        return true;
+                    }
+                }
+            }
+
+            result = null;
+            return false;
+        }
+
+        internal void ApplyMountainInstanceTransformDelta(
+            int placementIndex,
+            bool setPosition,
+            Vector3 localPositionDelta,
+            bool setScale,
+            Vector3 scaleRatio)
+        {
+            if (mountainInstanceOverrides == null)
+            {
+                mountainInstanceOverrides =
+                    new List<MountainInstanceOverride>();
+            }
+
+            for (int i = 0; i < mountainInstanceOverrides.Count; i++)
+            {
+                MountainInstanceOverride item = mountainInstanceOverrides[i];
+                if (item != null && item.placementIndex == placementIndex)
+                {
+                    item.relativeTransform = true;
+                    if (setPosition)
+                    {
+                        item.overridePosition = true;
+                        item.localPosition += localPositionDelta;
+                    }
+                    if (setScale)
+                    {
+                        item.overrideScale = true;
+                        item.scale = Vector3.Scale(item.scale, scaleRatio);
+                    }
+                    return;
+                }
+            }
+
+            mountainInstanceOverrides.Add(new MountainInstanceOverride
+            {
+                placementIndex = placementIndex,
+                relativeTransform = true,
+                overridePosition = setPosition,
+                localPosition = localPositionDelta,
+                overrideScale = setScale,
+                scale = setScale ? scaleRatio : Vector3.one
+            });
+        }
+
+        internal bool HasLegacyMountainInstanceOverrides()
+        {
+            if (mountainInstanceOverrides == null)
+                return false;
+            for (int i = 0; i < mountainInstanceOverrides.Count; i++)
+            {
+                MountainInstanceOverride item = mountainInstanceOverrides[i];
+                if (item != null && !item.relativeTransform)
+                    return true;
+            }
+            return false;
+        }
+
+        internal void ClearMountainInstanceOverrides()
+        {
+            if (mountainInstanceOverrides == null)
+            {
+                mountainInstanceOverrides =
+                    new List<MountainInstanceOverride>();
+                return;
+            }
+            mountainInstanceOverrides.Clear();
         }
 
         public void EnsureOutputStack()

@@ -51,14 +51,18 @@ namespace ProcGen
                 if (asset != null && asset.settings != null)
                 {
                     settings = asset.settings;
+                    RestoreAvoidanceObjects();
                     return;
                 }
             }
             settings = new ProcGenSettings();
+            RestoreAvoidanceObjects();
         }
 
         private void SaveSettings()
         {
+            SyncAvoidanceObjectIds();
+
             var guids = UnityEditor.AssetDatabase.FindAssets("t:ProcGenSettingsAsset");
             ProcGenSettingsAsset asset = null;
             if (guids.Length > 0)
@@ -76,6 +80,41 @@ namespace ProcGen
                 UnityEditor.EditorUtility.SetDirty(asset);
             }
             UnityEditor.AssetDatabase.SaveAssets();
+        }
+
+        private void RestoreAvoidanceObjects()
+        {
+            settings.avoidanceObjects = new System.Collections.Generic.List<GameObject>();
+            if (settings.avoidanceObjectGlobalIds == null)
+                settings.avoidanceObjectGlobalIds = new System.Collections.Generic.List<string>();
+
+            foreach (string value in settings.avoidanceObjectGlobalIds)
+            {
+                if (string.IsNullOrEmpty(value)) continue;
+                if (!GlobalObjectId.TryParse(value, out GlobalObjectId id)) continue;
+
+                var go = GlobalObjectId.GlobalObjectIdentifierToObjectSlow(id) as GameObject;
+                if (go != null && go.scene.IsValid() && !settings.avoidanceObjects.Contains(go))
+                    settings.avoidanceObjects.Add(go);
+            }
+        }
+
+        private void SyncAvoidanceObjectIds()
+        {
+            if (settings.avoidanceObjectGlobalIds == null)
+                settings.avoidanceObjectGlobalIds = new System.Collections.Generic.List<string>();
+            else
+                settings.avoidanceObjectGlobalIds.Clear();
+
+            if (settings.avoidanceObjects == null) return;
+
+            foreach (var go in settings.avoidanceObjects)
+            {
+                if (go == null || !go.scene.IsValid()) continue;
+                string value = GlobalObjectId.GetGlobalObjectIdSlow(go).ToString();
+                if (!settings.avoidanceObjectGlobalIds.Contains(value))
+                    settings.avoidanceObjectGlobalIds.Add(value);
+            }
         }
 
         private void BuildList()
@@ -148,7 +187,12 @@ namespace ProcGen
                 slot.name = EditorGUI.TextField(Row(), Content("Name", "插槽名称").text, slot.name);
 
                 // Prefab 列表 (object | weight | -)
-                EditorGUI.LabelField(Row(), $"Prefabs ({slot.prefabEntries.Count})");
+                float prefabDropTop = y;
+                var prefabDropRect = new Rect(rect.x + 4f, prefabDropTop, rect.width - 4f,
+                    lh * (slot.prefabEntries.Count + 2)); // 标题 + 条目 + Add 按钮
+                // 必须先处理拖放事件，避免单个 ObjectField 抢先只接收一个 Prefab。
+                HandlePrefabDrop(prefabDropRect, slot);
+                EditorGUI.LabelField(Row(), $"Prefabs ({slot.prefabEntries.Count})  —  Drop Multiple Here");
                 int removeIdx = -1;
 
                 for (int pi = 0; pi < slot.prefabEntries.Count; pi++)
@@ -261,6 +305,102 @@ namespace ProcGen
                     }
                 }
 
+                var groupHeader = Row();
+                slot.groupComposerFoldout = EditorGUI.Foldout(groupHeader, slot.groupComposerFoldout,
+                    "Group Composer (create at world origin)", true);
+
+                if (slot.groupComposerFoldout)
+                {
+                    slot.groupParentName = EditorGUI.TextField(Row(),
+                        Content("  Parent Name", "确认生成后的父节点名称；留空时使用 Slot 名称"), slot.groupParentName);
+                    slot.groupObjectCount = Mathf.Max(1, EditorGUI.IntField(Row(),
+                        Content("  Object Count", "一个组群中随机生成多少个物体"), slot.groupObjectCount));
+                    slot.groupRadius = Mathf.Max(0f, EditorGUI.FloatField(Row(),
+                        Content("  Radius (m)", "组群在 XZ 平面的随机分布半径"), slot.groupRadius));
+                    slot.groupMinSpacing = Mathf.Max(0f, EditorGUI.FloatField(Row(),
+                        Content("  Min Spacing (m)", "组群内物体中心之间的最小距离，0 表示不限制"), slot.groupMinSpacing));
+                    slot.groupSeparateAxisScale = EditorGUI.Toggle(Row(),
+                        Content("  Separate XYZ Scale", "开启后分别设置三个轴；关闭时使用统一缩放系数"), slot.groupSeparateAxisScale);
+
+                    if (slot.groupSeparateAxisScale)
+                    {
+                        slot.groupScaleXMin = EditorGUI.FloatField(Row(),
+                            Content("    Scale X Min", "X 轴随机缩放最小值"), slot.groupScaleXMin);
+                        slot.groupScaleXMax = EditorGUI.FloatField(Row(),
+                            Content("    Scale X Max", "X 轴随机缩放最大值"), slot.groupScaleXMax);
+                        slot.groupScaleYMin = EditorGUI.FloatField(Row(),
+                            Content("    Scale Y Min", "Y 轴随机缩放最小值"), slot.groupScaleYMin);
+                        slot.groupScaleYMax = EditorGUI.FloatField(Row(),
+                            Content("    Scale Y Max", "Y 轴随机缩放最大值"), slot.groupScaleYMax);
+                        slot.groupScaleZMin = EditorGUI.FloatField(Row(),
+                            Content("    Scale Z Min", "Z 轴随机缩放最小值"), slot.groupScaleZMin);
+                        slot.groupScaleZMax = EditorGUI.FloatField(Row(),
+                            Content("    Scale Z Max", "Z 轴随机缩放最大值"), slot.groupScaleZMax);
+                    }
+                    else
+                    {
+                        slot.groupScaleMin = EditorGUI.FloatField(Row(),
+                            Content("  Scale Min", "组群内物体统一随机缩放系数最小值"), slot.groupScaleMin);
+                        slot.groupScaleMax = EditorGUI.FloatField(Row(),
+                            Content("  Scale Max", "组群内物体统一随机缩放系数最大值"), slot.groupScaleMax);
+                    }
+                    slot.groupRotationMin = EditorGUI.FloatField(Row(),
+                        Content("  Y Rotation Min", "组群内物体随机 Y 旋转最小角度"), slot.groupRotationMin);
+                    slot.groupRotationMax = EditorGUI.FloatField(Row(),
+                        Content("  Y Rotation Max", "组群内物体随机 Y 旋转最大角度"), slot.groupRotationMax);
+
+                    var seedRow = Row();
+                    var seedFieldRect = new Rect(seedRow.x, seedRow.y, seedRow.width - 68f, seedRow.height);
+                    var seedButtonRect = new Rect(seedRow.xMax - 64f, seedRow.y, 64f, seedRow.height);
+                    slot.groupSeed = EditorGUI.IntField(seedFieldRect,
+                        Content("  Group Seed", "相同参数和种子会生成相同的组群"), slot.groupSeed);
+                    if (GUI.Button(seedButtonRect, Content("Random", "生成新种子并立即刷新组群预览")))
+                    {
+                        slot.groupSeed = Random.Range(int.MinValue, int.MaxValue);
+                        SaveSettings();
+                        ProcGenerator.PreviewGroupAtOrigin(slot);
+                    }
+
+                    var flipRow = Row();
+                    float flipLabelWidth = Mathf.Min(EditorGUIUtility.labelWidth, flipRow.width * 0.46f);
+                    EditorGUI.LabelField(new Rect(flipRow.x, flipRow.y, flipLabelWidth, flipRow.height),
+                        Content("  Random Axis Flip", "勾选的轴会让每个组群物体以 50% 概率随机翻转"));
+                    float flipWidth = (flipRow.width - flipLabelWidth) / 3f;
+                    slot.groupRandomFlipX = EditorGUI.ToggleLeft(
+                        new Rect(flipRow.x + flipLabelWidth, flipRow.y, flipWidth, flipRow.height), "X", slot.groupRandomFlipX);
+                    slot.groupRandomFlipY = EditorGUI.ToggleLeft(
+                        new Rect(flipRow.x + flipLabelWidth + flipWidth, flipRow.y, flipWidth, flipRow.height), "Y", slot.groupRandomFlipY);
+                    slot.groupRandomFlipZ = EditorGUI.ToggleLeft(
+                        new Rect(flipRow.x + flipLabelWidth + flipWidth * 2f, flipRow.y, flipWidth, flipRow.height), "Z", slot.groupRandomFlipZ);
+
+                    var fixedFlipRow = Row();
+                    EditorGUI.LabelField(new Rect(fixedFlipRow.x, fixedFlipRow.y, flipLabelWidth, fixedFlipRow.height),
+                        Content("  Fixed Axis Flip", "勾选的轴会让组群内所有物体始终翻转，并优先于该轴的随机翻转"));
+                    slot.groupFixedFlipX = EditorGUI.ToggleLeft(
+                        new Rect(fixedFlipRow.x + flipLabelWidth, fixedFlipRow.y, flipWidth, fixedFlipRow.height), "X", slot.groupFixedFlipX);
+                    slot.groupFixedFlipY = EditorGUI.ToggleLeft(
+                        new Rect(fixedFlipRow.x + flipLabelWidth + flipWidth, fixedFlipRow.y, flipWidth, fixedFlipRow.height), "Y", slot.groupFixedFlipY);
+                    slot.groupFixedFlipZ = EditorGUI.ToggleLeft(
+                        new Rect(fixedFlipRow.x + flipLabelWidth + flipWidth * 2f, fixedFlipRow.y, flipWidth, fixedFlipRow.height), "Z", slot.groupFixedFlipZ);
+
+                    var createRow = Row();
+                    float gap = 4f;
+                    float buttonWidth = (createRow.width - gap * 2f) / 3f;
+                    var previewRect = new Rect(createRow.x, createRow.y, buttonWidth, createRow.height);
+                    var confirmRect = new Rect(previewRect.xMax + gap, createRow.y, buttonWidth, createRow.height);
+                    var cancelRect = new Rect(confirmRect.xMax + gap, createRow.y, buttonWidth, createRow.height);
+
+                    if (GUI.Button(previewRect, Content("Preview Group", "在世界原点生成临时预览；再次点击会替换旧预览")))
+                    {
+                        SaveSettings();
+                        ProcGenerator.PreviewGroupAtOrigin(slot);
+                    }
+                    if (GUI.Button(confirmRect, Content("Confirm Generate", "把当前预览正式保留在场景中")))
+                        ProcGenerator.ConfirmGroupPreview();
+                    if (GUI.Button(cancelRect, Content("Cancel Preview", "清除当前临时预览")))
+                        ProcGenerator.CancelGroupPreview();
+                }
+
                 GUI.enabled = prevEnabled;
             };
 
@@ -278,7 +418,11 @@ namespace ProcGen
             // 固定: header + name + prefab label + (+ 添加按钮) + count + scaleMin + scaleMax
             //   + minDist + priority + 允许被销毁 + yRot + offX + offY + offZ + material + boundsMode = 16
             // 加上每个 prefab entry 一行
-            int rows = 16 + slot.prefabEntries.Count;
+            int rows = 17 + slot.prefabEntries.Count; // + 组群制作折叠头
+
+            if (slot.groupComposerFoldout)
+                // 固定 13 行；独立 XYZ 模式用 6 个缩放字段替代统一的 2 个，因此再加 4 行。
+                rows += 13 + (slot.groupSeparateAxisScale ? 4 : 0);
 
             if (slot.boundsMode == BoundsMode.Custom)
             {
@@ -350,6 +494,62 @@ namespace ProcGen
             }
         }
 
+        private static void HandlePrefabDrop(Rect dropRect, ProcGenSlot slot)
+        {
+            Event evt = Event.current;
+            if (!dropRect.Contains(evt.mousePosition)) return;
+            if (evt.type != EventType.DragUpdated && evt.type != EventType.DragPerform) return;
+
+            bool hasValidPrefab = false;
+            foreach (var obj in DragAndDrop.objectReferences)
+            {
+                var go = obj as GameObject;
+                if (go != null && EditorUtility.IsPersistent(go)
+                    && PrefabUtility.GetPrefabAssetType(go) != PrefabAssetType.NotAPrefab)
+                {
+                    hasValidPrefab = true;
+                    break;
+                }
+            }
+
+            DragAndDrop.visualMode = hasValidPrefab ? DragAndDropVisualMode.Copy : DragAndDropVisualMode.Rejected;
+            if (evt.type == EventType.DragUpdated)
+            {
+                evt.Use();
+                return;
+            }
+
+            if (hasValidPrefab)
+            {
+                DragAndDrop.AcceptDrag();
+                if (slot.prefabEntries == null)
+                    slot.prefabEntries = new System.Collections.Generic.List<PrefabEntry>();
+
+                foreach (var obj in DragAndDrop.objectReferences)
+                {
+                    var go = obj as GameObject;
+                    if (go == null || !EditorUtility.IsPersistent(go)
+                        || PrefabUtility.GetPrefabAssetType(go) == PrefabAssetType.NotAPrefab)
+                        continue;
+
+                    bool duplicate = false;
+                    foreach (var entry in slot.prefabEntries)
+                    {
+                        if (entry != null && entry.prefab == go)
+                        {
+                            duplicate = true;
+                            break;
+                        }
+                    }
+
+                    if (!duplicate)
+                        slot.prefabEntries.Add(new PrefabEntry { prefab = go, weight = 1f });
+                }
+            }
+
+            evt.Use();
+        }
+
         private static GUIContent Content(string label, string tooltip) => new GUIContent(label, tooltip);
 
         private void OnGUI()
@@ -378,6 +578,8 @@ namespace ProcGen
             EditorGUILayout.EndHorizontal();
 
             settings.maxRetriesPerPoint = EditorGUILayout.IntField(Content("Max Retries Per Point", "每个候选点放置失败后的最大重试次数"), settings.maxRetriesPerPoint);
+
+            DrawAvoidanceObjects();
 
             // ========== 调试设置面板 ==========
             EditorGUILayout.Space();
@@ -455,10 +657,26 @@ namespace ProcGen
                 "工作流程：\n" +
                 "1. 选定目标 Mesh（必须含 MeshFilter，只在 Y+ 朝上面生成）\n" +
                 "2. 添加插槽 → 指定 prefab、数量、缩放、间距、旋转、偏移、材质\n" +
+                "   可在 Project 一次多选 Prefab/FBX，只拖一次到整个 Prefabs 列表区域批量加入\n" +
                 "3. 点击「生成」。每次生成创建独立的 [ProcGen Root] #N，可 Ctrl+Z 撤销\n\n" +
                 "多次生成：\n" +
                 "• 每次点击「生成」创建独立的 [ProcGen Root] #N，新物体会自动避让已有批次\n" +
                 "• 在场景中手动删除对应 Root 即可移除某次生成结果\n\n" +
+                "场景物体避让：\n" +
+                "• 把需要避开的场景物体拖入列表；拖入父物体会自动逐个识别所有子物体\n" +
+                "• 网格按实际三角面避让，弯曲河流/道路不会用一个大矩形挡住空地\n" +
+                "• 非网格 Renderer 使用各自包围盒；没有 Renderer 时使用各子 Collider\n" +
+                "• 场景避让物体始终受保护，不会被生成物覆盖或销毁\n\n" +
+                "组群制作：\n" +
+                "• 展开 Slot 内的 Group Composer，可用当前 Prefab 列表随机组合树群/石群\n" +
+                "• Parent Name 可自定义确认生成后的父节点名称，留空时使用 Slot 名称\n" +
+                "• Group Seed 相同时会得到相同组合，Random 会换种子并立即刷新预览\n" +
+                "• Separate XYZ Scale 关闭时统一缩放，开启后可分别设置 X/Y/Z 随机范围\n" +
+                "• Random Axis Flip 可分别控制 X/Y/Z 轴，每个物体有 50% 概率翻转\n" +
+                "• Fixed Axis Flip 可分别控制 X/Y/Z 轴，让组群内所有物体固定翻转\n" +
+                "• Preview Group 在世界原点生成临时预览；重复点击会刷新当前预览\n" +
+                "• Confirm Generate 保留当前预览，Cancel Preview 清除预览\n" +
+                "• 组群不会参与 Generate 散布；调整满意后可自行拖到 Project 保存成 Prefab\n\n" +
                 "优先级规则：\n" +
                 "• 数值越大优先级越高，高优先级物体生成时会自动销毁重叠的**允许被销毁**的低优先级物体\n" +
                 "• 同优先级物体不会互相覆盖\n" +
@@ -486,6 +704,53 @@ namespace ProcGen
             };
             EditorGUILayout.LabelField("Developed by ZXX", authorStyle);
             EditorGUILayout.LabelField("114.21, 30.56", authorStyle);
+        }
+
+        private void DrawAvoidanceObjects()
+        {
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField(Content("Scene Avoidance", "指定生成时必须避开的场景物体"), EditorStyles.boldLabel);
+
+            if (settings.avoidanceObjects == null)
+                settings.avoidanceObjects = new System.Collections.Generic.List<GameObject>();
+
+            int removeIndex = -1;
+            for (int i = 0; i < settings.avoidanceObjects.Count; i++)
+            {
+                EditorGUILayout.BeginHorizontal();
+                settings.avoidanceObjects[i] = (GameObject)EditorGUILayout.ObjectField(
+                    Content($"Avoid Object {i + 1}", "该物体及其所有子物体的 Renderer/Collider 范围都不会生成"),
+                    settings.avoidanceObjects[i], typeof(GameObject), true);
+                if (GUILayout.Button("-", GUILayout.Width(24f)))
+                    removeIndex = i;
+                EditorGUILayout.EndHorizontal();
+            }
+
+            if (removeIndex >= 0)
+                settings.avoidanceObjects.RemoveAt(removeIndex);
+
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button(Content("+ Add", "添加一个避让物体槽位")))
+                settings.avoidanceObjects.Add(null);
+
+            if (GUILayout.Button(Content("Add Selection", "把 Hierarchy 当前选中的场景物体加入避让列表")))
+            {
+                foreach (var go in Selection.gameObjects)
+                {
+                    if (go != null && go.scene.IsValid() && !settings.avoidanceObjects.Contains(go))
+                        settings.avoidanceObjects.Add(go);
+                }
+            }
+
+            using (new EditorGUI.DisabledScope(settings.avoidanceObjects.Count == 0))
+            {
+                if (GUILayout.Button("Clear", GUILayout.Width(52f)))
+                    settings.avoidanceObjects.Clear();
+            }
+            EditorGUILayout.EndHorizontal();
+
+            settings.avoidancePadding = Mathf.Max(0f, EditorGUILayout.FloatField(
+                Content("Extra Padding (m)", "在避让物体包围盒外额外保留的距离"), settings.avoidancePadding));
         }
     }
 }

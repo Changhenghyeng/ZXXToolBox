@@ -1,0 +1,18 @@
+{
+    "name": "RockTools.Editor",
+    "rootNamespace": "RockTools",
+    "references": [
+        "GUID:a6b6f349c7d843b7b7c22b45ea8cb63a"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

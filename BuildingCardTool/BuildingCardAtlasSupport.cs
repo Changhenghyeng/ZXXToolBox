@@ -161,7 +161,13 @@ internal sealed class BuildingCardAtlasPanel
             }
             var prefabPath = AssetDatabase.GetAssetPath(prefabs[i]);
             if (!BuildingCardAtlasBuilder.TryGetGridSize(prefabPath, out var gridWidth, out var gridDepth))
+            {
+                // Keep the Atlas UI and persisted prefab metadata in sync.
+                // Previously the UI displayed 1 x 1 here without saving it, so BuildPrefabs
+                // could still see gridWidth/gridDepth == 0 and report a missing Grid size.
                 gridWidth = gridDepth = 1;
+                BuildingCardAtlasBuilder.SetGridSize(prefabPath, gridWidth, gridDepth);
+            }
             GUILayout.Label(new GUIContent("Grid", "该 Prefab 的图集规格权重。修改后会重新分配图集像素，不会改动碰撞体或面片 Transform。"),
                 EditorStyles.miniLabel, GUILayout.Width(26f));
             EditorGUI.BeginChangeCheck();
@@ -433,9 +439,21 @@ internal enum BuildingCardRenderMode
 }
 
 [Serializable]
+internal sealed class BuildingCardRefactorTransform
+{
+    public string path;
+    public Vector3 localPosition;
+    public Quaternion localRotation;
+    public Vector3 localScale;
+}
+
+[Serializable]
 internal sealed class BuildingCardAssetMetadata
 {
     public int version = 2;
+    public string editSettingsJson;
+    public string editPointsJson;
+    public string editCameraId;
     public string sourceTextureGuid;
     public string standaloneMaterialGuid;
     public int gridWidth;
@@ -446,6 +464,13 @@ internal sealed class BuildingCardAssetMetadata
     public string atlasMaterialGuid;
     public string atlasRuleSuffix;
     public BuildingCardRenderMode renderMode;
+    public bool hasRefactorSourceTransform;
+    public bool hasRefactorSourcePosition;
+    public Quaternion refactorSourceRotation;
+    public Vector3 refactorSourceScale;
+    public Vector3 refactorSourcePosition;
+    public List<BuildingCardRefactorTransform> refactorVisualTransforms =
+        new List<BuildingCardRefactorTransform>();
 }
 
 internal static class BuildingCardMetadataStore
@@ -915,15 +940,22 @@ internal static class BuildingCardAtlasBuilder
                 metadata = CaptureStandaloneMetadata(prefabPath, renderer);
             if (metadata.gridWidth <= 0 || metadata.gridDepth <= 0)
             {
+                // Backward compatibility for older Building Card prefabs that predate persisted
+                // Grid metadata. Prefer the Grid stored in the Building Card workspace; when it
+                // cannot be recovered, use the same 1 x 1 default shown by the Atlas UI.
+                // Persist the resolved value so subsequent atlas builds are deterministic.
                 if (!TryRecoverGridSize(metadata.sourceTextureGuid, out metadata.gridWidth, out metadata.gridDepth))
-                    throw new InvalidOperationException(
-                        "Grid size is missing for " + prefab.name + ". Generate this prefab once with its Grid W × D settings.");
+                {
+                    metadata.gridWidth = 1;
+                    metadata.gridDepth = 1;
+                }
                 metadata.version = 2;
                 BuildingCardMetadataStore.Save(prefabPath, metadata);
             }
             var sourcePath = AssetDatabase.GUIDToAssetPath(metadata.sourceTextureGuid);
             var sourceAsset = AssetDatabase.LoadAssetAtPath<Texture2D>(sourcePath);
-            if (sourceAsset == null)
+            if (sourceAsset == null &&
+                !TryRepairSourceTextureMetadata(prefabPath, renderer, metadata, out sourcePath, out sourceAsset))
                 throw new InvalidOperationException("Building source texture is missing: " + prefabPath);
 
             metadata.atlasGroup = group.Trim();
@@ -934,6 +966,36 @@ internal static class BuildingCardAtlasBuilder
         }
 
         return items;
+    }
+
+    private static bool TryRepairSourceTextureMetadata(string prefabPath, MeshRenderer renderer,
+        BuildingCardAssetMetadata metadata, out string sourcePath, out Texture2D sourceAsset)
+    {
+        sourcePath = string.Empty;
+        sourceAsset = null;
+
+        var standaloneMaterialPath = AssetDatabase.GUIDToAssetPath(metadata.standaloneMaterialGuid);
+        var material = AssetDatabase.LoadAssetAtPath<Material>(standaloneMaterialPath);
+        if (material == null && metadata.renderMode == BuildingCardRenderMode.Standalone)
+            material = renderer.sharedMaterial;
+        if (material == null) return false;
+
+        var texture = material.HasProperty("_BaseMap") ? material.GetTexture("_BaseMap") as Texture2D : null;
+        if (texture == null) texture = material.mainTexture as Texture2D;
+        sourcePath = AssetDatabase.GetAssetPath(texture);
+        if (texture == null || string.IsNullOrEmpty(sourcePath) || IsGeneratedAtlasTexture(texture))
+        {
+            sourcePath = string.Empty;
+            return false;
+        }
+
+        sourceAsset = texture;
+        metadata.sourceTextureGuid = AssetDatabase.AssetPathToGUID(sourcePath);
+        var materialPath = AssetDatabase.GetAssetPath(material);
+        if (!string.IsNullOrEmpty(materialPath))
+            metadata.standaloneMaterialGuid = AssetDatabase.AssetPathToGUID(materialPath);
+        BuildingCardMetadataStore.Save(prefabPath, metadata);
+        return true;
     }
 
     private static bool TryRecoverGridSize(string sourceTextureGuid, out int gridWidth, out int gridDepth)

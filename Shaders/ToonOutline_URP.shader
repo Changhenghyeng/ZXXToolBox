@@ -2,6 +2,8 @@ Shader "Custom/ToonOutline"
 {
     Properties
     {
+        [HideInInspector] _MiniGameDeathGray ("MiniGame Death Gray", Range(0,1)) = 0
+        [HideInInspector] _MiniGameDeathOpacity ("MiniGame Death Opacity", Range(0,1)) = 1
         [Header(Surface)]
         [MainColor] _BaseColor ("Base Color", Color) = (1,1,1,1)
         [MainTexture] _BaseMap ("Base Map", 2D) = "white" {}
@@ -68,6 +70,7 @@ Shader "Custom/ToonOutline"
             ZTest LEqual
 
             HLSLPROGRAM
+            #include "MiniGameDeathFade.hlsl"
             #pragma target 3.0
             #pragma vertex vert
             #pragma fragment frag
@@ -93,6 +96,8 @@ Shader "Custom/ToonOutline"
                 float4 _BaseMap_ST;
                 float4 _NormalMap_ST;
                 half4 _BaseColor;
+                half _MiniGameDeathOpacity;
+                half _MiniGameDeathGray;
                 half _NormalScale;
                 half _Metallic;
                 half _Smoothness;
@@ -402,6 +407,7 @@ Shader "Custom/ToonOutline"
             half4 frag(Varyings IN) : SV_Target
             {
                 UNITY_SETUP_INSTANCE_ID(IN);
+                MiniGameClipDeath(IN.positionHCS.xy, _MiniGameDeathOpacity);
 
                 half4 baseSample = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, TRANSFORM_TEX(IN.uv, _BaseMap));
                 half4 baseColor = baseSample * _BaseColor;
@@ -457,6 +463,7 @@ Shader "Custom/ToonOutline"
                 half3 midColor = lerp(pbrColor, pbrToonColor, pbrToToon);
                 half3 finalColor = lerp(midColor, pureToonColor, toonToPure);
 
+                finalColor = MiniGameDeathColor(finalColor, _MiniGameDeathGray);
                 finalColor = MixFog(finalColor, IN.fogCoord);
                 return half4(finalColor, baseColor.a);
             }
@@ -474,6 +481,7 @@ Shader "Custom/ToonOutline"
             Cull [_Cull]
 
             HLSLPROGRAM
+            #include "MiniGameDeathFade.hlsl"
             #pragma target 3.0
             #pragma vertex ShadowVertex
             #pragma fragment ShadowFragment
@@ -491,6 +499,8 @@ Shader "Custom/ToonOutline"
                 float4 _BaseMap_ST;
                 float4 _NormalMap_ST;
                 half4 _BaseColor;
+                half _MiniGameDeathOpacity;
+                half _MiniGameDeathGray;
                 half _NormalScale;
                 half _Metallic;
                 half _Smoothness;
@@ -561,6 +571,7 @@ Shader "Custom/ToonOutline"
             half4 ShadowFragment(Varyings IN) : SV_Target
             {
                 UNITY_SETUP_INSTANCE_ID(IN);
+                MiniGameClipDeath(IN.positionHCS.xy, _MiniGameDeathOpacity);
                 return 0;
             }
             ENDHLSL
@@ -576,6 +587,7 @@ Shader "Custom/ToonOutline"
             Cull [_Cull]
 
             HLSLPROGRAM
+            #include "MiniGameDeathFade.hlsl"
             #pragma target 3.0
             #pragma vertex DepthVertex
             #pragma fragment DepthFragment
@@ -587,6 +599,8 @@ Shader "Custom/ToonOutline"
                 float4 _BaseMap_ST;
                 float4 _NormalMap_ST;
                 half4 _BaseColor;
+                half _MiniGameDeathOpacity;
+                half _MiniGameDeathGray;
                 half _NormalScale;
                 half _Metallic;
                 half _Smoothness;
@@ -639,6 +653,7 @@ Shader "Custom/ToonOutline"
             half DepthFragment(Varyings IN) : SV_Target
             {
                 UNITY_SETUP_INSTANCE_ID(IN);
+                MiniGameClipDeath(IN.positionHCS.xy, _MiniGameDeathOpacity);
                 return IN.positionHCS.z;
             }
             ENDHLSL
@@ -653,6 +668,7 @@ Shader "Custom/ToonOutline"
             Cull [_Cull]
 
             HLSLPROGRAM
+            #include "MiniGameDeathFade.hlsl"
             #pragma target 3.0
             #pragma vertex DepthNormalsVertex
             #pragma fragment DepthNormalsFragment
@@ -664,6 +680,8 @@ Shader "Custom/ToonOutline"
                 float4 _BaseMap_ST;
                 float4 _NormalMap_ST;
                 half4 _BaseColor;
+                half _MiniGameDeathOpacity;
+                half _MiniGameDeathGray;
                 half _NormalScale;
                 half _Metallic;
                 half _Smoothness;
@@ -719,6 +737,7 @@ Shader "Custom/ToonOutline"
             half4 DepthNormalsFragment(Varyings IN) : SV_Target
             {
                 UNITY_SETUP_INSTANCE_ID(IN);
+                MiniGameClipDeath(IN.positionHCS.xy, _MiniGameDeathOpacity);
                 return half4(normalize(IN.normalWS), 0.0h);
             }
             ENDHLSL
@@ -734,6 +753,7 @@ Shader "Custom/ToonOutline"
             ZTest LEqual
 
             HLSLPROGRAM
+            #include "MiniGameDeathFade.hlsl"
             #pragma target 3.0
             #pragma vertex vert
             #pragma fragment frag
@@ -747,6 +767,8 @@ Shader "Custom/ToonOutline"
                 float4 _BaseMap_ST;
                 float4 _NormalMap_ST;
                 half4 _BaseColor;
+                half _MiniGameDeathOpacity;
+                half _MiniGameDeathGray;
                 half _NormalScale;
                 half _Metallic;
                 half _Smoothness;
@@ -817,10 +839,11 @@ Shader "Custom/ToonOutline"
             half4 frag(Varyings IN) : SV_Target
             {
                 UNITY_SETUP_INSTANCE_ID(IN);
+                MiniGameClipDeath(IN.positionHCS.xy, _MiniGameDeathOpacity);
                 #if !defined(_OUTLINE_ON)
                     discard;
                 #endif
-                return _OutlineColor;
+                return half4(MiniGameDeathColor(_OutlineColor.rgb, _MiniGameDeathGray), _OutlineColor.a);
             }
             ENDHLSL
         }

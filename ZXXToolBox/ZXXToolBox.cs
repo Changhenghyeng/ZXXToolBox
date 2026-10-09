@@ -15,6 +15,9 @@ using DayChangeTransitionTool.Editor;
 using SLGTerrainBakerTool.Editor;
 using SLGMapTileCutter.Editor;
 using ZXXTools.FBXMeshEditor;
+using ZXXTools.CardGroundBaker;
+using ZXXTools.SLGCityEditor;
+using RockTools;
 
 public class ZXXToolBox : EditorWindow
 {
@@ -22,12 +25,15 @@ public class ZXXToolBox : EditorWindow
     private static readonly (string id, string defaultDesc, string category, Action action)[] _registry =
     {
         ("FBX Mesh Editor",      "在 Unity 场景中直接选择并移动静态模型顶点，支持 Undo；当前为 V1 第一阶段", "资源制作", FBXMeshEditorWindow.Open),
+        ("Rock Generator",       "组合内置或自定义石头 Mesh，生成并烘焙岩石模型",       "资源制作", RockGeneratorWindow.Open),
         ("SLG Map Tile Cutter", "根据线框在模型表面生成可编辑的独立 SLG 地块 Mesh", "场景搭建", SLGMapTileCutterWindow.Open),
+        ("SLG City Editor",     "绘制主城网格区域，提取边界并自动生成模块化城墙",       "场景搭建", SLGCityEditorWindow.Open),
         ("ProcGen",              "在模型表面按规则散布预制体",                       "场景搭建",   ProcGenWindow.Open),
         ("Path Builder",         "沿路径生成墙体、山脉散布和可变宽河流",              "场景搭建",   PathBuilderWindow.ShowWindow),
         ("Building Card Prefab", "SLG 建筑 PNG：自动原点、面片和点击 BoxCollider",    "资源制作",   BuildingCardTool.ShowWindow),
         ("Box Collider Generator","批量为预制体生成 BoxCollider",                     "资源制作",   BoxColliderGenerator.ShowWindow),
         ("Shadow Baker",         "建筑顶光影子烘培 + 地面面片生成",                  "视觉烘焙",   ShadowBakerWindow.Open),
+        ("Card Ground Baker",    "将摄像机朝向面片沿视线拍平到世界平面或 Collider 地表", "视觉烘焙", CardGroundBakerWindow.Open),
         ("Self Shadow Baker",    "建筑自投影阴影烘焙：uv2 展开 + PCF 软边 + 自动赋 _BakedMap", "视觉烘焙", SelfShadowBakerWindow.Open),
         ("SLG Terrain Baker",    "SLG 地貌制作材质：烘焙自定义 Mipmap + 生成手机运行材质", "视觉烘焙", SLGTerrainBakeWindow.Open),
         ("Fog Of War Tool",      "战争迷雾 RGBA Mask：R 探索 / G 选中 / B 溶解边缘", "场景搭建",   FogOfWarToolWindow.Open),
@@ -37,6 +43,9 @@ public class ZXXToolBox : EditorWindow
         ("Generated Assets Manager", "按工具、生命周期和资源类型整理、审计并安全清理 Generated 文件", "检查与输出", OpenGeneratedAssetsManager),
         ("Light Cookie Scroller","灯光 Cookie 纹理滚动动画：云影/焦散/斑驳光影流动",  "视觉烘焙",   AddLightCookieScrollerToSelected),
         ("Batch Replacer",                "在 Hierarchy 中批量替换场景物体",         "批量操作",   PrefabBatchReplacer.ShowWindow),
+        ("Random Material",               "从自定义材质列表随机赋予场景对象或 Project Prefab", "批量操作", RandomMaterialWindow.Open),
+        ("Overlap Spreader",              "将选中的重叠场景物体沿各组中心向外散开，直到地面投影不再重叠", "批量操作", OverlapSpreaderWindow.Open),
+        ("Transparent Queue Sorter",       "在树状面板中手动排序半透明物体，并烘培指定范围内的独立队列材质", "批量操作", TransparentQueueSorterWindow.Open),
         ("Batch Rename Tool",             "批量重命名工具",                         "批量操作",   BatchRenameTool.Open),
         ("Sync Names",                    "同步物体名称到 Prefab（有选中→仅选中 / 无选中→整个场景）", "批量操作", MakeSelectedOrAll("Sync Names", PrefabNameSyncTool.Execute)),
         ("Cast Shadows OFF",              "关闭 Cast Shadows（有选中→仅选中 / 无选中→整个场景）", "批量操作", MakeSelectedOrAll("Cast Shadows OFF", ShadowCastOffTool.Execute)),

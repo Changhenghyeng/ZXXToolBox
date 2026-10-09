@@ -7,6 +7,7 @@ namespace ProcGen
     public static class ProcGenerator
     {
         private const string ROOT_PREFIX = "[ProcGen Root]";
+        private const string GROUP_PREVIEW_PREFIX = "[ProcGen Group Preview] ";
 
         private static int GetNextRootIndex()
         {
@@ -95,6 +96,9 @@ namespace ProcGen
             // 5.5 把场景中已有的生成物体注册到空间哈希，避免二次生成穿模
             PrePopulateSpatialHash(spatial);
 
+            // 5.6 注册用户指定的场景避让物体；这些物体始终受保护
+            int avoidanceCount = PrePopulateAvoidanceObjects(spatial, settings);
+
             // 6. 逐插槽生成
             int totalPlaced = 0;
             for (int i = 0; i < sortedSlots.Count; i++)
@@ -107,7 +111,191 @@ namespace ProcGen
                 totalPlaced += PlaceSlot(slot, i, candidates, spatial, rng, root.transform, settings);
             }
 
-            Debug.Log($"[ProcGen] 第 {rootIndex} 次生成完成，新增 {totalPlaced} 个物体");
+            Debug.Log($"[ProcGen] 第 {rootIndex} 次生成完成，新增 {totalPlaced} 个物体，已避让 {avoidanceCount} 个场景物体");
+        }
+
+        public static void PreviewGroupAtOrigin(ProcGenSlot slot)
+        {
+            if (slot == null || !HasAnyValidPrefab(slot))
+            {
+                Debug.LogWarning("[ProcGen] 当前 Slot 没有可用的 Prefab，无法制作组群");
+                return;
+            }
+
+            CancelGroupPreview();
+            string parentName = string.IsNullOrWhiteSpace(slot.groupParentName)
+                ? slot.name
+                : slot.groupParentName.Trim();
+            GameObject groupRoot = CreateGroupAtOrigin(slot, GROUP_PREVIEW_PREFIX + parentName, false);
+            if (groupRoot == null) return;
+
+            SetHideFlagsRecursive(groupRoot, HideFlags.DontSaveInEditor);
+            Selection.activeGameObject = groupRoot;
+            EditorGUIUtility.PingObject(groupRoot);
+            Debug.Log($"[ProcGen] 已在世界原点预览组群 \"{slot.name}\"；确认后才会正式保留", groupRoot);
+        }
+
+        public static void ConfirmGroupPreview()
+        {
+            GameObject preview = FindGroupPreview();
+            if (preview == null)
+            {
+                Debug.LogWarning("[ProcGen] 当前没有组群预览，请先点击 Preview Group");
+                return;
+            }
+
+            string requestedName = preview.name.Substring(GROUP_PREVIEW_PREFIX.Length);
+            preview.name = GetUniqueGroupName(requestedName);
+            SetHideFlagsRecursive(preview, HideFlags.None);
+            Undo.RegisterCreatedObjectUndo(preview, "ProcGen Confirm Group");
+            Selection.activeGameObject = preview;
+            EditorGUIUtility.PingObject(preview);
+            Debug.Log($"[ProcGen] 已确认生成组群 \"{preview.name}\"，父节点位于世界原点", preview);
+        }
+
+        public static void CancelGroupPreview()
+        {
+            GameObject preview = FindGroupPreview();
+            if (preview != null)
+                Object.DestroyImmediate(preview);
+        }
+
+        private static GameObject CreateGroupAtOrigin(ProcGenSlot slot, string rootName, bool registerUndo)
+        {
+            GameObject groupRoot = new GameObject(rootName);
+            groupRoot.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+            groupRoot.transform.localScale = Vector3.one;
+            if (registerUndo)
+                Undo.RegisterCreatedObjectUndo(groupRoot, "ProcGen Create Group");
+
+            int requestedCount = Mathf.Max(1, slot.groupObjectCount);
+            float radius = Mathf.Max(0f, slot.groupRadius);
+            float minSpacing = Mathf.Max(0f, slot.groupMinSpacing);
+            float scaleMin = Mathf.Max(0.0001f, Mathf.Min(slot.groupScaleMin, slot.groupScaleMax));
+            float scaleMax = Mathf.Max(scaleMin, Mathf.Max(slot.groupScaleMin, slot.groupScaleMax));
+            float rotationMin = Mathf.Min(slot.groupRotationMin, slot.groupRotationMax);
+            float rotationMax = Mathf.Max(slot.groupRotationMin, slot.groupRotationMax);
+            var rng = new System.Random(slot.groupSeed);
+            var positions = new List<Vector3>();
+
+            for (int i = 0; i < requestedCount; i++)
+            {
+                Vector3 localPosition = Vector3.zero;
+                bool positionFound = i == 0;
+                int maxPositionAttempts = 40;
+
+                for (int attempt = 0; !positionFound && attempt < maxPositionAttempts; attempt++)
+                {
+                    float angle = (float)rng.NextDouble() * Mathf.PI * 2f;
+                    float distance = Mathf.Sqrt((float)rng.NextDouble()) * radius;
+                    Vector3 candidate = new Vector3(Mathf.Cos(angle) * distance, 0f, Mathf.Sin(angle) * distance);
+
+                    positionFound = true;
+                    if (minSpacing > 0f)
+                    {
+                        float minSpacingSqr = minSpacing * minSpacing;
+                        foreach (var existing in positions)
+                        {
+                            if ((existing - candidate).sqrMagnitude < minSpacingSqr)
+                            {
+                                positionFound = false;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (positionFound)
+                        localPosition = candidate;
+                }
+
+                if (!positionFound) continue;
+
+                GameObject prefab = PickPrefab(slot, rng);
+                if (prefab == null) continue;
+
+                GameObject instance = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
+                if (instance == null) instance = Object.Instantiate(prefab);
+                if (registerUndo)
+                    Undo.RegisterCreatedObjectUndo(instance, "ProcGen Create Group Item");
+
+                float yRotation = Mathf.Lerp(rotationMin, rotationMax, (float)rng.NextDouble());
+
+                instance.transform.SetParent(groupRoot.transform, false);
+                instance.transform.localPosition = localPosition;
+                instance.transform.localRotation = Quaternion.Euler(0f, yRotation, 0f) * prefab.transform.localRotation;
+                Vector3 scaleMultiplier;
+                if (slot.groupSeparateAxisScale)
+                {
+                    float xMin = Mathf.Max(0.0001f, Mathf.Min(slot.groupScaleXMin, slot.groupScaleXMax));
+                    float xMax = Mathf.Max(xMin, Mathf.Max(slot.groupScaleXMin, slot.groupScaleXMax));
+                    float yMin = Mathf.Max(0.0001f, Mathf.Min(slot.groupScaleYMin, slot.groupScaleYMax));
+                    float yMax = Mathf.Max(yMin, Mathf.Max(slot.groupScaleYMin, slot.groupScaleYMax));
+                    float zMin = Mathf.Max(0.0001f, Mathf.Min(slot.groupScaleZMin, slot.groupScaleZMax));
+                    float zMax = Mathf.Max(zMin, Mathf.Max(slot.groupScaleZMin, slot.groupScaleZMax));
+                    scaleMultiplier = new Vector3(
+                        Mathf.Lerp(xMin, xMax, (float)rng.NextDouble()),
+                        Mathf.Lerp(yMin, yMax, (float)rng.NextDouble()),
+                        Mathf.Lerp(zMin, zMax, (float)rng.NextDouble()));
+                }
+                else
+                {
+                    float uniformScale = Mathf.Lerp(scaleMin, scaleMax, (float)rng.NextDouble());
+                    scaleMultiplier = Vector3.one * uniformScale;
+                }
+
+                Vector3 localScale = Vector3.Scale(prefab.transform.localScale, scaleMultiplier);
+                if (slot.groupFixedFlipX || (slot.groupRandomFlipX && rng.NextDouble() < 0.5)) localScale.x *= -1f;
+                if (slot.groupFixedFlipY || (slot.groupRandomFlipY && rng.NextDouble() < 0.5)) localScale.y *= -1f;
+                if (slot.groupFixedFlipZ || (slot.groupRandomFlipZ && rng.NextDouble() < 0.5)) localScale.z *= -1f;
+                instance.transform.localScale = localScale;
+
+                if (slot.overrideMaterial != null)
+                    ApplyOverrideMaterial(instance, slot.overrideMaterial);
+
+                positions.Add(localPosition);
+            }
+
+            if (positions.Count < requestedCount)
+            {
+                Debug.LogWarning($"[ProcGen] 组群 \"{groupRoot.name}\" 生成了 {positions.Count}/{requestedCount} 个物体；" +
+                    "当前半径无法满足最小间距，请增大 Radius 或减小 Min Spacing", groupRoot);
+            }
+            return groupRoot;
+        }
+
+        private static GameObject FindGroupPreview()
+        {
+            foreach (var transform in Resources.FindObjectsOfTypeAll<Transform>())
+            {
+                if (transform == null || transform.parent != null || !transform.gameObject.scene.IsValid()) continue;
+                if (transform.name.StartsWith(GROUP_PREVIEW_PREFIX))
+                    return transform.gameObject;
+            }
+            return null;
+        }
+
+        private static string GetUniqueGroupName(string requestedName)
+        {
+            string baseName = string.IsNullOrWhiteSpace(requestedName) ? "ProcGen Group" : requestedName.Trim();
+            var rootNames = new HashSet<string>();
+            foreach (var transform in Resources.FindObjectsOfTypeAll<Transform>())
+            {
+                if (transform == null || transform.parent != null || !transform.gameObject.scene.IsValid()) continue;
+                if (!transform.name.StartsWith(GROUP_PREVIEW_PREFIX))
+                    rootNames.Add(transform.name);
+            }
+
+            if (!rootNames.Contains(baseName)) return baseName;
+
+            int index = 2;
+            while (rootNames.Contains($"{baseName} #{index}")) index++;
+            return $"{baseName} #{index}";
+        }
+
+        private static void SetHideFlagsRecursive(GameObject root, HideFlags flags)
+        {
+            foreach (var transform in root.GetComponentsInChildren<Transform>(true))
+                transform.gameObject.hideFlags = flags;
         }
 
         // ---- 预填充 ----
@@ -132,6 +320,110 @@ namespace ProcGen
                         int.MaxValue, child.gameObject, -1, false);
                 }
             }
+        }
+
+        private static int PrePopulateAvoidanceObjects(SpatialHash spatial, ProcGenSettings settings)
+        {
+            if (settings.avoidanceObjects == null || settings.avoidanceObjects.Count == 0)
+                return 0;
+
+            float padding = Mathf.Max(0f, settings.avoidancePadding);
+            int registeredCount = 0;
+            var registeredRoots = new HashSet<GameObject>();
+            var registeredRenderers = new HashSet<Renderer>();
+            var registeredColliders = new HashSet<Collider>();
+
+            foreach (var go in settings.avoidanceObjects)
+            {
+                if (go == null || !registeredRoots.Add(go)) continue;
+
+                if (!go.scene.IsValid())
+                {
+                    Debug.LogWarning($"[ProcGen] 避让列表中的 \"{go.name}\" 不是场景物体，已跳过；请从 Hierarchy 拖入", go);
+                    continue;
+                }
+
+                bool foundBounds = false;
+
+                // 每个子 Renderer 单独注册，避免分散子物体被合并成一个巨大 AABB。
+                var renderers = go.GetComponentsInChildren<Renderer>(true);
+                foreach (var renderer in renderers)
+                {
+                    if (renderer == null) continue;
+                    foundBounds = true;
+                    if (!registeredRenderers.Add(renderer)) continue;
+
+                    AddRendererAvoidance(spatial, renderer, padding);
+                }
+
+                // 整个层级没有 Renderer 时，才按每个子 Collider 分别注册。
+                if (!foundBounds)
+                {
+                    var colliders = go.GetComponentsInChildren<Collider>(true);
+                    foreach (var collider in colliders)
+                    {
+                        if (collider == null) continue;
+                        foundBounds = true;
+                        if (!registeredColliders.Add(collider)) continue;
+
+                        Bounds bounds = collider.bounds;
+                        spatial.Add(bounds.center, bounds.extents + Vector3.one * padding,
+                            int.MaxValue, collider.gameObject, -1, false);
+                    }
+                }
+
+                if (foundBounds)
+                    registeredCount++;
+                else
+                    Debug.LogWarning($"[ProcGen] 避让物体 \"{go.name}\" 没有 Renderer 或 Collider，已跳过", go);
+            }
+
+            return registeredCount;
+        }
+
+        private static void AddRendererAvoidance(SpatialHash spatial, Renderer renderer, float padding)
+        {
+            // 河流、道路等可能是一整条弯曲网格。如果直接使用 Renderer.bounds，
+            // 会把弯曲网格外接矩形里的大片空地也挡住，因此 MeshRenderer 按三角面注册。
+            var meshFilter = renderer.GetComponent<MeshFilter>();
+            Mesh mesh = meshFilter != null ? meshFilter.sharedMesh : null;
+
+            if (mesh != null)
+            {
+                try
+                {
+                    Vector3[] vertices = mesh.vertices;
+                    int[] triangles = mesh.triangles;
+                    Transform meshTransform = meshFilter.transform;
+
+                    if (vertices.Length > 0 && triangles.Length >= 3)
+                    {
+                        for (int i = 0; i + 2 < triangles.Length; i += 3)
+                        {
+                            Vector3 a = meshTransform.TransformPoint(vertices[triangles[i]]);
+                            Vector3 b = meshTransform.TransformPoint(vertices[triangles[i + 1]]);
+                            Vector3 c = meshTransform.TransformPoint(vertices[triangles[i + 2]]);
+
+                            Bounds triangleBounds = new Bounds(a, Vector3.zero);
+                            triangleBounds.Encapsulate(b);
+                            triangleBounds.Encapsulate(c);
+
+                            spatial.Add(triangleBounds.center,
+                                triangleBounds.extents + Vector3.one * padding,
+                                int.MaxValue, renderer.gameObject, -1, false);
+                        }
+                        return;
+                    }
+                }
+                catch (UnityException)
+                {
+                    // 极少数不可读网格无法取得顶点，回退到 Renderer 包围盒。
+                }
+            }
+
+            Bounds bounds = renderer.bounds;
+            spatial.Add(bounds.center, bounds.extents + Vector3.one * padding,
+                int.MaxValue, renderer.gameObject, -1, false);
         }
 
         // ----------------------------------------------------------------

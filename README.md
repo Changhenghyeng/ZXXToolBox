@@ -1,5 +1,10 @@
 # ZXX ToolBox
 
+
+## 2026-10-09 源码同步
+
+本次按全项目 Git 作者和迁移记录同步个人工具、运行时配套脚本及 Shader，包含 RockTools、SLGCityEditor、CardGroundBaker、OverlapSpreader、RandomMaterial、TransparentQueueSorter 等更新。完整目录和原项目路径见 [源码位置索引](SOURCE_INDEX.md)，详细操作见 [工具使用说明](Docs/工具使用说明.md)。不包含模型、贴图或工具生成资产。
+
 Unity 编辑器工具与 Shader 集合，适用于 **Unity 2022.3+ · URP 14+**。
 
 ## 安装
@@ -24,7 +29,7 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.5.0
 
 | 工具 | 功能 | 入口 |
 |------|------|------|
-| **ZXXToolBox** | 工具箱主面板，可自定义工作流串联多个工具 | `Tools > ZXX ToolBox` |
+| **ZXXToolBox** | 工具箱主面板，可自定义工作流串联多个工具 | `ArtTools > BIGBRO ToolBox` |
 | **BatchRenameTool** | 批量重命名 Hierarchy 中的 GameObject，支持查找替换/前缀后缀/正则 | 工具箱面板 |
 | **BoxColliderGenerator** | 根据 Renderer 包围盒自动生成 BoxCollider | 工具箱面板 |
 | **BuildingCardTool** | 建筑面片预制体批量生成，用于快速搭建主城建筑白模 | 工具箱面板 |
@@ -127,7 +132,7 @@ ZXXToolBox/
 
 | 目录 | 用途 | 说明 |
 |------|------|------|
-| 根目录各工具文件夹 | **Editor 工具** | 仅 Editor 下运行，入口在 `Tools > ZXX ToolBox` |
+| 根目录各工具文件夹 | **Editor 工具** | 仅 Editor 下运行，入口在 `ArtTools > BIGBRO ToolBox` |
 | `Runtime/` | **运行时组件** | 需要 PlayMode 执行，对应公司项目 `HotUpdate/` 路径 |
 | `Shaders/` | **通用 Shader** | 独立于具体工具的渲染 Shader |
 | `ZXXToolBox/` | **工具箱主入口** | 面板配置 `.asset` + 注册逻辑 |
@@ -168,3 +173,4 @@ Unity 中 `Editor` 文件夹下的代码**无法在 PlayMode 运行时访问**�
 ## 贡献
 
 个人工具仓库，欢迎提 Issue 反馈 bug 或工具需求。
+
