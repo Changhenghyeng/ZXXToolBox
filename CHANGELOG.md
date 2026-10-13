@@ -1,6 +1,41 @@
 # Changelog
 
 
+## [v0.7.0] — 2026-10-13
+
+相对 v0.6.0，新增 4 个 Shader，更新建筑面片工具的排序、相机补偿和保存流程，以及地形、河流和城墙渲染。此次共同步 11 个源码文件（4 个新增、7 个修改），未新增编辑器工具。
+
+### 新增 Shader（4 个）
+
+- **Spine_Skeleton_LineClip.shader**：Spine 建筑双线裁剪。两条裁剪线分别设置开关、高度和角度，可组合出 V 形裁剪；使用相对 Renderer 枢轴的世界单位坐标，避免裁剪线随动画 Bounds 或图集 UV 变化。增加可见贴图 Alpha 阈值，可裁掉烘焙阴影等低透明度像素；可见与投影 Pass 使用相同裁剪线。依赖项目中的 spine-unity `Spine-Common.cginc`。
+- **ShadowDecal_PlantWind_URP.shader**：让地面树影随植物风动变化。通过阴影纹理 UV 扭曲保持地面网格水平，无需细分；可设置固定根部、根到树冠过渡、风向/强度/速度/频率/相位，以及树冠到阴影的 X/Z 投影偏移；保留渐变与天空染色控制。
+- **WallWorldVariation_Opaque_URP.shader**：世界空间花纹城墙的不透明版本，使用 Geometry 队列并写入深度，保留基础贴图、花纹法线、分轴投影及共享 ShaderGUI。
+- **UnlitReceiveShadow_URP.shader**：保留贴图原色、同时接收主光源阴影的 Unlit 材质；可设置阴影颜色和强度、Alpha 裁剪及剔除方式，包含投影、深度及深度法线 Pass。
+
+### BuildingCardTool 改进
+
+- **统一建筑排序基准**：以 BoxCollider 底面中心作为 Root 枢轴，在根节点使用 `SortingGroup.sortAtRoot`，普通面片与 Spine 按落地点排序；重新计算真实 Mesh Bounds，不再用修改 Bounds 中心模拟排序枢轴。校正 Root 时保持可见子物体及碰撞盒的世界位置。
+- **增加“仅修复排序”**：批量修复现有 Prefab 的排序和旧 Visual SortingGroup；失败项在列表中标记并显示原因。
+- **增加底面中心补偿**：默认关闭。启用后将 Visual 的 X 旋转归零，补偿 Y 缩放以维持原相机画面高度，再沿指定正交相机方向对齐碰撞盒底面中心线；保持 X 缩放。记录原始变换与偏移，重复应用不累加，关闭后再应用可恢复原始变换；无法满足投影条件的对象会跳过并报告。
+- **明确保存方式**：编辑现有图片 Prefab 默认覆盖当前 Prefab；按钮区分“覆盖当前 Prefab”和“另存为新 Prefab”。覆盖时复用原 Mesh，另存时复制 Mesh，保留原材质及图集数据。
+- **图集与编辑数据同步**：图集更新时应用新的排序规则，并同步 Root 调整和相机补偿记录，避免后续编辑重复偏移。
+
+### 已有 Shader 改进
+
+- **BakedLightMap_PlantWind.shader**：风力为零时跳过顶点风动；法线强度为零、金属/光滑强度均为零或自发光关闭时，跳过对应贴图采样及计算，使用材质统一分支而不增加 Shader 变体。
+- **TerrainBlender.shadergraph**：增加世界 XZ 矩形裁剪，分别设置中心 X/Z、宽度 X、长度 Z 和遮罩翻转；默认关闭。启用 Alpha Clip，原边缘渐隐改为边缘裁剪，仍保留 X/Y 独立宽度与硬度；圆角过渡改用径向组合，消除四角的对角接缝。
+- **SLG_TerrainBlend_Mobile_Transparent.shader**：Unlit 模式也可接收主光源阴影，增加 `Shadow Strength`；从表面的世界坐标采样阴影，并补充不同软阴影质量变体。
+- **StylizedRiverIntersection.shader**：移除镜头中心强制最低高光，避免反射角较弱时仍保留人为亮斑。
+- **WallWorldVariation_URP.shader**：透明版关闭深度写入，继续 Alpha 混合；需要不透明遮挡时可选新增的 Opaque 版本。
+
+### 同步范围与检查
+
+- 扫描全项目代码 Git 历史、作者及迁移记录，并对比上次发布源码哈希；沿用原目录映射，未改动本地项目源码。
+- `BuildingCard_URP.shader` 当前内容与 v0.6.0 一致；项目中新增后又删除的 `BuildingCard_ContourClip_URP.shader` 不收录。`MainCityViewTool` 的添加记录属于其他作者，本次没有将其作为个人新增工具上传。
+- 更新 README、操作说明和源码位置索引；发布 v0.7.0 标签。
+- 没有新增模型、贴图、材质、场景、Prefab、`.meta` 或生成配置。Spine 等第三方依赖需由使用项目自行安装，不复制第三方库。
+- 已核对源码内容、ShaderGraph JSON 对象、include 依赖和 Git 提交范围；本次上传未进行 Unity 编译或场景效果验证。
+
 ## [v0.6.0] — 2026-10-09
 
 相对 v0.5.0，新增 6 个编辑器工具、14 个 Shader / Shader Graph，并更新建筑面片、路径生成、程序化摆放、地块切割和战争迷雾等现有功能。

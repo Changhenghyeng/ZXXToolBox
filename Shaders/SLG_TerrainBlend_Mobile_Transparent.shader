@@ -63,7 +63,8 @@ Shader "Custom/Terrain Blend Mobile Transparent"
         _LodTransitionRatio("LOD Transition Smoothness", Range(0.01, 1.0)) = 0.2
 
         [Header(Lighting)]
-        [Toggle(_SLG_UNLIT)] _Unlit("Unlit (Ignore Lighting And Shadows)", Float) = 0
+        [Toggle(_SLG_UNLIT)] _Unlit("Unlit (Ignore Lighting, Receive Shadows)", Float) = 0
+        _ShadowStrength("Shadow Strength", Range(0, 1)) = 1
 
         [Header(Global)]
         _GlobalTint("Global Tint", Color) = (1, 1, 1, 1)
@@ -100,9 +101,11 @@ Shader "Custom/Terrain Blend Mobile Transparent"
             #pragma shader_feature_local_fragment _SLG_VARIANTS
             #pragma shader_feature_local_fragment _SLG_BOTTOM_LOD
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
-            #pragma multi_compile_fragment _ _SHADOWS_SOFT
+            #pragma multi_compile_fragment _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH
             #pragma multi_compile_fog
 
+            // Transparent surfaces receive shadows from their own world position.
+            #define _SURFACE_TYPE_TRANSPARENT 1
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 
@@ -162,6 +165,7 @@ Shader "Custom/Terrain Blend Mobile Transparent"
                 float _LodTransitionRatio;
                 float _Saturation;
                 float _Opacity;
+                float _ShadowStrength;
             CBUFFER_END
 
             struct Attributes
@@ -720,15 +724,23 @@ Shader "Custom/Terrain Blend Mobile Transparent"
             {
                 float4 shadowCoord =
                     TransformWorldToShadowCoord(positionWS);
-                Light mainLight = GetMainLight(shadowCoord);
-                half nDotL = saturate(
-                    dot(normalWS, mainLight.direction));
-                half3 ambientLighting =
-                    max(SampleSH(normalWS), 0.0h);
-                half3 directLighting = mainLight.color *
-                    (nDotL * mainLight.distanceAttenuation *
-                    mainLight.shadowAttenuation);
-                return albedo * (ambientLighting + directLighting);
+                Light mainLight = GetMainLight(
+                    shadowCoord, positionWS, half4(1, 1, 1, 1));
+                half shadowAttenuation = lerp(
+                    1.0h, mainLight.shadowAttenuation,
+                    saturate((half)_ShadowStrength));
+                #if defined(_SLG_UNLIT)
+                    return albedo * shadowAttenuation;
+                #else
+                    half nDotL = saturate(
+                        dot(normalWS, mainLight.direction));
+                    half3 ambientLighting =
+                        max(SampleSH(normalWS), 0.0h);
+                    half3 directLighting = mainLight.color *
+                        (nDotL * mainLight.distanceAttenuation *
+                        shadowAttenuation);
+                    return albedo * (ambientLighting + directLighting);
+                #endif
             }
 
             half4 Frag(Varyings input) : SV_Target
@@ -869,12 +881,10 @@ Shader "Custom/Terrain Blend Mobile Transparent"
 
                 albedo *= _GlobalTint.rgb;
                 albedo = ApplySaturation(albedo, _Saturation);
-                #if !defined(_SLG_UNLIT)
-                    albedo = ApplyLighting(
-                        albedo,
-                        normalize(input.normalWS),
-                        input.positionWS);
-                #endif
+                albedo = ApplyLighting(
+                    albedo,
+                    normalize(input.normalWS),
+                    input.positionWS);
                 albedo = MixFog(albedo, input.fogFactor);
                 return half4(albedo, saturate((half)_Opacity));
             }

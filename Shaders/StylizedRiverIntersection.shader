@@ -465,12 +465,6 @@ Shader "Custom/StylizedRiverIntersection"
                 half specularTerm = PositivePow(
                     saturate(dot(normalWS, halfDirectionWS)),
                     specularPower);
-                // Keep an art-directed minimum highlight around the camera
-                // centre, even when the directional-light reflection angle is
-                // weak in a top-down orthographic view.
-                specularTerm = max(
-                    specularTerm,
-                    cameraHighlightMask * 0.2h);
                 half fresnel = PositivePow(
                     1.0h - saturate(dot(normalWS, viewDirectionWS)),
                     5.0h);

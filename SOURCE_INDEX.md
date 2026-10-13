@@ -1,6 +1,6 @@
 # 源码位置索引
 
-2026-10-09：按 X26 项目的全量代码 Git 历史、重命名记录及现有工具仓库整理。
+2026-10-13：按 X26 项目的全量代码 Git 历史、重命名记录及现有工具仓库整理。
 
 只同步源码和说明，不同步 .meta、模型、贴图、材质、场景、Prefab 或生成配置。
 
@@ -140,11 +140,17 @@
 | Runtime/LightCookieScroller/LightCookieScroller.cs | Scripts/HotUpdate/ArtCode/Helper/LightCookieScroller/LightCookieScroller.cs | 本人添加；已追踪移动历史 |
 | Runtime/LightCookieScroller/LightCookieScroller.shader | Scripts/HotUpdate/ArtCode/Helper/LightCookieScroller/LightCookieScroller.shader | 本人添加；已追踪移动历史 |
 
+| Shaders/Spine_Skeleton_LineClip.shader | ArtRes/Art_Scene/Art_MainScene/Scene_City/Shader/Spine_Skeleton_LineClip.shader | 本人添加；已核对 Git 历史 |
+| Shaders/ShadowDecal_PlantWind_URP.shader | ArtRes/Art_Scene/Art_MainScene/Scene_City/Shader/ShadowDecal_PlantWind_URP.shader | 本人添加；已核对 Git 历史 |
+| Shaders/WallWorldVariation_Opaque_URP.shader | ArtRes/Art_Shader/Build/WallWorldVariation_Opaque_URP.shader | 本人添加；已核对 Git 历史 |
+| Shaders/UnlitReceiveShadow_URP.shader | ArtRes/Art_Scene/Art_MainScene/Scene_City/Shader/UnlitReceiveShadow_URP.shader | 本人添加；已核对 Git 历史 |
+
 ## 排除依据
 
 - AnimationTools、EffectTools、ResourceReview、ShaderTools/ZEffect 等：沿移动前历史核对，主要由 hty、ZhengZhi 等其他提交者添加。
 - AssetExportTool 中个人提交仅是已有工具整理或小幅维护，没有将其作为个人新工具收录。
 - ASE_River、旧沙盘 ASE 地面/区域 Shader：本人提交为搬运或小幅参数调整，原始添加者为他人。
+- MainCityViewTool：添加记录属于 Enix，本次不作为个人新增工具收录。
 - Unity.Editor.asmdef：项目共享程序集配置，不属于个人工具源码。
 - MiniGameDeathFade.hlsl：其他提交者导入的必要配套头文件；两份个人 ToonOutline Shader 直接 include，保留以避免缺依赖。
 - 本次没有新增任何模型或图片文件；仓库已有的文档截图保持原样。
@@ -152,6 +158,6 @@
 ## 依赖
 
 - Unity 2022.3、URP 14；ShaderGraph 文件需要 Shader Graph。
-- BuildingCardTool 依赖 spine-unity；第三方库不随本次源码同步上传。
+- BuildingCardTool 与 Spine_Skeleton_LineClip 依赖 spine-unity；后者直接 include `Assets/Plugins/Spine/spine-unity/Runtime/spine-unity/Shaders/CGIncludes/Spine-Common.cginc`。第三方库不随源码同步上传，安装路径不同时需调整 include。
 - RockTools.Editor 通过 RockTools.Runtime 程序集名称引用运行时源码；所有 .meta 由各 Unity 项目自行生成，不随仓库分发。编辑器 asmdef 是发布整理时的配置转换，项目原文件保持原样。
 - 本次核对了源码复制、依赖文件及 Git 提交范围，未声称完成其他项目中的 Unity 编译或运行测试。

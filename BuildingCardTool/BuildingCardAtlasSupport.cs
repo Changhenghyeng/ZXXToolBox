@@ -6,46 +6,68 @@ using UnityEngine;
 
 internal static class BuildingCardTransparentSortUtility
 {
-    private const float MinimumBoundsExtent = 0.0001f;
-
     /// <summary>
-    /// MeshRenderer transparency sorting uses Renderer.bounds.center. Re-centre that bounds at
-    /// the prefab Root without moving vertices, so a card is sorted from its ground pivot while
-    /// its bounds still fully contain the visible quad for correct frustum culling.
+    /// Sort the whole building from its ground Root, independently of card height or Spine pose.
+    /// Keep real geometry bounds for culling; never encode a sorting pivot in shared Mesh bounds.
     /// </summary>
-    public static void AlignBoundsCenterToRoot(GameObject root)
+    public static Vector3 UpdateSorting(GameObject root)
     {
-        if (root == null) return;
-        var filters = root.GetComponentsInChildren<MeshFilter>(true);
-        for (var filterIndex = 0; filterIndex < filters.Length; filterIndex++)
+        if (root == null) return Vector3.zero;
+        var collider = root.GetComponent<BoxCollider>();
+        if (collider == null) throw new InvalidOperationException("Building Card root BoxCollider is missing.");
+        var rootOffset = collider.center - Vector3.up * collider.size.y * 0.5f;
+        if (rootOffset.sqrMagnitude > 0.0000000001f)
         {
-            var filter = filters[filterIndex];
-            var mesh = filter.sharedMesh;
-            if (mesh == null || mesh.vertexCount == 0) continue;
+            // Rebase the pivot to the real footprint centre without moving any visible child or box in world space.
+            var childPositions = new Vector3[root.transform.childCount];
+            for (var i = 0; i < childPositions.Length; i++) childPositions[i] = root.transform.GetChild(i).position;
+            root.transform.position = collider.transform.TransformPoint(rootOffset);
+            for (var i = 0; i < childPositions.Length; i++) root.transform.GetChild(i).position = childPositions[i];
+            collider.center -= rootOffset;
+        }
+        else rootOffset = Vector3.zero;
+        var visual = root.transform.Find("Visual");
+        var renderer = visual == null ? root.GetComponentInChildren<Renderer>(true) : visual.GetComponent<Renderer>();
+        if (renderer == null) throw new InvalidOperationException("Building Card renderer is missing.");
+        var group = root.GetComponent<UnityEngine.Rendering.SortingGroup>();
+        if (group == null)
+        {
+            group = root.AddComponent<UnityEngine.Rendering.SortingGroup>();
+            group.sortingLayerID = renderer.sortingLayerID;
+            group.sortingOrder = renderer.sortingOrder;
+        }
+        group.sortAtRoot = true;
 
-            var localRoot = filter.transform.InverseTransformPoint(root.transform.position);
-            var extents = Vector3.zero;
-            var vertices = mesh.vertices;
-            for (var vertexIndex = 0; vertexIndex < vertices.Length; vertexIndex++)
-            {
-                var distance = vertices[vertexIndex] - localRoot;
-                extents = Vector3.Max(extents, new Vector3(
-                    Mathf.Abs(distance.x),
-                    Mathf.Abs(distance.y),
-                    Mathf.Abs(distance.z)));
-            }
+        // Migrate the single-renderer Visual group produced by the previous compensation version.
+        var visualGroup = visual == null ? null : visual.GetComponent<UnityEngine.Rendering.SortingGroup>();
+        if (visualGroup != null && root.GetComponentsInChildren<Renderer>(true).Length == 1 &&
+            visualGroup.sortingLayerID == group.sortingLayerID && visualGroup.sortingOrder == group.sortingOrder)
+            UnityEngine.Object.DestroyImmediate(visualGroup);
 
-            extents = Vector3.Max(extents, Vector3.one * MinimumBoundsExtent);
-            var desiredBounds = new Bounds(localRoot, extents * 2f);
-            var currentBounds = mesh.bounds;
-            if ((currentBounds.center - desiredBounds.center).sqrMagnitude < 0.00000001f &&
-                (currentBounds.size - desiredBounds.size).sqrMagnitude < 0.00000001f)
-                continue;
-
-            Undo.RecordObject(mesh, "Align Building Card Transparent Sort Pivot");
-            mesh.bounds = desiredBounds;
+        var filter = visual == null ? null : visual.GetComponent<MeshFilter>();
+        var mesh = filter == null ? null : filter.sharedMesh;
+        if (mesh != null && mesh.vertexCount > 0 && AssetDatabase.Contains(mesh))
+        {
+            Undo.RecordObject(mesh, "Restore Building Card Geometry Bounds");
+            mesh.RecalculateBounds();
             EditorUtility.SetDirty(mesh);
         }
+        return rootOffset;
+    }
+
+    public static void ApplyRootOffsetToMetadata(BuildingCardAssetMetadata metadata, Vector3 rootOffset)
+    {
+        if (metadata == null || rootOffset == Vector3.zero || metadata.refactorVisualTransforms == null) return;
+        // Refactor source positions in world space stay unchanged; direct-child local records follow the rebased Root.
+        foreach (var record in metadata.refactorVisualTransforms)
+            if (!string.IsNullOrEmpty(record.path) && !record.path.Contains("/")) record.localPosition -= rootOffset;
+    }
+
+    public static void SaveRootOffset(string path, Vector3 rootOffset)
+    {
+        if (rootOffset == Vector3.zero || !BuildingCardMetadataStore.TryLoad(path, out var metadata)) return;
+        ApplyRootOffsetToMetadata(metadata, rootOffset);
+        BuildingCardMetadataStore.Save(path, metadata);
     }
 }
 
@@ -454,6 +476,10 @@ internal sealed class BuildingCardAssetMetadata
     public string editSettingsJson;
     public string editPointsJson;
     public string editCameraId;
+    public Vector3 cameraOffsetLocal;
+    public bool hasCameraCompensationSource;
+    public Quaternion cameraSourceLocalRotation;
+    public Vector3 cameraSourceLocalScale;
     public string sourceTextureGuid;
     public string standaloneMaterialGuid;
     public int gridWidth;
@@ -1442,10 +1468,10 @@ internal static class BuildingCardAtlasBuilder
         {
             var renderer = root.GetComponentInChildren<MeshRenderer>(true);
             if (renderer == null) throw new InvalidOperationException("Building Card renderer is missing: " + prefabPath);
-            BuildingCardTransparentSortUtility.AlignBoundsCenterToRoot(root);
-            if (renderer.sharedMaterial == material) return;
+            var rootOffset = BuildingCardTransparentSortUtility.UpdateSorting(root);
             renderer.sharedMaterial = material;
             PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
+            BuildingCardTransparentSortUtility.SaveRootOffset(prefabPath, rootOffset);
         }
         finally
         {

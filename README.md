@@ -1,9 +1,9 @@
 # ZXX ToolBox
 
 
-## v0.6.0 — 2026-10-09
+## v0.7.0 — 2026-10-13
 
-新增 6 个工具（面片落地烘焙、岩石生成、城市网格编辑、随机材质、重叠物体散开、半透队列排序）和 14 个 Shader / Shader Graph；完善建筑面片编辑、PathBuilder 烘焙、ProcGen 组装与避让、地块切割、阴影烘焙和战争迷雾。逐项变化见 [v0.6.0 更新日志](CHANGELOG.md#v060--2026-10-09)，原项目路径见 [源码位置索引](SOURCE_INDEX.md)，操作见 [工具使用说明](Docs/工具使用说明.md)。
+新增 4 个 Shader：Spine 双线裁剪、植物风动阴影贴花、不透明城墙、接收阴影的 Unlit。建筑面片工具增加底面中心补偿、批量排序修复和明确的覆盖/另存流程；地形增加世界矩形裁剪，透明地形支持 Unlit 接收阴影，并调整河流高光与透明城墙深度写入。逐项变化见 [v0.7.0 更新日志](CHANGELOG.md#v070--2026-10-13)，原项目路径见 [源码位置索引](SOURCE_INDEX.md)，操作见 [工具使用说明](Docs/工具使用说明.md)。
 
 Unity 编辑器工具与 Shader 集合，适用于 **Unity 2022.3+ · URP 14+**。
 
@@ -18,7 +18,7 @@ git clone https://github.com/Changhenghyeng/ZXXToolBox.git Assets/ZXXToolBox
 或通过 Unity Package Manager 以 git URL 导入：
 
 ```
-https://github.com/Changhenghyeng/ZXXToolBox.git#v0.6.0
+https://github.com/Changhenghyeng/ZXXToolBox.git#v0.7.0
 ```
 
 ---
@@ -38,7 +38,7 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.6.0
 | **ZXXToolBox** | 工具箱主面板，可自定义工作流串联多个工具 | `ArtTools > BIGBRO ToolBox` |
 | **BatchRenameTool** | 批量重命名 Hierarchy 中的 GameObject，支持查找替换/前缀后缀/正则 | 工具箱面板 |
 | **BoxColliderGenerator** | 根据 Renderer 包围盒自动生成 BoxCollider | 工具箱面板 |
-| **BuildingCardTool** | 建筑面片预制体批量生成，用于快速搭建主城建筑白模 | 工具箱面板 |
+| **BuildingCardTool** | 建筑面片生成与编辑、图集、根节点排序修复及底面中心补偿 | 工具箱面板 |
 | **ConvertVariantToNormalPrefab** | 将 Prefab Variant 转换为普通 Prefab | 工具箱面板 |
 | **DayChangeTransitionTool** | 昼夜切换材质过渡编辑与预览 | 工具箱面板 |
 | **FBXMeshEditor** | 场景中直接选择并移动静态模型顶点，支持 Undo | 工具箱面板 |
@@ -79,16 +79,20 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.6.0
 
 | Shader | 类型 | 说明 |
 |--------|------|------|
+| **Spine_Skeleton_LineClip** | 建筑/Spine | 两条独立斜线裁剪及贴图 Alpha 阈值，依赖 spine-unity |
+| **ShadowDecal_PlantWind_URP** | 阴影/植被 | 地面树影随风动，固定根部及投影偏移控制 |
+| **WallWorldVariation_Opaque_URP** | 建筑 | 世界空间花纹城墙的不透明、写深度版本 |
+| **UnlitReceiveShadow_URP** | 光照 | 保留贴图原色并接收主光源阴影 |
 | **BakedLightMap / BakedLightMap_PlantWind** | 光照/植被 | 烘焙阴影、AO、补光及植物风动 |
 | **BuildingCard_FogDepth_URP** | 建筑 | 建筑面片雾与深度版本 |
 | **Character Color Adjustment** | 角色 | 角色颜色调整 Shader Graph |
 | **LitTransparentDepth** | 光照/透明 | Lit 透明深度版本及专用 Inspector |
-| **SLG_TerrainBlend_Mobile_Transparent** | 地形 | 移动版地形混合透明版本 |
+| **SLG_TerrainBlend_Mobile_Transparent** | 地形 | 移动版地形混合透明版本，Unlit 也接收阴影 |
 | **SimpleLit_BottomFade / SimpleLit_BottomFade_Shadow** | 植被 | 根部渐隐及阴影支持版本 |
 | **SimpleTopBlend** | 混合 | 顶部混合材质 |
 | **StylizedRiverIntersection** | 水面 | 深浅水、岸边泡沫、坡面流纹及边缘透明 |
 | **StylizedWaterfall** | 水面 | 双层流纹/法线、底部与交界泡沫 |
-| **TerrainBlender** | 地形 | 地形混合，X/Y 边缘渐隐宽度与硬度分别控制 |
+| **TerrainBlender** | 地形 | 地形混合，X/Y 边缘裁剪控制、世界 XZ 矩形裁剪 |
 | **WallWorldVariation_URP** | 建筑 | 世界空间花纹及法线，分轴投影 |
 | **Manual Cloud Fog** | 迷雾 | 战争迷雾配套云雾材质 |
 | **ShadowDecal_Gradient_URP** | 阴影/贴花 | 渐变方向/角度/Lp-norm 距离/SkyTint 天空着色 |
@@ -122,7 +126,7 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.6.0
 |------|------|
 | Unity | 2022.3+ |
 | Render Pipeline | URP 14.x |
-| Spine (spine-unity) | 4.2.x |
+| Spine (spine-unity) | 4.2.x（BuildingCardTool 与 Spine_Skeleton_LineClip；裁剪 Shader 的 include 路径见操作说明） |
 
 ---
 

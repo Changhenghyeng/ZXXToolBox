@@ -121,6 +121,10 @@ Shader "Custom/BakedLightMap_PlantWind"
 
         float3 ApplyPlantWind(float3 positionOS)
         {
+            [branch]
+            if (_WindStrength == 0.0)
+                return positionOS;
+
             float3 positionWS = TransformObjectToWorld(positionOS);
             float2 directionXZ = _WindDirection.xz;
             float directionLengthSq = dot(directionXZ, directionXZ);
@@ -230,19 +234,31 @@ Shader "Custom/BakedLightMap_PlantWind"
 
                 half faceSign = IS_FRONT_VFACE(frontFace, 1.0h, -1.0h);
                 half3 geometricNormalWS = normalize(input.normalWS) * faceSign;
-                half3 tangentWS = normalize(input.tangentWS.xyz);
-                half3 bitangentWS = input.tangentWS.w * cross(geometricNormalWS, tangentWS);
-                half3 normalTS = UnpackNormalScale(
-                    SAMPLE_TEXTURE2D(_BumpMap, sampler_BumpMap, input.rawUV),
-                    _NormalStrength);
-                half3 normalWS = NormalizeNormalPerPixel(
-                    TransformTangentToWorld(normalTS,
-                        half3x3(tangentWS, bitangentWS, geometricNormalWS)));
+                half3 normalTS = half3(0.0h, 0.0h, 1.0h);
+                half3 normalWS = geometricNormalWS;
+                // These conditions are uniform per material; no extra shader variants are needed.
+                [branch]
+                if (_NormalStrength != 0.0)
+                {
+                    half3 tangentWS = normalize(input.tangentWS.xyz);
+                    half3 bitangentWS = input.tangentWS.w * cross(geometricNormalWS, tangentWS);
+                    normalTS = UnpackNormalScale(
+                        SAMPLE_TEXTURE2D(_BumpMap, sampler_BumpMap, input.rawUV),
+                        _NormalStrength);
+                    normalWS = NormalizeNormalPerPixel(
+                        TransformTangentToWorld(normalTS,
+                            half3x3(tangentWS, bitangentWS, geometricNormalWS)));
+                }
 
                 half4 baseSample = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.baseUV);
                 half4 bakedSample = SAMPLE_TEXTURE2D(_BakedMap, sampler_BakedMap, input.bakedUV);
-                half4 metallicSample = SAMPLE_TEXTURE2D(
-                    _MetallicGlossMap, sampler_MetallicGlossMap, input.rawUV);
+                half4 metallicSample = half4(1.0h, 1.0h, 1.0h, 1.0h);
+                [branch]
+                if (_MetallicaStrength != 0.0 || _SmoothnessStrength != 0.0)
+                {
+                    metallicSample = SAMPLE_TEXTURE2D(
+                        _MetallicGlossMap, sampler_MetallicGlossMap, input.rawUV);
+                }
 
                 half bakedShadow = lerp(1.0h, bakedSample.r, saturate(_ShadowStrength));
                 half bakedAO = lerp(1.0h, bakedSample.g, saturate(_AOStrength));
@@ -250,14 +266,19 @@ Shader "Custom/BakedLightMap_PlantWind"
                 half bakedLighting = bakedShadow * aoFactor;
                 half3 untintedBase = baseSample.rgb * _MainColor.rgb;
 
-                float3 fillDirection = -SafeNormalize(_FillDir.xyz);
-                half fillFacing = saturate(dot(geometricNormalWS, fillDirection));
-                half3 fillEmission = baseSample.rgb * _FillColor.rgb
-                    * (bakedSample.b * fillFacing);
-                half3 textureEmission = SAMPLE_TEXTURE2D(
-                    _EmissionMap, sampler_EmissionMap, input.rawUV).rgb * _EmissionColor.rgb;
-                half3 optionalEmission = (textureEmission + fillEmission)
-                    * saturate(_EmissionSwitch);
+                half3 optionalEmission = half3(0.0h, 0.0h, 0.0h);
+                [branch]
+                if (_EmissionSwitch > 0.0)
+                {
+                    float3 fillDirection = -SafeNormalize(_FillDir.xyz);
+                    half fillFacing = saturate(dot(geometricNormalWS, fillDirection));
+                    half3 fillEmission = baseSample.rgb * _FillColor.rgb
+                        * (bakedSample.b * fillFacing);
+                    half3 textureEmission = SAMPLE_TEXTURE2D(
+                        _EmissionMap, sampler_EmissionMap, input.rawUV).rgb * _EmissionColor.rgb;
+                    optionalEmission = (textureEmission + fillEmission)
+                        * saturate(_EmissionSwitch);
+                }
 
                 half darkMask = (1.0h - bakedLighting) * aoFactor;
                 half3 skyEmission = untintedBase * _SkyLightColor.rgb

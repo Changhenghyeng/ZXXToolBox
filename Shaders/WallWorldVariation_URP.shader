@@ -72,7 +72,7 @@ Shader "Custom/Wall World Variation (URP)"
             Blend SrcAlpha OneMinusSrcAlpha, One OneMinusSrcAlpha
             ZTest LEqual
             Cull [_Cull]
-            ZWrite On
+            ZWrite Off
 
             HLSLPROGRAM
             #pragma target 3.0
@@ -158,7 +158,7 @@ Shader "Custom/Wall World Variation (URP)"
                 float topPatternV = input.positionWS.z * max(_PatternVerticalTiling, 0.001);
                 half4 baseSample = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, baseUV);
                 half opacity = saturate(baseSample.a * _BaseColor.a);
-                // Discard exactly invisible pixels before writing any color or depth.
+                // Fully invisible pixels are discarded; all visible coverage uses alpha blending.
                 clip(opacity <= 0.0h ? -1.0h : 1.0h);
 
                 half3x3 tangentToWorld = half3x3(
