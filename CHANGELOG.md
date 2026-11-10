@@ -1,6 +1,43 @@
 # Changelog
 
 
+## [v0.8.0] — 2026-11-10
+
+相对 v0.7.0，本次同步 60 个源码文件：新增 18 个、更新 42 个。新增 Game View 录屏、本机工具统计和 8 个独立材质 Shader。
+
+### 工具与运行时
+
+- **Transparent Screenshot**：增加 Play Mode 下的 Game View MP4 录制，可设尺寸、30/60/120 FPS 和编码质量；支持 UI 图片叠加与 Game View 实时预览，也可用于单张截图。Windows 下可选 FFmpeg 硬件编码，探测 NVIDIA、AMD、Intel 后端，无法使用时回退 Unity H.264。录屏不含透明通道和音频，配套帧抓取与叠加脚本放在 Runtime。
+- **ZXXToolBox 使用统计**：分别累计工具箱入口调用、成功批次、处理项数和耗时，支持排序、CSV 导出和清空。数据保存在本机 EditorPrefs，按项目区分。接入烘焙、建筑面片、路径、程序化摆放、资源管理、批量操作和检查工具等。
+- **BuildingCardTool**：从原贴图 UV 与地脚标注计算底面中心，补偿时对齐碰撞盒底面中心，新建、覆盖和另存沿用同一基准。增加“恢复正对相机”，根据当前姿态恢复朝向及近角点定位。支持编辑既有 Spine Prefab 的地脚和尺寸，保留骨骼数据、图集和材质。
+- **PathBuilder**：可从模型提取并预览中心线，生成独立可编辑样条；增加网格变形输出的相机拍平和整条路径平滑预览，保留控制点位置。
+- **CardGroundBaker**：保留烘焙为新组，新增显式覆盖原 Prefab/Mesh。FBX 内嵌网格会导出独立 Mesh 并替换目标引用。
+
+### 新增独立 Shader（8 个）
+
+- **FlowingSilk**：用 UV 驱动飘绸展开、弯曲、升降和翻卷，支持绸面柔光、边缘与头尾渐隐。
+- **TransparentTextureBlur**：不透明 Lit 贴图模糊，按贴图像素设置模糊半径。
+- **RiverBankUnlit**：河岸贴图支持中间开口、左右边缘分别渐隐和主光源阴影强度。
+- **SimpleLit_BottomColor_Opaque**：不透明 SimpleLit，支持根部颜色过渡。
+- **SimpleLit_BottomFade_Emission**：根部渐隐版本，增加自发光控制。
+- **SimpleLit_BottomFade_Opaque**：拆分不透明主体与半透明根部两个 Pass，按 Alpha 区间分别渲染。
+- **PainterlyLit**：双色明暗、笔触纹理、UV 或物体三平面映射，支持笔触对比、旋转和弯曲。
+- **SceneHSV**：色相、饱和度、明度可调；颜色与 Alpha 使用各自的平铺和偏移，支持裁剪和 Unlit。
+
+### 已有 Shader 改进
+
+- **SLG_TerrainBlend_Mobile**：Unlit 模式保留接收阴影的能力，可调阴影强度；普通光照模式共用阴影强度控制。
+- **SLG_TerrainBlend_Mobile_Transparent**：材质面板按渲染队列切换不透明写深度或透明混合，保留手动队列；不透明队列不受 Opacity 影响。
+- **TerrainBlender**：矩形裁剪从世界 XZ 改为物体局部 XZ，裁剪区随物体移动和旋转。
+- **BakedLightMap_PlantWind**：风力渐变改用材质给定的本地边界范围，支持分别设定最小与最大坐标。
+- **SimpleLit_BottomFade_Wave**：增加 Unlit 开关，风动和根部渐隐继续可用。
+
+### 发布范围与检查
+
+- 新增 Hidden/ZXX/GameViewVideoBlit 和地形材质 Inspector 作为工具依赖。发布副本为 SceneHSV 使用标准 Vector 面板，去掉没有随源码提供实现的自定义属性标签；RockTools 的统计查找兼容独立项目的编辑器程序集名。
+- 排除其他作者原有的 Toon_URP_Packed、项目美术资产、生成配置、.meta 和第三方程序。只整理 GitHub 发布副本，X26 源项目保持不变。
+- 核对源码映射、必要 include、ShaderGraph 数据、运行时脚本和提交范围；本次未运行 Unity 编译、场景效果或实际录屏验证。
+
 ## [v0.7.0] — 2026-10-13
 
 相对 v0.6.0，新增 4 个 Shader，更新建筑面片工具的排序、相机补偿和保存流程，以及地形、河流和城墙渲染。此次共同步 11 个源码文件（4 个新增、7 个修改），未新增编辑器工具。

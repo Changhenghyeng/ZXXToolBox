@@ -6,6 +6,7 @@ public class ConvertVariantToNormalPrefab
 {
     public static void ConvertSelectedVariant()
     {
+        var usageTimer = ZXXToolUsageStats.Begin();
         Object[] selectedObjects = Selection.objects;
 
         if (selectedObjects.Length == 0)
@@ -72,6 +73,7 @@ public class ConvertVariantToNormalPrefab
             }
         }
 
+        ZXXToolUsageStats.Complete("Convert Variant To Normal Prefab", successCount, usageTimer);
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
 

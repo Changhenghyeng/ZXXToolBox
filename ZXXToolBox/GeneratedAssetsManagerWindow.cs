@@ -62,7 +62,12 @@ namespace ZXXTools.GeneratedAssets
 
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("Refresh", GUILayout.Width(90))) Refresh();
+                if (GUILayout.Button("Refresh", GUILayout.Width(90)))
+                {
+                    var usageTimer = ZXXToolUsageStats.Begin();
+                    Refresh();
+                    ZXXToolUsageStats.Complete("Generated Assets Manager", 1, usageTimer);
+                }
                 if (GUILayout.Button("Migrate Legacy Layout", GUILayout.Width(160)))
                 {
                     MigrateLegacyLayout(true);
@@ -180,6 +185,7 @@ namespace ZXXTools.GeneratedAssets
 
         private void DeleteSelected()
         {
+            var usageTimer = ZXXToolUsageStats.Begin();
             List<Entry> targets = _entries.Where(e => e.selected && !e.inUse).ToList();
             if (targets.Count == 0) return;
             string preview = string.Join("\n", targets.Take(12).Select(e => "• " + e.path));
@@ -195,6 +201,7 @@ namespace ZXXTools.GeneratedAssets
                 if (AssetDatabase.DeleteAsset(entry.path)) deleted++;
             AssetDatabase.SaveAssets();
             Refresh();
+            ZXXToolUsageStats.Complete("Generated Assets Manager", deleted, usageTimer);
             EditorUtility.DisplayDialog("Generated Assets", $"已删除 {deleted} 个未使用文件。", "确定");
         }
 

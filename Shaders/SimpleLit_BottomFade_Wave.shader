@@ -5,6 +5,9 @@ Shader "Custom/SimpleLit_BottomFade_Wave"
         _BaseMap   ("Albedo (Base Map)", 2D)         = "white" {}
         _BaseColor ("Base Color", Color)             = (1,1,1,1)
 
+        [Header(Lighting)]
+        [Toggle] _UnlitMode ("Unlit Mode", Float) = 0
+
         [Header(Wind)]
         _WindDirection ("Wind Direction (XZ)", Vector) = (0.5, 0.3, 0, 0)
         _WindStrength  ("Wind Strength", Range(0, 2))  = 0.3
@@ -61,6 +64,7 @@ Shader "Custom/SimpleLit_BottomFade_Wave"
             CBUFFER_START(UnityPerMaterial)
                 float4 _BaseMap_ST;
                 float4 _BaseColor;
+                float  _UnlitMode;
                 float  _FadeStart;
                 float  _FadeRange;
                 float2 _WindDirection;
@@ -149,6 +153,12 @@ Shader "Custom/SimpleLit_BottomFade_Wave"
                 float fadeT = smoothstep(_FadeStart, _FadeStart + max(_FadeRange, 0.0001), IN.positionWS.y);
                 float alpha = albedo.a * fadeT;
                 clip(alpha - 0.01);
+
+                // 显式 Unlit 开关优先于原有 Receive Lighting 设置。
+                if (_UnlitMode >= 0.5)
+                {
+                    return half4(MixFog(albedo.rgb, IN.fogFactor), alpha);
+                }
 
             #ifdef _RECEIVE_LIGHTING_ON
                 InputData inputData;

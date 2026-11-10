@@ -37,6 +37,11 @@ Shader "Custom/BakedLightMap_PlantWind"
         _GradientDirection ("Gradient Direction", Float) = 0
         _GradientStart ("Gradient Start (Normalized)", Range(0, 1)) = 0
         _GradientWidth ("Gradient Width (Normalized)", Range(0.001, 1)) = 1
+        // Object-space mesh AABB for wind falloff. Do NOT use unity_RendererBounds:
+        // RenderMeshInstanced fills those from RenderParams.worldBounds (often a huge
+        // culling box), which flattens the gradient. Sandbox sets these from mesh.bounds.
+        _WindLocalBoundsMin ("Wind Local Bounds Min", Vector) = (-1.6, 0, -1.6, 0)
+        _WindLocalBoundsMax ("Wind Local Bounds Max", Vector) = (1.6, 5.34, 1.6, 0)
     }
 
     SubShader
@@ -80,9 +85,14 @@ Shader "Custom/BakedLightMap_PlantWind"
             float _GradientDirection;
             float _GradientStart;
             float _GradientWidth;
+            float4 _WindLocalBoundsMin;
+            float4 _WindLocalBoundsMax;
         CBUFFER_END
 
-        float GetWindGradient(float3 positionWS)
+        // Object-space falloff. Avoid unity_RendererBounds: RenderMeshInstanced
+        // feeds RenderParams.worldBounds into them (often a huge culling box),
+        // which collapses Bottom→Top wind to ~0.5 on every vertex.
+        float GetWindGradient(float3 positionOS)
         {
             float axisPosition;
             float axisMinimum;
@@ -90,27 +100,27 @@ Shader "Custom/BakedLightMap_PlantWind"
 
             if (_GradientDirection < 0.5)
             {
-                axisPosition = positionWS.y;
-                axisMinimum = unity_RendererBounds_Min.y;
-                axisMaximum = unity_RendererBounds_Max.y;
+                axisPosition = positionOS.y;
+                axisMinimum = _WindLocalBoundsMin.y;
+                axisMaximum = _WindLocalBoundsMax.y;
             }
             else if (_GradientDirection < 1.5)
             {
-                axisPosition = -positionWS.y;
-                axisMinimum = -unity_RendererBounds_Max.y;
-                axisMaximum = -unity_RendererBounds_Min.y;
+                axisPosition = -positionOS.y;
+                axisMinimum = -_WindLocalBoundsMax.y;
+                axisMaximum = -_WindLocalBoundsMin.y;
             }
             else if (_GradientDirection < 2.5)
             {
-                axisPosition = positionWS.x;
-                axisMinimum = unity_RendererBounds_Min.x;
-                axisMaximum = unity_RendererBounds_Max.x;
+                axisPosition = positionOS.x;
+                axisMinimum = _WindLocalBoundsMin.x;
+                axisMaximum = _WindLocalBoundsMax.x;
             }
             else
             {
-                axisPosition = -positionWS.x;
-                axisMinimum = -unity_RendererBounds_Max.x;
-                axisMaximum = -unity_RendererBounds_Min.x;
+                axisPosition = -positionOS.x;
+                axisMinimum = -_WindLocalBoundsMax.x;
+                axisMaximum = -_WindLocalBoundsMin.x;
             }
 
             float normalizedPosition = saturate(
@@ -136,7 +146,7 @@ Shader "Custom/BakedLightMap_PlantWind"
             float time = _Time.y * _WindSpeed;
             float wave = sin(phase + time) * 0.75
                        + sin(phase * 1.91 - time * 1.37) * 0.25;
-            float gradient = GetWindGradient(positionWS);
+            float gradient = GetWindGradient(positionOS);
             float3 offsetWS = float3(directionXZ.x, 0.0, directionXZ.y)
                             * (wave * _WindStrength * gradient);
 

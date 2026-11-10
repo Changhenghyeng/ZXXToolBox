@@ -587,6 +587,7 @@ namespace PrefabTools
 
         private void Execute()
         {
+            var usageTimer = ZXXToolUsageStats.Begin();
             if (_analyzeResult == null || _analyzeResult.Groups.Count == 0)
             {
                 if (!EditorUtility.DisplayDialog("提示", "尚未分析,是否现在分析并执行?", "是", "取消"))
@@ -859,6 +860,7 @@ namespace PrefabTools
                 }
             }
 
+            if (!_dryRun) ZXXToolUsageStats.Complete("Prefab Extractor", totalCreated + totalReplaced, usageTimer);
             Log($"\n=== 完成 ===  创建子预制体: {totalCreated},替换实例: {totalReplaced}");
         }
 

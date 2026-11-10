@@ -4931,6 +4931,7 @@ namespace SLGMapTileCutter.Editor
 
         private void WriteGeneratedAssets(Dictionary<int, TileBuilder> builders)
         {
+            var usageTimer = ZXXToolUsageStats.Begin();
             if (builders.Count == 0)
             {
                 throw new InvalidOperationException("没有生成任何朝上的模型表面。请确认参考模型是用于俯视投射的地形 Mesh。");
@@ -5073,6 +5074,7 @@ namespace SLGMapTileCutter.Editor
             }
 
             AssetDatabase.SaveAssets();
+            ZXXToolUsageStats.Complete("SLG Map Tile Cutter", root.transform.childCount, usageTimer);
             Selection.activeGameObject = root;
             EditorGUIUtility.PingObject(mapAsset);
             EditorUtility.DisplayDialog("SLG 地块切分",

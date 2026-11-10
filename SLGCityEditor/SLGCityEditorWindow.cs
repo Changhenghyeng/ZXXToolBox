@@ -1100,6 +1100,7 @@ namespace ZXXTools.SLGCityEditor
 
         private void GenerateWalls()
         {
+            var usageTimer = ZXXToolUsageStats.Begin();
             if (CityWallGenerator.TryGenerate(
                 _layout,
                 _wallPrefabSet,
@@ -1107,6 +1108,7 @@ namespace ZXXTools.SLGCityEditor
                 out CityWallGenerator.Result result,
                 out string error))
             {
+                ZXXToolUsageStats.Complete("SLG City Editor", result.StraightCount + result.CornerCount + result.GateCount, usageTimer);
                 _lastGenerationMessage =
                     $"生成完成：{result.StraightCount} 个 Straight，{result.CornerCount} 个 Corner，"
                     + $"{result.GateCount} 个 Gate。";
@@ -1149,6 +1151,7 @@ namespace ZXXTools.SLGCityEditor
 
         private void GenerateGround()
         {
+            var usageTimer = ZXXToolUsageStats.Begin();
             if (_groundType == GroundType.Terrain)
             {
                 if (CityGroundGenerator.TryCreateOrRestoreTerrain(
@@ -1163,6 +1166,7 @@ namespace ZXXTools.SLGCityEditor
                     out bool createdTerrainData,
                     out string terrainError))
                 {
+                    ZXXToolUsageStats.Complete("SLG City Editor", 1, usageTimer);
                     _lastGenerationMessage = createdTerrainData
                         ? $"Terrain 首次创建完成：{AssetDatabase.GetAssetPath(terrainData)}。"
                             + "该 TerrainData 已绑定，工具后续不会再修改它。"
@@ -1189,6 +1193,7 @@ namespace ZXXTools.SLGCityEditor
                 int triangleCount = meshFilter != null && meshFilter.sharedMesh != null
                     ? meshFilter.sharedMesh.triangles.Length / 3
                     : 0;
+                ZXXToolUsageStats.Complete("SLG City Editor", 1, usageTimer);
                 _lastGenerationMessage = $"地面生成完成：1 个 Quad，{triangleCount} 个三角面。";
                 _lastGenerationMessageType = MessageType.Info;
                 return;

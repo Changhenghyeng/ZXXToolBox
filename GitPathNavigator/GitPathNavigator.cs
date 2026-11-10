@@ -225,6 +225,7 @@ public class GitPathNavigator : EditorWindow
 
     private bool Navigate(string rawPath)
     {
+        var usageTimer = ZXXToolUsageStats.Begin();
         _lastAssetPath = "";
 
         if (string.IsNullOrWhiteSpace(rawPath))
@@ -255,6 +256,7 @@ public class GitPathNavigator : EditorWindow
         EditorGUIUtility.PingObject(obj);
         _lastAssetPath = assetPath;
         AddToHistory(rawPath);
+        ZXXToolUsageStats.Complete("Git Path Navigator", 1, usageTimer);
         SetStatus($"Located: {assetPath}", MessageType.Info);
         return true;
     }

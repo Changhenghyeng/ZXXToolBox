@@ -168,6 +168,7 @@ public class RandomMaterialWindow : EditorWindow
 
     private void ApplyToSelection()
     {
+        var usageTimer = ZXXToolUsageStats.Begin();
         var pool = randomMaterial
             ? materials.Where(m => m != null && EditorUtility.IsPersistent(m)).Distinct().ToArray()
             : Array.Empty<Material>();
@@ -268,6 +269,7 @@ public class RandomMaterialWindow : EditorWindow
         }
         finally { Undo.CollapseUndoOperations(undoGroup); }
 
+        ZXXToolUsageStats.Complete("Random Material", changedTransforms + changedRenderers, usageTimer);
         result = $"修改 {changedTransforms} 个 Transform；修改 {changedRenderers} 个 Renderer；" +
                  $"跳过 {skipped} 个不可编辑资源；失败 {failures} 个目标。";
         SceneView.RepaintAll();

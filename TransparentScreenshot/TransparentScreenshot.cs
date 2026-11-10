@@ -72,7 +72,7 @@ public class TransparentScreenshot : EditorWindow
     private bool addResolution = true;
 
     // === Capture Mode ===
-    private enum CaptureMode { Single, AnimSequence, ParticleSequence }
+    private enum CaptureMode { Single, AnimSequence, ParticleSequence, Video }
     private CaptureMode captureMode = CaptureMode.Single;
 
     // === Sequence capture (shared params) ===
@@ -200,6 +200,7 @@ public class TransparentScreenshot : EditorWindow
         ShortcutModifiers.Shift | ShortcutModifiers.Control)]
     private static void QuickCapture()
     {
+        if (GameViewVideoRecorder.IsRecording) return;
         // 从 EditorPrefs 恢复相机引用
         var camPath = EditorPrefs.GetString(PREF_PREFIX + "cam", "");
         Camera cam = null;
@@ -256,6 +257,7 @@ public class TransparentScreenshot : EditorWindow
         try
         {
 finalTex = CapturePipeline.CaptureFrame(cam, outW, outH, ss, tbg);
+            CompositeSingleUI(finalTex);
 
             // 命名
             var folderAbs = string.IsNullOrEmpty(folder) || !Path.IsPathRooted(folder)
@@ -288,9 +290,187 @@ finalTex = CapturePipeline.CaptureFrame(cam, outW, outH, ss, tbg);
     }
 
     private Vector2 scrollPos;
+    private bool videoAdvanced;
 
     private void OnEnable() { LoadPrefs(); }
-    private void OnDisable() { SavePrefs(); }
+    private void OnDisable()
+    {
+        SavePrefs();
+        if (!GameViewVideoRecorder.IsRecording) GameViewVideoPreview.Clear();
+    }
+
+    private void OnInspectorUpdate()
+    {
+        SyncVideoPreview();
+        if (GameViewVideoRecorder.IsRecording || GameViewVideoRecorder.IsFinalizing) Repaint();
+    }
+
+    private void SyncVideoPreview()
+    {
+        bool single = captureMode == CaptureMode.Single;
+        GameViewVideoPreview.Sync((single || captureMode == CaptureMode.Video)
+            && EditorPrefs.GetBool(PREF_PREFIX + (single ? "singleOverlay" : "videoOverlay"), false)
+            && EditorPrefs.GetBool(PREF_PREFIX + (single ? "singleOverlayPreview" : "videoOverlayPreview"), true),
+            EditorPrefs.GetString(PREF_PREFIX + "videoOverlayPath", ""),
+            EditorPrefs.GetBool(PREF_PREFIX + "videoOverlayStretch", false),
+            single ? (useGameViewSize ? 0 : width) : VideoOutputWidth,
+            single ? (useGameViewSize ? 0 : height) : VideoOutputHeight);
+    }
+
+    private static void CompositeSingleUI(Texture2D frame)
+    {
+        if (!EditorPrefs.GetBool(PREF_PREFIX + "singleOverlay", false)) return;
+        var ui = new GameViewVideoOverlay(EditorPrefs.GetString(PREF_PREFIX + "videoOverlayPath", ""),
+            EditorPrefs.GetBool(PREF_PREFIX + "videoOverlayStretch", false));
+        ui.Composite(frame, true);
+    }
+
+    private void DrawSingleUISection()
+    {
+        EditorGUILayout.Space();
+        EditorGUILayout.LabelField("UI 效果图", EditorStyles.boldLabel);
+        bool enabled = EditorGUILayout.Toggle("叠加 UI 效果图",
+            EditorPrefs.GetBool(PREF_PREFIX + "singleOverlay", false));
+        EditorPrefs.SetBool(PREF_PREFIX + "singleOverlay", enabled);
+        if (enabled)
+        {
+            string path = EditorGUILayout.TextField("图片路径", EditorPrefs.GetString(PREF_PREFIX + "videoOverlayPath", ""));
+            if (GUILayout.Button("选择 UI 图片（PNG / JPG）"))
+            {
+                string selected = EditorUtility.OpenFilePanelWithFilters("选择 UI 效果图", "", new[] { "图片", "png,jpg,jpeg" });
+                if (!string.IsNullOrEmpty(selected)) path = selected;
+            }
+            EditorPrefs.SetString(PREF_PREFIX + "videoOverlayPath", path);
+            int fit = EditorGUILayout.Popup("图片适配", EditorPrefs.GetBool(PREF_PREFIX + "videoOverlayStretch", false) ? 1 : 0,
+                new[] { "等比完整显示（居中）", "拉伸铺满截图" });
+            EditorPrefs.SetBool(PREF_PREFIX + "videoOverlayStretch", fit == 1);
+            EditorPrefs.SetBool(PREF_PREFIX + "singleOverlayPreview", EditorGUILayout.Toggle("Game 实时预览",
+                EditorPrefs.GetBool(PREF_PREFIX + "singleOverlayPreview", true)));
+            EditorGUILayout.HelpBox("与 Video 共用 UI 图片和适配方式。保存截图（含快捷键）会合成 UI，透明 PNG 会保留剩余透明区域。Game 预览用于检查 UI 布局；若截图相机或宽高比不同，请以导出图为准。", MessageType.Info);
+        }
+        SyncVideoPreview();
+        if (!string.IsNullOrEmpty(GameViewVideoPreview.Error))
+            EditorGUILayout.HelpBox(GameViewVideoPreview.Error, MessageType.Warning);
+    }
+
+    private static int VideoOutputWidth => EditorPrefs.GetBool(PREF_PREFIX + "videoCustomSize", false)
+        ? EditorPrefs.GetInt(PREF_PREFIX + "videoWidth", 1920) : 0;
+    private static int VideoOutputHeight => EditorPrefs.GetBool(PREF_PREFIX + "videoCustomSize", false)
+        ? EditorPrefs.GetInt(PREF_PREFIX + "videoHeight", 1080) : 0;
+
+    [Shortcut("Transparent Screenshot/Record Video", null, KeyCode.V,
+        ShortcutModifiers.Shift | ShortcutModifiers.Control)]
+    private static void QuickRecordVideo()
+    {
+        if (GameViewVideoRecorder.IsRecording) { GameViewVideoRecorder.Stop(); return; }
+        var window = GetWindow<TransparentScreenshot>();
+        window.captureMode = CaptureMode.Video;
+        window.ToggleVideo();
+    }
+
+    private void ToggleVideo()
+    {
+        if (!GameViewVideoRecorder.IsRecording && EditorPrefs.GetBool(PREF_PREFIX + "videoCustomSize", false)
+            && (VideoOutputWidth < 2 || VideoOutputHeight < 2))
+        {
+            EditorUtility.DisplayDialog("视频分辨率", "视频宽高必须为 2～4096 的偶数。", "确定");
+            return;
+        }
+        SyncVideoPreview();
+        if (GameViewVideoRecorder.IsRecording) GameViewVideoRecorder.Stop();
+        else GameViewVideoRecorder.Begin(GetAbsoluteOutputFolder(),
+            EditorPrefs.GetInt(PREF_PREFIX + "videoFps", 60), openFolderAfterSave,
+            EditorPrefs.GetBool(PREF_PREFIX + "videoOverlay", false)
+                ? EditorPrefs.GetString(PREF_PREFIX + "videoOverlayPath", "") : null,
+            EditorPrefs.GetBool(PREF_PREFIX + "videoOverlayStretch", false), VideoOutputWidth, VideoOutputHeight,
+            EditorPrefs.GetString(PREF_PREFIX + "ffmpegPath", ""),
+            EditorPrefs.GetInt(PREF_PREFIX + "videoQuality", 18));
+    }
+
+    private void DrawVideoSection()
+    {
+        EditorGUILayout.LabelField("Game View 视频", EditorStyles.boldLabel);
+        EditorGUILayout.HelpBox("进入 Play 模式后开始录制。输出 Game 画面（含 UI、后处理），高画质 H.264 MP4（无声）。请保持 Game 视图可见，建议先设为固定 1920 × 1080。录制中不要调整分辨率或切到 Scene 标签。\n固定步长逐帧录制：运行预览可能变慢，视频按所选帧率播放；使用真实时间的逻辑不适合此模式。", MessageType.Info);
+        using (new EditorGUI.DisabledScope(GameViewVideoRecorder.IsRecording || GameViewVideoRecorder.IsFinalizing))
+        {
+            EditorGUILayout.LabelField("视频格式", "MP4 / H.264（兼容常见播放器）");
+            int quality = EditorPrefs.GetInt(PREF_PREFIX + "videoQuality", 18);
+            int qualityChoice = EditorGUILayout.Popup("画质", quality == 22 ? 0 : quality == 16 ? 2 : 1,
+                new[] { "标准（文件较小）", "高画质（推荐）", "极高画质（文件较大）" });
+            EditorPrefs.SetInt(PREF_PREFIX + "videoQuality", qualityChoice == 0 ? 22 : qualityChoice == 2 ? 16 : 18);
+            EditorGUILayout.HelpBox("自动优先使用可用的显卡编码器；不可用时回退到 Unity 内置高画质编码。MP4 是高画质有损压缩，体积更适合预览和分享。", MessageType.Info);
+            videoAdvanced = EditorGUILayout.Foldout(videoAdvanced, "高级设置", true);
+            if (videoAdvanced)
+            {
+                string ffmpegPath = EditorGUILayout.TextField("编码程序路径（自动）",
+                    EditorPrefs.GetString(PREF_PREFIX + "ffmpegPath", ""));
+                if (GUILayout.Button("指定编码程序"))
+                {
+                    string selected = EditorUtility.OpenFilePanel("选择 FFmpeg", "", "exe");
+                    if (!string.IsNullOrEmpty(selected)) ffmpegPath = selected;
+                }
+                EditorPrefs.SetString(PREF_PREFIX + "ffmpegPath", ffmpegPath);
+                EditorGUILayout.HelpBox("通常无需填写。硬件编码会先实际测试；没有可用程序或硬件时仍可使用 Unity 内置编码。内置回退统一使用高画质档。", MessageType.Info);
+            }
+            int fps = EditorPrefs.GetInt(PREF_PREFIX + "videoFps", 60);
+            int selection = EditorGUILayout.Popup("帧率", fps == 30 ? 0 : fps == 120 ? 2 : 1,
+                new[] { "30 FPS", "60 FPS", "120 FPS" });
+            EditorPrefs.SetInt(PREF_PREFIX + "videoFps", selection == 0 ? 30 : selection == 2 ? 120 : 60);
+            if (selection == 2)
+                EditorGUILayout.HelpBox("120 FPS 按固定步长逐帧录制，编辑器预览可能变慢，输出视频按 120 FPS 播放。4K 下处理和编码耗时会更高。", MessageType.Info);
+            bool customSize = EditorGUILayout.Toggle("自定义输出分辨率",
+                EditorPrefs.GetBool(PREF_PREFIX + "videoCustomSize", false));
+            EditorPrefs.SetBool(PREF_PREFIX + "videoCustomSize", customSize);
+            if (customSize)
+            {
+                EditorPrefs.SetInt(PREF_PREFIX + "videoWidth", EditorGUILayout.IntField("视频宽度",
+                    EditorPrefs.GetInt(PREF_PREFIX + "videoWidth", 1920)));
+                EditorPrefs.SetInt(PREF_PREFIX + "videoHeight", EditorGUILayout.IntField("视频高度",
+                    EditorPrefs.GetInt(PREF_PREFIX + "videoHeight", 1080)));
+                EditorGUILayout.HelpBox("宽高需为 2～4096 的偶数。Game 画面缩放到此尺寸，不改变摄像机和 Game 渲染分辨率；放大不会增加细节。为避免变形，请让 Game 与输出保持相同宽高比。UI 按输出尺寸适配。", MessageType.Info);
+            }
+            else
+                EditorGUILayout.LabelField("输出分辨率", "跟随 Game 视图");
+            outputFolder = EditorGUILayout.TextField("保存目录", outputFolder);
+            if (GUILayout.Button("选择保存目录"))
+            {
+                string folder = EditorUtility.OpenFolderPanel("视频保存目录", GetAbsoluteOutputFolder(), "");
+                if (!string.IsNullOrEmpty(folder)) outputFolder = folder;
+            }
+            openFolderAfterSave = EditorGUILayout.Toggle("保存后打开目录", openFolderAfterSave);
+            EditorGUILayout.Space();
+            bool overlay = EditorGUILayout.Toggle("叠加 UI 效果图",
+                EditorPrefs.GetBool(PREF_PREFIX + "videoOverlay", false));
+            EditorPrefs.SetBool(PREF_PREFIX + "videoOverlay", overlay);
+            if (overlay)
+            {
+                string path = EditorPrefs.GetString(PREF_PREFIX + "videoOverlayPath", "");
+                path = EditorGUILayout.TextField("图片路径", path);
+                if (GUILayout.Button("选择 UI 图片（PNG / JPG）"))
+                {
+                    string selected = EditorUtility.OpenFilePanelWithFilters("选择 UI 效果图", "",
+                        new[] { "图片", "png,jpg,jpeg" });
+                    if (!string.IsNullOrEmpty(selected)) path = selected;
+                }
+                EditorPrefs.SetString(PREF_PREFIX + "videoOverlayPath", path);
+                int fit = EditorGUILayout.Popup("图片适配",
+                    EditorPrefs.GetBool(PREF_PREFIX + "videoOverlayStretch", false) ? 1 : 0,
+                    new[] { "等比完整显示（居中）", "拉伸铺满视频" });
+                EditorPrefs.SetBool(PREF_PREFIX + "videoOverlayStretch", fit == 1);
+                EditorPrefs.SetBool(PREF_PREFIX + "videoOverlayPreview", EditorGUILayout.Toggle("Game 实时预览",
+                    EditorPrefs.GetBool(PREF_PREFIX + "videoOverlayPreview", true)));
+                EditorGUILayout.HelpBox("勾选实时预览后，选图即可在 Game 视图看到效果，无需进入 Play。图片在后处理之后显示，录制时不会重复叠加。推荐与视频同尺寸的透明 PNG；不透明背景也会盖住视频。UI 不受场景灯光和后处理影响；视频压缩可能产生轻微色差。", MessageType.Info);
+            }
+        }
+        SyncVideoPreview();
+        if (!string.IsNullOrEmpty(GameViewVideoPreview.Error))
+            EditorGUILayout.HelpBox(GameViewVideoPreview.Error, MessageType.Warning);
+        EditorGUILayout.LabelField("快捷键", "Ctrl + Shift + V 开始 / 停止");
+        if (GameViewVideoRecorder.IsRecording)
+            EditorGUILayout.LabelField("录制进度", $"{GameViewVideoRecorder.Duration:F1} 秒 / {GameViewVideoRecorder.FrameCount} 帧");
+        if (!string.IsNullOrEmpty(GameViewVideoRecorder.Status))
+            EditorGUILayout.HelpBox(GameViewVideoRecorder.Status, MessageType.Info);
+    }
 
     private void OnGUI()
     {
@@ -304,10 +484,15 @@ finalTex = CapturePipeline.CaptureFrame(cam, outW, outH, ss, tbg);
         // ============================================================
         scrollPos = EditorGUILayout.BeginScrollView(scrollPos);
 
-        DrawCameraSection();
-        DrawOutputSection();
-        DrawRenderingSection();
-        DrawSourceSection();
+        if (captureMode == CaptureMode.Video) DrawVideoSection();
+        else
+        {
+            DrawCameraSection();
+            DrawOutputSection();
+            DrawRenderingSection();
+            DrawSourceSection();
+            if (captureMode == CaptureMode.Single) DrawSingleUISection();
+        }
 
         EditorGUILayout.EndScrollView();
 
@@ -335,7 +520,7 @@ finalTex = CapturePipeline.CaptureFrame(cam, outW, outH, ss, tbg);
         EditorGUILayout.BeginHorizontal();
 
         // Mode 按钮（非 toolbar，手动实现选中高亮）
-        var modeNames = new[] { "Single", "Anim Seq", "Particle" };
+        var modeNames = new[] { "Single", "Anim Seq", "Particle", "Video" };
         for (int i = 0; i < modeNames.Length; i++)
         {
             bool selected = (captureMode == (CaptureMode)i);
@@ -343,7 +528,7 @@ finalTex = CapturePipeline.CaptureFrame(cam, outW, outH, ss, tbg);
                 ? new Color(0.55f, 0.75f, 1f)
                 : Color.white;
             if (GUILayout.Button(modeNames[i],
-                GUILayout.Height(BTN_H), GUILayout.Width(90)))
+                GUILayout.Height(BTN_H), GUILayout.MinWidth(55)))
                 captureMode = (CaptureMode)i;
         }
         GUI.backgroundColor = Color.white;
@@ -353,6 +538,8 @@ finalTex = CapturePipeline.CaptureFrame(cam, outW, outH, ss, tbg);
         string btnLabel;
         switch (captureMode)
         {
+            case CaptureMode.Video:
+                btnLabel = GameViewVideoRecorder.IsRecording ? "停止并保存 MP4" : "开始录制 MP4"; break;
             case CaptureMode.AnimSequence:
             case CaptureMode.ParticleSequence:
                 btnLabel = "Capture Sequence"; break;
@@ -360,6 +547,8 @@ finalTex = CapturePipeline.CaptureFrame(cam, outW, outH, ss, tbg);
                 btnLabel = "Capture  (Ctrl+Shift+X)"; break;
         }
 
+        if (GameViewVideoRecorder.IsRecording) btnLabel = "停止并保存 MP4";
+        if (captureMode == CaptureMode.Video && GameViewVideoRecorder.IsFinalizing) btnLabel = "正在后台保存…";
         GUI.backgroundColor = new Color(0.6f, 1f, 0.6f);
         if (GUILayout.Button(btnLabel,
             GUILayout.Height(BTN_H), GUILayout.Width(180)))
@@ -372,8 +561,12 @@ finalTex = CapturePipeline.CaptureFrame(cam, outW, outH, ss, tbg);
 
     private void OnCaptureButton()
     {
+        if (GameViewVideoRecorder.IsRecording) { GameViewVideoRecorder.Stop(); return; }
         switch (captureMode)
         {
+            case CaptureMode.Video:
+                ToggleVideo();
+                break;
             case CaptureMode.Single:
                 Capture();
                 break;
@@ -822,6 +1015,7 @@ finalTex = CapturePipeline.CaptureFrame(cam, outW, outH, ss, tbg);
 
     private void Capture()
     {
+        var usageTimer = ZXXToolUsageStats.Begin();
         var cam = targetCamera != null ? targetCamera : Camera.main;
         if (cam == null)
         {
@@ -856,6 +1050,7 @@ finalTex = CapturePipeline.CaptureFrame(cam, outW, outH, ss, tbg);
         try
         {
             finalTex = RenderCurrentFrame(cam, outW, outH);
+            CompositeSingleUI(finalTex);
 
             var bytes = finalTex.EncodeToPNG();
             var folderAbs = GetAbsoluteOutputFolder();
@@ -865,6 +1060,7 @@ finalTex = CapturePipeline.CaptureFrame(cam, outW, outH, ss, tbg);
             var path = Path.Combine(folderAbs, fname).Replace('\\', '/');
             File.WriteAllBytes(path, bytes);
 
+            ZXXToolUsageStats.Complete("Transparent Screenshot", 1, usageTimer);
             Debug.Log($"<color=#7fcf6f>[Screenshot]</color> Saved: {path}");
 
             var projectRoot = Directory.GetParent(Application.dataPath)
@@ -989,6 +1185,7 @@ return CapturePipeline.CaptureFrame(cam, outW, outH, superSize,
 
     private void CaptureSequence()
     {
+        var usageTimer = ZXXToolUsageStats.Begin();
         var sourceCam = targetCamera != null ? targetCamera : Camera.main;
         if (sourceCam == null)
         {
@@ -1111,6 +1308,7 @@ return CapturePipeline.CaptureFrame(cam, outW, outH, superSize,
                 folderAbs, sheetFileName, framesDirName,
                 exportIndividualFrames, out sheetPath);
 
+            if (ok) ZXXToolUsageStats.Complete("Transparent Screenshot", frameCount, usageTimer);
             if (ok)
                 Debug.Log($"<color=#7fcf6f>[Screenshot]</color> Sheet saved: {sheetPath} "
                         + $"(layout {cols}x{rows}, frame {outW}x{outH}, {validPairs.Count} pairs)");
@@ -1175,6 +1373,7 @@ return CapturePipeline.CaptureFrame(cam, outW, outH, superSize,
     /// <summary>执行粒子特效序列帧截图。</summary>
     private void CaptureParticleSequence()
     {
+        var usageTimer = ZXXToolUsageStats.Begin();
         var cam = targetCamera != null ? targetCamera : Camera.main;
         if (cam == null)
         {
@@ -1286,6 +1485,7 @@ return CapturePipeline.CaptureFrame(cam, outW, outH, superSize,
                 folderAbs, sheetFileName, framesDirName);
             if (ok)
             {
+                ZXXToolUsageStats.Complete("Transparent Screenshot", frameCount, usageTimer);
                 var sheetPath = Path.Combine(folderAbs, sheetFileName).Replace('\\', '/');
                 var projectRoot = Directory.GetParent(Application.dataPath)
                                     .FullName.Replace('\\', '/');
@@ -1328,6 +1528,7 @@ return CapturePipeline.CaptureFrame(cam, outW, outH, superSize,
 
         if (transparentOk)
         {
+            ZXXToolUsageStats.Complete("Transparent Screenshot", frameCount, usageTimer);
             var sheetPath = Path.Combine(folderAbs, sheetFileName).Replace('\\', '/');
             var projectRoot = Directory.GetParent(Application.dataPath)
                                 .FullName.Replace('\\', '/');

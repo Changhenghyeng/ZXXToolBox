@@ -805,6 +805,7 @@ namespace DayChangeTransitionTool.Editor
 
         private void CreateOrRepairSetup(bool selectController)
         {
+            var usageTimer = ZXXToolUsageStats.Begin();
             SavePrefs();
 
             if (_mainLight == null)
@@ -851,6 +852,7 @@ namespace DayChangeTransitionTool.Editor
             EditorUtility.SetDirty(nightVolume);
             EditorUtility.SetDirty(duskProfile);
             EditorUtility.SetDirty(nightProfile);
+            ZXXToolUsageStats.Complete("Day Change Transition", 1, usageTimer);
             AssetDatabase.SaveAssets();
 
             if (selectController)

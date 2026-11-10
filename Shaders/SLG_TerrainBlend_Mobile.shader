@@ -34,12 +34,15 @@ Shader "Custom/Terrain Blend Mobile"
         [Header(Variant)]
         [Toggle(_SLG_VARIANTS)] _UseVariants("Enable Variant Textures", Float) = 1
         [NoScaleOffset] _PackedNoise("Noise LOD Array", 2DArray) = "" {}
-        _Terrain0VariantRatio("Type A Variant Coverage", Range(0, 1)) = 0.5
-        _Terrain1VariantRatio("Type B Variant Coverage", Range(0, 1)) = 0.5
-        _Terrain2VariantRatio("Type C Variant Coverage", Range(0, 1)) = 0.5
-        _Terrain3VariantRatio("Type D Variant Coverage", Range(0, 1)) = 0.5
+        _Terrain0VariantRatio("Type A L0 Variant Coverage", Range(0, 1)) = 0.5
+        _Terrain1VariantRatio("Type B L0 Variant Coverage", Range(0, 1)) = 0.5
+        _Terrain2VariantRatio("Type C L0 Variant Coverage", Range(0, 1)) = 0.5
+        _Terrain3VariantRatio("Type D L0 Variant Coverage", Range(0, 1)) = 0.5
+        _Terrain0VariantRatioL3("Type A L3 Variant Coverage", Range(0, 1)) = 0
+        _Terrain1VariantRatioL3("Type B L3 Variant Coverage", Range(0, 1)) = 0
+        _Terrain2VariantRatioL3("Type C L3 Variant Coverage", Range(0, 1)) = 0
+        _Terrain3VariantRatioL3("Type D L3 Variant Coverage", Range(0, 1)) = 0
         _VariantEdgeSoftness("Variant Edge Softness", Range(0.01, 0.49)) = 0.2
-        _FarVariantStrength("Far Variant Strength", Range(0, 1)) = 0.35
         [HideInInspector] _VariantSoftness("Legacy Variant Softness", Vector) = (0.2, 0.2, 0.2, 0.2)
         [HideInInspector] _NoiseCorrelation01("Noise Correlation 0-1", Float) = 0.976
         [HideInInspector] _NoiseCorrelation12("Noise Correlation 1-2", Float) = 0.894
@@ -60,7 +63,8 @@ Shader "Custom/Terrain Blend Mobile"
         _LodTransitionRatio("LOD Transition Smoothness", Range(0.01, 1.0)) = 0.2
 
         [Header(Lighting)]
-        [Toggle(_SLG_UNLIT)] _Unlit("Unlit (Ignore Lighting And Shadows)", Float) = 0
+        [Toggle(_SLG_UNLIT)] _Unlit("Unlit (Ignore Lighting, Receive Shadows)", Float) = 0
+        _ShadowStrength("Shadow Strength", Range(0, 1)) = 1
 
         [Header(Global)]
         _GlobalTint("Global Tint", Color) = (1, 1, 1, 1)
@@ -83,6 +87,7 @@ Shader "Custom/Terrain Blend Mobile"
             Tags { "LightMode" = "UniversalForward" }
 
             Cull Back
+            Blend One Zero
             ZWrite On
             ZTest LEqual
 
@@ -95,7 +100,7 @@ Shader "Custom/Terrain Blend Mobile"
             #pragma shader_feature_local_fragment _SLG_VARIANTS
             #pragma shader_feature_local_fragment _SLG_BOTTOM_LOD
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
-            #pragma multi_compile_fragment _ _SHADOWS_SOFT
+            #pragma multi_compile_fragment _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH
             #pragma multi_compile_fog
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
@@ -141,8 +146,11 @@ Shader "Custom/Terrain Blend Mobile"
                 float _Terrain1VariantRatio;
                 float _Terrain2VariantRatio;
                 float _Terrain3VariantRatio;
+                float _Terrain0VariantRatioL3;
+                float _Terrain1VariantRatioL3;
+                float _Terrain2VariantRatioL3;
+                float _Terrain3VariantRatioL3;
                 float _VariantEdgeSoftness;
-                float _FarVariantStrength;
                 float _BottomDissolveSoftness;
                 float _BottomUvDistortion;
                 float _NoiseCorrelation01;
@@ -153,6 +161,7 @@ Shader "Custom/Terrain Blend Mobile"
                 float _Lod3ToBottomRange;
                 float _LodTransitionRatio;
                 float _Saturation;
+                float _ShadowStrength;
             CBUFFER_END
 
             struct Attributes
@@ -372,12 +381,31 @@ Shader "Custom/Terrain Blend Mobile"
                 return value.a;
             }
 
-            half SelectVariantRatio(int id)
+            half SelectVariantRatio(int id, half lodProgress)
             {
-                if (id == 0) return (half)_Terrain0VariantRatio;
-                if (id == 1) return (half)_Terrain1VariantRatio;
-                if (id == 2) return (half)_Terrain2VariantRatio;
-                return (half)_Terrain3VariantRatio;
+                half lod0Ratio;
+                half lod3Ratio;
+                if (id == 0)
+                {
+                    lod0Ratio = (half)_Terrain0VariantRatio;
+                    lod3Ratio = (half)_Terrain0VariantRatioL3;
+                }
+                else if (id == 1)
+                {
+                    lod0Ratio = (half)_Terrain1VariantRatio;
+                    lod3Ratio = (half)_Terrain1VariantRatioL3;
+                }
+                else if (id == 2)
+                {
+                    lod0Ratio = (half)_Terrain2VariantRatio;
+                    lod3Ratio = (half)_Terrain2VariantRatioL3;
+                }
+                else
+                {
+                    lod0Ratio = (half)_Terrain3VariantRatio;
+                    lod3Ratio = (half)_Terrain3VariantRatioL3;
+                }
+                return lerp(lod0Ratio, lod3Ratio, lodProgress);
             }
 
             half SelectTerrainSaturation(int id)
@@ -462,13 +490,14 @@ Shader "Custom/Terrain Blend Mobile"
                 half4 packedNoise,
                 half4 noiseFilterWidth,
                 int id,
-                half artistSoftness)
+                half artistSoftness,
+                half lodProgress)
             {
                 half noise = SelectComponent(packedNoise, id);
                 half softness = max(
                     artistSoftness,
                     SelectComponent(noiseFilterWidth, id));
-                half ratio = saturate(SelectVariantRatio(id));
+                half ratio = saturate(SelectVariantRatio(id, lodProgress));
                 half threshold = 1.0h - ratio;
                 half mask = smoothstep(
                     threshold - softness,
@@ -531,7 +560,8 @@ Shader "Custom/Terrain Blend Mobile"
                 half4 packedNoise,
                 half4 noiseFilterWidth,
                 half variantVisibility,
-                half variantSoftness)
+                half variantSoftness,
+                half variantLodProgress)
             {
                 half3 resolvedColor = SampleTerrainArray(
                     mapUV,
@@ -551,7 +581,8 @@ Shader "Custom/Terrain Blend Mobile"
                                 packedNoise,
                                 noiseFilterWidth,
                                 terrainId,
-                                variantSoftness) *
+                                variantSoftness,
+                                variantLodProgress) *
                             variantVisibility;
                         resolvedColor = lerp(
                             resolvedColor,
@@ -689,15 +720,23 @@ Shader "Custom/Terrain Blend Mobile"
             {
                 float4 shadowCoord =
                     TransformWorldToShadowCoord(positionWS);
-                Light mainLight = GetMainLight(shadowCoord);
-                half nDotL = saturate(
-                    dot(normalWS, mainLight.direction));
-                half3 ambientLighting =
-                    max(SampleSH(normalWS), 0.0h);
-                half3 directLighting = mainLight.color *
-                    (nDotL * mainLight.distanceAttenuation *
-                    mainLight.shadowAttenuation);
-                return albedo * (ambientLighting + directLighting);
+                Light mainLight = GetMainLight(
+                    shadowCoord, positionWS, half4(1, 1, 1, 1));
+                half shadowAttenuation = lerp(
+                    1.0h, mainLight.shadowAttenuation,
+                    saturate((half)_ShadowStrength));
+                #if defined(_SLG_UNLIT)
+                    return albedo * shadowAttenuation;
+                #else
+                    half nDotL = saturate(
+                        dot(normalWS, mainLight.direction));
+                    half3 ambientLighting =
+                        max(SampleSH(normalWS), 0.0h);
+                    half3 directLighting = mainLight.color *
+                        (nDotL * mainLight.distanceAttenuation *
+                        shadowAttenuation);
+                    return albedo * (ambientLighting + directLighting);
+                #endif
             }
 
             half4 Frag(Varyings input) : SV_Target
@@ -735,14 +774,12 @@ Shader "Custom/Terrain Blend Mobile"
                             0.001h);
                     #endif
 
+                    // Camera Size drives L0 -> L3 coverage without changing UVs.
                     half variantLodProgress = saturate(
-                        (half)lod.noiseMip * 0.5h);
+                        ((half)lod.noiseMip + lod.farBlend) / 3.0h);
                     half variantSoftness = GetVariantSoftness(
                         variantLodProgress);
-                    half variantVisibility = lerp(
-                        1.0h,
-                        (half)_FarVariantStrength,
-                        variantLodProgress) * (1.0h - lod.farBlend);
+                    half variantVisibility = 1.0h - lod.farBlend;
                     half bottomUvDetail = 0.0h;
                     #if defined(_SLG_VARIANTS)
                         bottomUvDetail = 1.0h - lod.farBlend;
@@ -753,7 +790,8 @@ Shader "Custom/Terrain Blend Mobile"
                         packedNoise,
                         noiseFilterWidth,
                         variantVisibility,
-                        variantSoftness);
+                        variantSoftness,
+                        variantLodProgress);
                     firstColor = ApplySaturation(
                         firstColor,
                         SelectTerrainSaturation(terrain.firstId));
@@ -766,7 +804,8 @@ Shader "Custom/Terrain Blend Mobile"
                         packedNoise,
                         noiseFilterWidth,
                         variantVisibility,
-                        variantSoftness);
+                        variantSoftness,
+                        variantLodProgress);
                     secondColor = ApplySaturation(
                         secondColor,
                         SelectTerrainSaturation(terrain.secondId));
@@ -838,12 +877,10 @@ Shader "Custom/Terrain Blend Mobile"
 
                 albedo *= _GlobalTint.rgb;
                 albedo = ApplySaturation(albedo, _Saturation);
-                #if !defined(_SLG_UNLIT)
-                    albedo = ApplyLighting(
-                        albedo,
-                        normalize(input.normalWS),
-                        input.positionWS);
-                #endif
+                albedo = ApplyLighting(
+                    albedo,
+                    normalize(input.normalWS),
+                    input.positionWS);
                 albedo = MixFog(albedo, input.fogFactor);
                 return half4(albedo, 1.0h);
             }

@@ -282,11 +282,29 @@ namespace RockTools
 
         private void Bake(string path)
         {
+            var usageTimer = System.Diagnostics.Stopwatch.StartNew();
             var bakedMeshFilter = new GameObject("Baked-Rock").AddComponent<MeshFilter>();
             var bakedMeshRenderer = bakedMeshFilter.gameObject.AddComponent<MeshRenderer>();
             bakedMeshRenderer.sharedMaterial = rockGen.pMeshRenderer.sharedMaterial;
             var parameters = new BakeParameters {addCollider = AddCollider, path = path, mergeVerticesThreshold = 0.1f, generateSecondaryUVSet = true, optimize = KOptimize};
             RockBaker.Bake(rockGen, parameters, bakedMeshFilter);
+            if (bakedMeshFilter.sharedMesh != null && AssetDatabase.Contains(bakedMeshFilter.sharedMesh))
+            {
+                usageTimer.Stop();
+                try
+                {
+                    var usageType = System.Type.GetType("ZXXToolUsageStats, Unity.Editor")
+                        ?? System.AppDomain.CurrentDomain.GetAssemblies()
+                            .Select(assembly => assembly.GetType("ZXXToolUsageStats"))
+                            .FirstOrDefault(type => type != null);
+                    usageType?.GetMethod("RecordCompleted", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+                        ?.Invoke(null, new object[] { "Rock Generator", 1, usageTimer.Elapsed.TotalSeconds });
+                }
+                catch (System.Exception exception)
+                {
+                    Debug.LogWarning("[Rock Generator] 使用统计保存失败：" + exception.Message);
+                }
+            }
         }
     }
 }

@@ -8,6 +8,7 @@ public static class PrefabNameSyncTool
 {
     public static void Execute(GameObject[] roots)
     {
+        var usageTimer = ZXXToolUsageStats.Begin();
         int renamedCount = 0;
         List<string> logs = new List<string>();
 
@@ -24,6 +25,7 @@ public static class PrefabNameSyncTool
             EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
         }
 
+        ZXXToolUsageStats.Complete("Sync Names", renamedCount, usageTimer);
         Debug.Log(
             $"[Sync Prefab Names] Complete — Renamed: {renamedCount}\n" +
             string.Join("\n", logs)

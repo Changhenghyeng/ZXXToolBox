@@ -70,7 +70,9 @@ namespace ZXXTools.PathBuilder
     public enum PathCornerHandling
     {
         Off,
-        CompressInner
+        CompressInner,
+        [InspectorName("保宽裁切")]
+        TrimInner
     }
 
     public enum MountainSourceType
@@ -114,6 +116,7 @@ namespace ZXXTools.PathBuilder
         [HideInInspector]
         public bool brokenTangents;
         [Min(0.01f)] public float width = 4f;
+        [Min(0.01f)] public float meshWidthScale = 1f;
 
         public PathKnot()
         {
@@ -133,7 +136,8 @@ namespace ZXXTools.PathBuilder
                 tangentOut = tangentOut,
                 tangentMode = tangentMode,
                 brokenTangents = brokenTangents,
-                width = width
+                width = width,
+                meshWidthScale = meshWidthScale
             };
         }
     }
@@ -201,6 +205,11 @@ namespace ZXXTools.PathBuilder
         [Min(0f)] public float endSegmentOffset;
         public bool repeat = true;
         public bool fitLastSegment = true;
+        public bool useSplineWidth;
+        [FormerlySerializedAs("flattenAboveWorldHeight")]
+        public bool flattenFromCamera;
+        [FormerlySerializedAs("flattenWorldHeight")]
+        public float flattenPlaneHeight;
         public float spacing;
         public PathCornerHandling cornerHandling =
             PathCornerHandling.CompressInner;
@@ -466,6 +475,7 @@ namespace ZXXTools.PathBuilder
                     knots[i] = new PathKnot();
                 MigrateLegacyTangentMode(knots[i]);
                 knots[i].width = Mathf.Max(0.01f, knots[i].width);
+                knots[i].meshWidthScale = Mathf.Max(0.01f, knots[i].meshWidthScale);
             }
         }
 
@@ -755,6 +765,7 @@ namespace ZXXTools.PathBuilder
                     knot.tangentMode = PathTangentMode.Mirrored;
                 }
                 knot.width = previous.width;
+                knot.meshWidthScale = previous.meshWidthScale;
             }
 
             knots.Add(knot);
@@ -773,7 +784,10 @@ namespace ZXXTools.PathBuilder
                 tangentMode = PathTangentMode.Linear
             };
             if (knots.Count > 0)
+            {
                 knot.width = knots[knots.Count - 1].width;
+                knot.meshWidthScale = knots[knots.Count - 1].meshWidthScale;
+            }
 
             knots.Add(knot);
             return knots.Count - 1;
@@ -835,7 +849,8 @@ namespace ZXXTools.PathBuilder
                 tangentIn = tangentIn,
                 tangentOut = tangentOut,
                 tangentMode = PathTangentMode.Continuous,
-                width = PathSplineUtility.EvaluateWidth(start, end, t)
+                width = PathSplineUtility.EvaluateWidth(start, end, t),
+                meshWidthScale = PathSplineUtility.EvaluateMeshWidthScale(start, end, t)
             };
 
             start.tangentOut = q0 - p0;
@@ -1054,6 +1069,7 @@ namespace ZXXTools.PathBuilder
         public Vector3 position;
         public Vector3 tangent;
         public float width;
+        public float meshWidthScale;
         public float distance;
     }
 
@@ -1105,6 +1121,12 @@ namespace ZXXTools.PathBuilder
             return Mathf.Lerp(start.width, end.width, t);
         }
 
+        public static float EvaluateMeshWidthScale(PathKnot start, PathKnot end, float t)
+        {
+            t = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(t));
+            return Mathf.Lerp(start.meshWidthScale, end.meshWidthScale, t);
+        }
+
         public static List<PathSample> BuildArcTable(PathSpline builder)
         {
             List<PathSample> samples = new List<PathSample>();
@@ -1140,6 +1162,7 @@ namespace ZXXTools.PathBuilder
                         position = worldPosition,
                         tangent = worldTangent,
                         width = EvaluateWidth(start, end, t),
+                        meshWidthScale = EvaluateMeshWidthScale(start, end, t),
                         distance = distance
                     });
                     previousPosition = worldPosition;
@@ -1187,6 +1210,7 @@ namespace ZXXTools.PathBuilder
             result.position = Vector3.Lerp(lower.position, upper.position, t);
             result.tangent = Vector3.Lerp(lower.tangent, upper.tangent, t).normalized;
             result.width = Mathf.Lerp(lower.width, upper.width, t);
+            result.meshWidthScale = Mathf.Lerp(lower.meshWidthScale, upper.meshWidthScale, t);
             result.distance = distance;
             return true;
         }

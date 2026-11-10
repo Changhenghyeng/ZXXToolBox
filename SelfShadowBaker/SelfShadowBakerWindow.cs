@@ -441,6 +441,7 @@ namespace SelfShadowBakerTool.Editor
         // ---------------------------------------------------------- Bake logic
         void DoBatchBake(bool bakeShadow, bool bakeAO, bool bakeFill)
         {
+            var usageTimer = ZXXToolUsageStats.Begin();
             var valid = new List<GameObject>();
             foreach (var target in _targets)
                 if (target != null && !valid.Contains(target)) valid.Add(target);
@@ -482,6 +483,7 @@ namespace SelfShadowBakerTool.Editor
             finally { EditorUtility.ClearProgressBar(); }
 
             AssetDatabase.SaveAssets();
+            ZXXToolUsageStats.Complete("Self Shadow Baker", success, usageTimer);
             Debug.Log($"[SelfShadowBaker] Batch done: {success}/{valid.Count}");
             foreach (var f in failures) Debug.LogWarning("[SelfShadowBaker] " + f);
 

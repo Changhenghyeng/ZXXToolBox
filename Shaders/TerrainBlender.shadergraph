@@ -1491,7 +1491,7 @@
     "m_Guid": {
         "m_GuidSerialized": "61af1782-0c78-4600-aaeb-2837648a3584"
     },
-    "m_Name": "启用世界方形裁剪",
+    "m_Name": "启用对象方形裁剪",
     "m_DefaultRefNameVersion": 1,
     "m_RefNameGeneratedByDisplayName": "启用世界方形裁剪",
     "m_DefaultReferenceName": "_WorldRectClipEnabled",
@@ -1552,7 +1552,7 @@
     "m_Guid": {
         "m_GuidSerialized": "7cf1f3aa-f139-4299-8200-123fde495cf4"
     },
-    "m_Name": "裁剪长度 Z",
+    "m_Name": "裁剪长度（本地 Z）",
     "m_DefaultRefNameVersion": 1,
     "m_RefNameGeneratedByDisplayName": "裁剪长度 Z",
     "m_DefaultReferenceName": "_WorldRectLength",
@@ -1569,7 +1569,7 @@
     "m_Value": 100.0,
     "m_FloatType": 0,
     "m_RangeValues": {
-        "x": 0.0010000000474974514,
+        "x": 0.0010000000474974513,
         "y": 1.0
     }
 }
@@ -2436,7 +2436,7 @@
     "m_Guid": {
         "m_GuidSerialized": "50d25a69-5cb1-45c6-a916-7bffd20dfe0d"
     },
-    "m_Name": "裁剪中心 X",
+    "m_Name": "裁剪中心 X（本地）",
     "m_DefaultRefNameVersion": 1,
     "m_RefNameGeneratedByDisplayName": "裁剪中心 X",
     "m_DefaultReferenceName": "_WorldRectCenterX",
@@ -2453,7 +2453,7 @@
     "m_Value": 0.0,
     "m_FloatType": 0,
     "m_RangeValues": {
-        "x": 0.0010000000474974514,
+        "x": 0.0010000000474974513,
         "y": 1.0
     }
 }
@@ -4886,7 +4886,7 @@
     "m_Guid": {
         "m_GuidSerialized": "81ac65e5-b159-41d8-a3a0-46739fb31b1e"
     },
-    "m_Name": "裁剪宽度 X",
+    "m_Name": "裁剪宽度（本地 X）",
     "m_DefaultRefNameVersion": 1,
     "m_RefNameGeneratedByDisplayName": "裁剪宽度 X",
     "m_DefaultReferenceName": "_WorldRectWidth",
@@ -4903,7 +4903,7 @@
     "m_Value": 100.0,
     "m_FloatType": 0,
     "m_RangeValues": {
-        "x": 0.0010000000474974514,
+        "x": 0.0010000000474974513,
         "y": 1.0
     }
 }
@@ -5192,7 +5192,7 @@
     "m_Group": {
         "m_Id": ""
     },
-    "m_Name": "TerrainWorldRectClip (Custom Function)",
+    "m_Name": "TerrainObjectRectClip (Custom Function)",
     "m_DrawState": {
         "m_Expanded": true,
         "m_Position": {
@@ -5242,9 +5242,9 @@
         "m_SerializableColors": []
     },
     "m_SourceType": 1,
-    "m_FunctionName": "TerrainWorldRectClip",
+    "m_FunctionName": "TerrainObjectRectClip",
     "m_FunctionSource": "",
-    "m_FunctionBody": "// Absolute world X/Z; sizes are full dimensions in world units.\nfloat2 halfSize = 0.5 * max(float2(Width, Length), 0.0);\nfloat2 distanceToCenter = abs(PositionWS.xz - float2(CenterX, CenterZ));\nfloat inside = step(distanceToCenter.x, halfSize.x) * step(distanceToCenter.y, halfSize.y);\ninside *= (Width > 0.0 && Length > 0.0) ? 1.0 : 0.0;\nfloat mask = Invert > 0.5 ? 1.0 - inside : inside;\nAlpha = saturate(EdgeAlpha) * (Enabled > 0.5 ? mask : 1.0);"
+    "m_FunctionBody": "// Object local X/Z; center and full dimensions use local mesh units.\nfloat2 halfSize = 0.5 * max(float2(Width, Length), 0.0);\nfloat2 distanceToCenter = abs(PositionOS.xz - float2(CenterX, CenterZ));\nfloat inside = step(distanceToCenter.x, halfSize.x) * step(distanceToCenter.y, halfSize.y);\ninside *= (Width > 0.0 && Length > 0.0) ? 1.0 : 0.0;\nfloat mask = Invert > 0.5 ? 1.0 - inside : inside;\nAlpha = saturate(EdgeAlpha) * (Enabled > 0.5 ? mask : 1.0);"
 }
 
 {
@@ -5531,7 +5531,7 @@
     "m_Guid": {
         "m_GuidSerialized": "e91a807c-75a3-435a-8239-d9d398ffef90"
     },
-    "m_Name": "裁剪中心 Z",
+    "m_Name": "裁剪中心 Z（本地）",
     "m_DefaultRefNameVersion": 1,
     "m_RefNameGeneratedByDisplayName": "裁剪中心 Z",
     "m_DefaultReferenceName": "_WorldRectCenterZ",
@@ -5548,7 +5548,7 @@
     "m_Value": 0.0,
     "m_FloatType": 0,
     "m_RangeValues": {
-        "x": 0.0010000000474974514,
+        "x": 0.0010000000474974513,
         "y": 1.0
     }
 }
@@ -6171,10 +6171,10 @@
     "m_Type": "UnityEditor.ShaderGraph.Vector3MaterialSlot",
     "m_ObjectId": "c4c361eb9395400fb90ef9ee136d6a4d",
     "m_Id": 0,
-    "m_DisplayName": "PositionWS",
+    "m_DisplayName": "PositionOS",
     "m_SlotType": 0,
     "m_Hidden": false,
-    "m_ShaderOutputName": "PositionWS",
+    "m_ShaderOutputName": "PositionOS",
     "m_StageCapability": 2,
     "m_Value": {
         "x": 0.0,
@@ -6694,7 +6694,7 @@
     "m_SGVersion": 0,
     "m_Type": "UnityEditor.ShaderGraph.CategoryData",
     "m_ObjectId": "d82fe34222224b04b14580a5d5eab434",
-    "m_Name": "世界方形裁剪",
+    "m_Name": "对象本地方形裁剪",
     "m_ChildObjectList": [
         {
             "m_Id": "1048e8bb0e984d8ab75f004dacef8dfd"
@@ -7126,7 +7126,7 @@
     "m_CustomColors": {
         "m_SerializableColors": []
     },
-    "m_Space": 4,
+    "m_Space": 0,
     "m_PositionSource": 0
 }
 

@@ -77,6 +77,7 @@ namespace ZXXTools.FBXMeshEditor
 
         public static bool SaveAsNewFBX(FBXMeshEditSession session, out string message)
         {
+            var usageTimer = ZXXToolUsageStats.Begin();
             if (!session.IsActive || session.MeshFilter == null || session.EditableMesh == null)
             {
                 message = "请先选择模型并进入编辑模式。";
@@ -132,6 +133,7 @@ namespace ZXXTools.FBXMeshEditor
                 }
                 Selection.activeObject = imported;
                 EditorGUIUtility.PingObject(imported);
+                ZXXToolUsageStats.Complete("FBX Mesh Editor", 1, usageTimer);
                 message = "新 FBX 已保存并通过重新导入验证。";
                 return true;
             }
@@ -154,6 +156,7 @@ namespace ZXXTools.FBXMeshEditor
         public static bool SaveMultipleAsNewFBX(IReadOnlyList<FBXMeshEditSession> sessions,
             out string message)
         {
+            var usageTimer = ZXXToolUsageStats.Begin();
             message = string.Empty;
             if (sessions == null || sessions.Count == 0)
             {
@@ -196,6 +199,7 @@ namespace ZXXTools.FBXMeshEditor
                 }
             }
             AssetDatabase.Refresh();
+            ZXXToolUsageStats.Complete("FBX Mesh Editor", succeeded, usageTimer);
             message = $"已输出 {succeeded} 个 FBX。";
             if (failures.Count > 0) message += "\n\n失败：\n" + string.Join("\n", failures);
             return succeeded > 0 && failures.Count == 0;
@@ -267,6 +271,7 @@ namespace ZXXTools.FBXMeshEditor
         private static bool OverwriteSourceFBX(FBXMeshEditSession session, bool showConfirmation,
             out string message)
         {
+            var usageTimer = ZXXToolUsageStats.Begin();
             message = string.Empty;
             if (!CanOverwriteSource(session))
             {
@@ -366,6 +371,7 @@ namespace ZXXTools.FBXMeshEditor
                 AssetDatabase.SaveAssets();
                 Selection.activeObject = importedMesh;
                 EditorGUIUtility.PingObject(importedMesh);
+                ZXXToolUsageStats.Complete("FBX Mesh Editor", 1, usageTimer);
                 message = $"源 FBX 已安全覆盖。\n备份位置：{backupFbx}";
                 return true;
             }

@@ -1,6 +1,6 @@
 # 源码位置索引
 
-2026-10-13：按 X26 项目的全量代码 Git 历史、重命名记录及现有工具仓库整理。
+2026-11-10：按 X26 项目的全量代码 Git 历史、重命名记录及现有工具仓库整理。
 
 只同步源码和说明，不同步 .meta、模型、贴图、材质、场景、Prefab 或生成配置。
 
@@ -144,12 +144,31 @@
 | Shaders/ShadowDecal_PlantWind_URP.shader | ArtRes/Art_Scene/Art_MainScene/Scene_City/Shader/ShadowDecal_PlantWind_URP.shader | 本人添加；已核对 Git 历史 |
 | Shaders/WallWorldVariation_Opaque_URP.shader | ArtRes/Art_Shader/Build/WallWorldVariation_Opaque_URP.shader | 本人添加；已核对 Git 历史 |
 | Shaders/UnlitReceiveShadow_URP.shader | ArtRes/Art_Scene/Art_MainScene/Scene_City/Shader/UnlitReceiveShadow_URP.shader | 本人添加；已核对 Git 历史 |
+| TransparentScreenshot/GameViewVideoBlit.shader | Scripts/Editor/ArtTools/ZXXTools/TransparentScreenshot/GameViewVideoBlit.shader | 本人添加；已核对 Git 历史 |
+| TransparentScreenshot/GameViewVideoEncoder.cs | Scripts/Editor/ArtTools/ZXXTools/TransparentScreenshot/GameViewVideoEncoder.cs | 本人添加；已核对 Git 历史 |
+| TransparentScreenshot/GameViewVideoFrameBuffer.cs | Scripts/Editor/ArtTools/ZXXTools/TransparentScreenshot/GameViewVideoFrameBuffer.cs | 本人添加；已核对 Git 历史 |
+| TransparentScreenshot/GameViewVideoOverlay.cs | Scripts/Editor/ArtTools/ZXXTools/TransparentScreenshot/GameViewVideoOverlay.cs | 本人添加；已核对 Git 历史 |
+| TransparentScreenshot/GameViewVideoPreview.cs | Scripts/Editor/ArtTools/ZXXTools/TransparentScreenshot/GameViewVideoPreview.cs | 本人添加；已核对 Git 历史 |
+| TransparentScreenshot/GameViewVideoRecorder.cs | Scripts/Editor/ArtTools/ZXXTools/TransparentScreenshot/GameViewVideoRecorder.cs | 本人添加；已核对 Git 历史 |
+| Runtime/TransparentScreenshot/GameViewUIOverlayPreview.cs | Scripts/HotUpdate/ArtCode/TransparentScreenshot/GameViewUIOverlayPreview.cs | 本人添加；已核对 Git 历史 |
+| Runtime/TransparentScreenshot/GameViewVideoRunner.cs | Scripts/HotUpdate/ArtCode/TransparentScreenshot/GameViewVideoRunner.cs | 本人添加；已核对 Git 历史 |
+| ZXXToolBox/ZXXToolUsageStats.cs | Scripts/Editor/ArtTools/ZXXTools/ZXXToolBox/ZXXToolUsageStats.cs | 本人添加；已核对 Git 历史 |
+| Shaders/Editor/TerrainBlendOpacityShaderGUI.cs | ArtRes/Art_Scene/Art_MainScene/Scene_City/Shader/Editor/TerrainBlendOpacityShaderGUI.cs | 本人添加；已核对 Git 历史 |
+| Shaders/RiverBankUnlit.shader | ArtRes/Art_Scene/Art_MainScene/Scene_City/Shader/RiverBankUnlit.shader | 本人添加；已核对 Git 历史 |
+| Shaders/SimpleLit_BottomColor_Opaque.shader | ArtRes/Art_Scene/Art_MainScene/Scene_City/Shader/SimpleLit_BottomColor_Opaque.shader | 本人添加；已核对 Git 历史 |
+| Shaders/SimpleLit_BottomFade_Emission.shader | ArtRes/Art_Scene/Art_MainScene/Scene_City/Shader/SimpleLit_BottomFade_Emission.shader | 本人添加；已核对 Git 历史 |
+| Shaders/SimpleLit_BottomFade_Opaque.shader | ArtRes/Art_Scene/Art_MainScene/Scene_City/Shader/SimpleLit_BottomFade_Opaque.shader | 本人添加；已核对 Git 历史 |
+| Shaders/PainterlyLit.shader | ArtRes/Art_Shader/Common/PainterlyLit.shader | 本人添加；已核对 Git 历史 |
+| Shaders/SceneHSV.shader | ArtRes/Art_Shader/SceneHSV.shader | 本人添加；已核对 Git 历史 |
+| Shaders/FlowingSilk.shader | ArtRes/Art_Scene/Art_HeroShowcase/FX/SilkMesh/FlowingSilk.shader | 本人添加；已核对 Git 历史 |
+| Shaders/TransparentTextureBlur.shader | ArtRes/Art_Scene/Art_HeroShowcase/Shader/TransparentTextureBlur.shader | 本人添加；已核对 Git 历史 |
 
 ## 排除依据
 
 - AnimationTools、EffectTools、ResourceReview、ShaderTools/ZEffect 等：沿移动前历史核对，主要由 hty、ZhengZhi 等其他提交者添加。
 - AssetExportTool 中个人提交仅是已有工具整理或小幅维护，没有将其作为个人新工具收录。
 - ASE_River、旧沙盘 ASE 地面/区域 Shader：本人提交为搬运或小幅参数调整，原始添加者为他人。
+- Toon_URP_Packed：由 hty 添加，本轮为项目角色渲染的维护，不作为个人 Shader 收录。
 - MainCityViewTool：添加记录属于 Enix，本次不作为个人新增工具收录。
 - Unity.Editor.asmdef：项目共享程序集配置，不属于个人工具源码。
 - MiniGameDeathFade.hlsl：其他提交者导入的必要配套头文件；两份个人 ToonOutline Shader 直接 include，保留以避免缺依赖。
@@ -157,6 +176,7 @@
 
 ## 依赖
 
+- Game View 录屏可选外部 FFmpeg 硬件编码，未安装或不可用时回退 Unity H.264，不打包 FFmpeg。
 - Unity 2022.3、URP 14；ShaderGraph 文件需要 Shader Graph。
 - BuildingCardTool 与 Spine_Skeleton_LineClip 依赖 spine-unity；后者直接 include `Assets/Plugins/Spine/spine-unity/Runtime/spine-unity/Shaders/CGIncludes/Spine-Common.cginc`。第三方库不随源码同步上传，安装路径不同时需调整 include。
 - RockTools.Editor 通过 RockTools.Runtime 程序集名称引用运行时源码；所有 .meta 由各 Unity 项目自行生成，不随仓库分发。编辑器 asmdef 是发布整理时的配置转换，项目原文件保持原样。

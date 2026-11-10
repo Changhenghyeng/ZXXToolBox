@@ -332,6 +332,7 @@ public class MeasureTool : EditorWindow
                 if (!_targetObjects.Contains(Selection.activeGameObject))
                 {
                     _targetObjects.Add(Selection.activeGameObject);
+                    if (TryGetCombinedBounds(_targetObjects, _includeChildren, out var usageBounds)) ZXXToolUsageStats.RecordCompleted("Measure Tool", 1, 0.0);
                     SceneView.RepaintAll();
                 }
             }
@@ -465,6 +466,7 @@ public class MeasureTool : EditorWindow
 
     private void ApplyTargetSize(OrientedMeasurementBounds measurement)
     {
+        var usageTimer = ZXXToolUsageStats.Begin();
         if (_targetObjects.Count != 1 || _targetObjects[0] == null) return;
 
         Transform targetTransform = _targetObjects[0].transform;
@@ -483,6 +485,7 @@ public class MeasureTool : EditorWindow
         PrefabUtility.RecordPrefabInstancePropertyModifications(targetTransform);
         EditorUtility.SetDirty(targetTransform);
 
+        ZXXToolUsageStats.Complete("Measure Tool", 1, usageTimer);
         SceneView.RepaintAll();
         Repaint();
     }
@@ -667,6 +670,7 @@ public class MeasureTool : EditorWindow
                     else if (!_rulerB.HasValue)
                     {
                         _rulerB = hit;
+                        ZXXToolUsageStats.RecordCompleted("Measure Tool", 1, 0.0);
                         _previewPoint = null;
                         _previewSnapped = false;
                     }

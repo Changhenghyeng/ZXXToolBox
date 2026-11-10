@@ -196,6 +196,7 @@ namespace LabelTool
         /// </summary>
         public void Scan()
         {
+            var usageTimer = ZXXToolUsageStats.Begin();
             var seen = new HashSet<GameObject>();
             foreach (var e in entries)
                 if (e.target) seen.Add(e.target);
@@ -211,6 +212,7 @@ namespace LabelTool
                     if (go) ScanRecursive(go.transform, seen);
             }
 
+            ZXXToolUsageStats.Complete("Label Tool", entries.Count, usageTimer);
             Refresh();
         }
 
@@ -307,6 +309,7 @@ namespace LabelTool
         /// </summary>
         public void BakeToScene()
         {
+            var usageTimer = ZXXToolUsageStats.Begin();
 #if UNITY_EDITOR
             var parent = new GameObject("[Baked Labels]");
             Undo.RegisterCreatedObjectUndo(parent, "烘培标签");
@@ -338,6 +341,7 @@ namespace LabelTool
                 }
             }
 
+            ZXXToolUsageStats.Complete("Label Tool", parent.transform.childCount, usageTimer);
             Selection.activeGameObject = parent;
             enabled = false;
             Debug.Log($"[Label] 烘培完成，共 {parent.transform.childCount} 个标签。LabelManager 已自动禁用。");

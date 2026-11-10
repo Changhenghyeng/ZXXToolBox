@@ -329,6 +329,7 @@ namespace ShadowBakerTool.Editor
 
         private void DoBatchBake()
         {
+            var usageTimer = ZXXToolUsageStats.Begin();
             var valid = _batchTargets.FindAll(t => t != null);
             if (valid.Count == 0) return;
 
@@ -360,6 +361,7 @@ namespace ShadowBakerTool.Editor
                 EditorUtility.ClearProgressBar();
             }
 
+            ZXXToolUsageStats.Complete("Shadow Baker", success, usageTimer);
             Debug.Log($"[ShadowBaker] Batch done: {success}/{valid.Count} baked");
             EditorUtility.DisplayDialog("Batch Bake Complete",
                 $"烘培完成: {success}/{valid.Count}\n输出目录: {_outputFolder}", "OK");

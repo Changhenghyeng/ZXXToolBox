@@ -730,6 +730,7 @@ public class TransparentQueueSorterWindow : EditorWindow
 
     private void Bake()
     {
+        var usageTimer = ZXXToolUsageStats.Begin();
         if (previewRecords.Count == 0 || !allocationValid) return;
 
         string invalidSource = items
@@ -810,6 +811,7 @@ public class TransparentQueueSorterWindow : EditorWindow
             AssetDatabase.SaveAssets();
             Undo.CollapseUndoOperations(undoGroup);
             previewRecords.Clear();
+            ZXXToolUsageStats.Complete("Transparent Queue Sorter", createdAssets.Count, usageTimer);
             SetMessage($"烘培完成：生成 {createdAssets.Count} 个独立材质，原材质未修改。", MessageType.Info);
             SceneView.RepaintAll();
         }

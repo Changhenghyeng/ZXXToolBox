@@ -93,8 +93,10 @@ public class ZXXToolBox : EditorWindow
     }
 
     private static readonly string[] _toolCatNames = { "场景搭建", "资源制作", "视觉烘焙", "批量操作", "检查与输出" };
-    private static readonly string[] _catNames = { "场景搭建", "资源制作", "视觉烘焙", "批量操作", "检查与输出", "工作流" };
+    private static readonly string[] _catNames = { "场景搭建", "资源制作", "视觉烘焙", "批量操作", "检查与输出", "工作流", "使用统计" };
     private const int WorkflowTabIndex = 5;
+    private const int UsageTabIndex = 6;
+    private int _usageSortMode;
 
     private static Type FindLightCookieScrollerType()
     {
@@ -142,7 +144,12 @@ public class ZXXToolBox : EditorWindow
 
         try
         {
+            var usageTimer = ZXXToolUsageStats.Begin();
+            var targets = Selection.gameObjects.Where(go => go.GetComponent<Light>() != null
+                && go.GetComponent(componentType) == null).ToArray();
             addMethod.Invoke(null, null);
+            ZXXToolUsageStats.Complete("Light Cookie Scroller",
+                targets.Count(go => go != null && go.GetComponent(componentType) != null), usageTimer);
         }
         catch (TargetInvocationException exception)
         {
@@ -458,7 +465,11 @@ public class ZXXToolBox : EditorWindow
 
         _scroll = EditorGUILayout.BeginScrollView(_scroll);
 
-        if (_selectedCat == WorkflowTabIndex)
+        if (_selectedCat == UsageTabIndex)
+        {
+            ZXXToolUsageStats.Draw(_registry.Select(tool => tool.id).ToArray(), ref _usageSortMode);
+        }
+        else if (_selectedCat == WorkflowTabIndex)
         {
             DrawWorkflowTab();
         }
@@ -537,7 +548,7 @@ public class ZXXToolBox : EditorWindow
                     // 点击触发
                     if (Event.current.type == EventType.MouseUp && Event.current.button == 0 && hover)
                     {
-                        tool.action();
+                        InvokeTool(tool.id, tool.action);
                         Event.current.Use();
                     }
                 }
@@ -548,7 +559,7 @@ public class ZXXToolBox : EditorWindow
 
         EditorGUILayout.EndScrollView();
 
-        if (_selectedCat != WorkflowTabIndex && _editMode)
+        if (_selectedCat != WorkflowTabIndex && _selectedCat != UsageTabIndex && _editMode)
         {
             EditorGUILayout.Space(6);
             EditorGUILayout.BeginHorizontal();
@@ -575,6 +586,12 @@ public class ZXXToolBox : EditorWindow
         };
         EditorGUILayout.LabelField("Developed by ZXX", authorStyle);
         EditorGUILayout.LabelField("114.21, 30.56", authorStyle);
+    }
+
+    private static void InvokeTool(string id, Action action)
+    {
+        ZXXToolUsageStats.RecordCall(id);
+        action();
     }
 
     private void ToggleEditMode()
@@ -926,7 +943,7 @@ public class ZXXToolBox : EditorWindow
                 using (new EditorGUI.DisabledScope(action == null))
                 {
                     if (GUILayout.Button(new GUIContent("打开工具窗口", "打开对应工具窗口进行参数配置"), GUILayout.Height(30)))
-                        action?.Invoke();
+                        InvokeTool(step.toolId, action);
                 }
                 string hasSaved = string.IsNullOrEmpty(step.settingsJson)
                     ? "尚未保存过设置。"

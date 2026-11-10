@@ -8,6 +8,7 @@ public static class ShadowCastOffTool
 {
     public static void Execute(GameObject[] roots)
     {
+        var usageTimer = ZXXToolUsageStats.Begin();
         int changed = 0;
 
         Undo.IncrementCurrentGroup();
@@ -32,6 +33,7 @@ public static class ShadowCastOffTool
             EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
         }
 
+        ZXXToolUsageStats.Complete("Cast Shadows OFF", changed, usageTimer);
         Debug.Log($"[Set Cast Shadows Off] Renderers updated: {changed}");
     }
 }

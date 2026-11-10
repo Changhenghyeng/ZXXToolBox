@@ -28,6 +28,7 @@ namespace ProcGen
 
         public static void Generate(ProcGenSettings settings)
         {
+            var usageTimer = ZXXToolUsageStats.Begin();
             if (settings.target == null)
             {
                 Debug.LogError("[ProcGen] 未指定 target");
@@ -111,6 +112,7 @@ namespace ProcGen
                 totalPlaced += PlaceSlot(slot, i, candidates, spatial, rng, root.transform, settings);
             }
 
+            ZXXToolUsageStats.Complete("ProcGen", totalPlaced, usageTimer);
             Debug.Log($"[ProcGen] 第 {rootIndex} 次生成完成，新增 {totalPlaced} 个物体，已避让 {avoidanceCount} 个场景物体");
         }
 

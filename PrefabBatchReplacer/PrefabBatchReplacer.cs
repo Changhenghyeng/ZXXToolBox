@@ -192,6 +192,7 @@ public class PrefabBatchReplacer : EditorWindow
 
     private void Replace(GameObject[] selected, GameObject target)
     {
+        var usageTimer = ZXXToolUsageStats.Begin();
         bool targetIsPrefabAsset = IsPrefabAsset(target);
 
         Undo.IncrementCurrentGroup();
@@ -306,6 +307,7 @@ public class PrefabBatchReplacer : EditorWindow
             EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetSceneAt(i));
 
         Selection.objects = newSelection.ToArray();
+        ZXXToolUsageStats.Complete("Batch Replacer", ok, usageTimer);
         Debug.Log($"[Prefab Batch Replacer] 替换完成:成功 {ok} 个,跳过 {skip} 个,目标 = '{target.name}'");
     }
 }

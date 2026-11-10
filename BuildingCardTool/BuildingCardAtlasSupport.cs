@@ -477,6 +477,8 @@ internal sealed class BuildingCardAssetMetadata
     public string editPointsJson;
     public string editCameraId;
     public Vector3 cameraOffsetLocal;
+    public bool hasVisualGroundCenter;
+    public Vector3 visualGroundCenterLocal;
     public bool hasCameraCompensationSource;
     public Quaternion cameraSourceLocalRotation;
     public Vector3 cameraSourceLocalScale;

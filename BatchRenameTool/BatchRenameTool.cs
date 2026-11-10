@@ -1537,6 +1537,8 @@ public class BatchRenameTool : EditorWindow
 
     private void ApplyRename()
     {
+        var usageTimer = ZXXToolUsageStats.Begin();
+        int usageRenamed = 0;
         BuildPreview();
         if (previewList.Count == 0) return;
 
@@ -1564,12 +1566,15 @@ public class BatchRenameTool : EditorWindow
                     // 只修改资源文件名
                     // 不修改 FBX 内部节点
                     // 不修改 Mesh 名
-                    AssetDatabase.RenameAsset(previewList[i].assetPath, previewList[i].newName);
+                    string renameError = AssetDatabase.RenameAsset(previewList[i].assetPath, previewList[i].newName);
+                    if (string.IsNullOrEmpty(renameError)) usageRenamed++;
+                    else Debug.LogWarning(renameError);
                 }
                 else if (previewList[i].obj is GameObject go)
                 {
                     Undo.RecordObject(go, "Batch Rename");
                     go.name = previewList[i].newName;
+                    usageRenamed++;
                     EditorUtility.SetDirty(go);
                 }
             }
@@ -1582,6 +1587,7 @@ public class BatchRenameTool : EditorWindow
             AssetDatabase.Refresh();
         }
 
+        ZXXToolUsageStats.Complete("Batch Rename Tool", usageRenamed, usageTimer);
         BuildPreview();
         Repaint();
     }

@@ -111,6 +111,7 @@ public class OutlineToolWindow : EditorWindow
 
     private void BakeAll()
     {
+        var usageTimer = ZXXToolUsageStats.Begin();
         var renderers = CollectRenderers(_target);
         if (renderers.Count == 0) { Debug.LogError("[Outline] No renderer found."); return; }
 
@@ -162,6 +163,7 @@ public class OutlineToolWindow : EditorWindow
         Undo.CollapseUndoOperations(undoGroup);
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
+        ZXXToolUsageStats.Complete("Outline", baked.Count, usageTimer);
         Debug.Log($"[Outline] {_target.name}: {baked.Count} meshes baked, {count} renderers assigned");
     }
 

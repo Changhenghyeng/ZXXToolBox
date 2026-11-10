@@ -91,6 +91,7 @@ public class OverlapSpreaderWindow : EditorWindow
 
     private void SpreadObjects(GameObject[] candidates, string sourceLabel)
     {
+        var usageTimer = ZXXToolUsageStats.Begin();
         var entries = new List<Entry>(candidates.Length);
         int skippedWithoutRenderer = 0;
 
@@ -158,6 +159,7 @@ public class OverlapSpreaderWindow : EditorWindow
         Undo.CollapseUndoOperations(undoGroup);
         SceneView.RepaintAll();
 
+        ZXXToolUsageStats.Complete("Overlap Spreader", movedCount, usageTimer);
         result = $"完成：处理 {overlapGroups.Count} 组重叠物体，移动 {movedCount} 个" +
                  (skippedWithoutRenderer > 0 ? $"，跳过 {skippedWithoutRenderer} 个无 Renderer 物体" : string.Empty) +
                  (unresolvedCount > 0 ? $"。仍有 {unresolvedCount} 个物体未能完全分离。" : "。Ctrl+Z 可撤销。");

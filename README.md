@@ -1,9 +1,9 @@
 # ZXX ToolBox
 
 
-## v0.7.0 — 2026-10-13
+## v0.8.0 — 2026-11-10
 
-新增 4 个 Shader：Spine 双线裁剪、植物风动阴影贴花、不透明城墙、接收阴影的 Unlit。建筑面片工具增加底面中心补偿、批量排序修复和明确的覆盖/另存流程；地形增加世界矩形裁剪，透明地形支持 Unlit 接收阴影，并调整河流高光与透明城墙深度写入。逐项变化见 [v0.7.0 更新日志](CHANGELOG.md#v070--2026-10-13)，原项目路径见 [源码位置索引](SOURCE_INDEX.md)，操作见 [工具使用说明](Docs/工具使用说明.md)。
+新增 Game View MP4 录屏、UI 叠加预览、本机使用统计，以及 8 个独立材质 Shader；更新建筑面片、路径生成、贴地烘焙和地形渲染。逐项变化见 [v0.8.0 更新日志](CHANGELOG.md#v080--2026-11-10)，原项目路径见 [源码位置索引](SOURCE_INDEX.md)，操作见 [工具使用说明](Docs/工具使用说明.md)。
 
 Unity 编辑器工具与 Shader 集合，适用于 **Unity 2022.3+ · URP 14+**。
 
@@ -18,7 +18,7 @@ git clone https://github.com/Changhenghyeng/ZXXToolBox.git Assets/ZXXToolBox
 或通过 Unity Package Manager 以 git URL 导入：
 
 ```
-https://github.com/Changhenghyeng/ZXXToolBox.git#v0.7.0
+https://github.com/Changhenghyeng/ZXXToolBox.git#v0.8.0
 ```
 
 ---
@@ -29,13 +29,13 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.7.0
 
 | 工具 | 功能 | 入口 |
 |------|------|------|
-| **CardGroundBaker** | 按相机方向将面片投影至水平面或 Collider，预览并烘焙新 Mesh | 工具箱面板 |
+| **CardGroundBaker** | 按相机方向投影面片，预览、烘焙新 Mesh 或写回原资源 | 工具箱面板 |
 | **RockTools** | 使用内置形状或自定义 Mesh/FBX/Prefab 生成并烘焙岩石 | 工具箱面板 |
 | **SLGCityEditor** | 网格绘制城市区域、生成城墙和地面、建筑对齐网格 | 工具箱面板 |
 | **RandomMaterial** | 随机分配材质，可选分轴随机位置、旋转和缩放 | 工具箱面板 |
 | **OverlapSpreader** | 将 XZ 占地重叠的场景物体组散开，可调范围和间距 | 工具箱面板 |
 | **TransparentQueueSorter** | 手动树状顺序设置透明队列，临时预览并烘焙独立材质 | 工具箱面板 |
-| **ZXXToolBox** | 工具箱主面板，可自定义工作流串联多个工具 | `ArtTools > BIGBRO ToolBox` |
+| **ZXXToolBox** | 工具箱主面板，可自定义工作流，查看本机使用统计并导出 CSV | `ArtTools > BIGBRO ToolBox` |
 | **BatchRenameTool** | 批量重命名 Hierarchy 中的 GameObject，支持查找替换/前缀后缀/正则 | 工具箱面板 |
 | **BoxColliderGenerator** | 根据 Renderer 包围盒自动生成 BoxCollider | 工具箱面板 |
 | **BuildingCardTool** | 建筑面片生成与编辑、图集、根节点排序修复及底面中心补偿 | 工具箱面板 |
@@ -49,7 +49,7 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.7.0
 | **LightCookieScroller** | 灯光 Cookie 纹理滚动动画（云影/焦散/斑驳光影） | 工具箱面板 |
 | **MeasureTool** | 场景视图距离/角度测量 | 工具箱面板 |
 | **OutlineTool** | 卡通描边效果设置 | 工具箱面板 |
-| **PathBuilder** | 路径生成工具，含 PathSpline 曲线编辑子系统 | 工具箱面板 |
+| **PathBuilder** | 路径生成、模型中心线提取、样条编辑与网格拍平 | 工具箱面板 |
 | **PrefabBatchReplacer** | 批量替换场景中的 Prefab 实例 | 工具箱面板 |
 | **PrefabExtractorTool** | 从场景中提取选中物体为 Prefab（支持 Undo/Backup） | 工具箱面板 |
 | **PrefabNameSyncTool** | 将 Prefab 实例名称同步为 Prefab 资源名称 | 工具箱面板 |
@@ -62,7 +62,7 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.7.0
 | **ShadowBakerTool** | 阴影贴图烘焙 + 贴花生成，含 Blur/Silhouette Shader | 工具箱面板 |
 | **ShadowCastOffTool** | 批量关闭选中物体的阴影投射 | 工具箱面板 |
 | **ToonMaterialConverter** | ToonOutline 普通/打包 Shader 双向转换，输出 BC 与 N_M_R 贴图 | 工具箱面板 |
-| **TransparentScreenshot** | 透明背景截图 + 粒子序列渲染 | 工具箱面板 / `Ctrl+Shift+X` |
+| **TransparentScreenshot** | 透明截图、粒子序列、Game View MP4 录制及 UI 叠加 | 工具箱面板 / `Ctrl+Shift+X` |
 
 ### 🏃 运行时组件
 
@@ -72,6 +72,7 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.7.0
 | **FogGridClickSystem** | 战争迷雾点击交互，正方形网格显露/遮蔽 | `Runtime/FogOfWar/` |
 | **LightCookieScroller** | Light Cookie UV 滚动（需 PlayMode） | `Runtime/LightCookieScroller/` |
 | **RockTools** | 岩石生成、逻辑与烘焙运行时类型 | `Runtime/RockTools/` |
+| **GameViewVideoRunner / GameViewUIOverlayPreview** | 编辑器 Play Mode 的帧抓取与 UI 叠加预览 | `Runtime/TransparentScreenshot/` |
 
 ### 🎨 Shader
 
@@ -79,6 +80,14 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.7.0
 
 | Shader | 类型 | 说明 |
 |--------|------|------|
+| **FlowingSilk** | 特效 | UV 驱动飘绸形变、柔光及边缘渐隐 |
+| **TransparentTextureBlur** | 模糊 | 不透明 Lit 的贴图像素模糊 |
+| **RiverBankUnlit** | 河岸 | 中央裁剪、双侧渐隐与接收阴影 |
+| **SimpleLit_BottomColor_Opaque** | 植被 | 不透明根部颜色过渡 |
+| **SimpleLit_BottomFade_Emission** | 植被 | 根部渐隐与自发光 |
+| **SimpleLit_BottomFade_Opaque** | 植被 | 不透明主体与透明根部双 Pass |
+| **PainterlyLit** | 风格化 | 双色明暗及 UV/三平面笔触 |
+| **SceneHSV** | 调色 | HSV 调整，RGB/Alpha 独立 UV |
 | **Spine_Skeleton_LineClip** | 建筑/Spine | 两条独立斜线裁剪及贴图 Alpha 阈值，依赖 spine-unity |
 | **ShadowDecal_PlantWind_URP** | 阴影/植被 | 地面树影随风动，固定根部及投影偏移控制 |
 | **WallWorldVariation_Opaque_URP** | 建筑 | 世界空间花纹城墙的不透明、写深度版本 |
@@ -87,12 +96,12 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.7.0
 | **BuildingCard_FogDepth_URP** | 建筑 | 建筑面片雾与深度版本 |
 | **Character Color Adjustment** | 角色 | 角色颜色调整 Shader Graph |
 | **LitTransparentDepth** | 光照/透明 | Lit 透明深度版本及专用 Inspector |
-| **SLG_TerrainBlend_Mobile_Transparent** | 地形 | 移动版地形混合透明版本，Unlit 也接收阴影 |
+| **SLG_TerrainBlend_Mobile_Transparent** | 地形 | 移动版地形混合，按队列切换透明混合或不透明写深度 |
 | **SimpleLit_BottomFade / SimpleLit_BottomFade_Shadow** | 植被 | 根部渐隐及阴影支持版本 |
 | **SimpleTopBlend** | 混合 | 顶部混合材质 |
 | **StylizedRiverIntersection** | 水面 | 深浅水、岸边泡沫、坡面流纹及边缘透明 |
 | **StylizedWaterfall** | 水面 | 双层流纹/法线、底部与交界泡沫 |
-| **TerrainBlender** | 地形 | 地形混合，X/Y 边缘裁剪控制、世界 XZ 矩形裁剪 |
+| **TerrainBlender** | 地形 | 地形混合，X/Y 边缘裁剪控制、物体局部 XZ 矩形裁剪 |
 | **WallWorldVariation_URP** | 建筑 | 世界空间花纹及法线，分轴投影 |
 | **Manual Cloud Fog** | 迷雾 | 战争迷雾配套云雾材质 |
 | **ShadowDecal_Gradient_URP** | 阴影/贴花 | 渐变方向/角度/Lp-norm 距离/SkyTint 天空着色 |
@@ -116,6 +125,7 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.7.0
 | **Blur_URP** | ShadowBakerTool | 阴影贴图模糊 |
 | **Silhouette_URP** | ShadowBakerTool | 阴影剪影生成 |
 | **FogGridDebugOverlay** | FogOfWarTool | 迷雾网格调试覆盖层 |
+| **GameViewVideoBlit** | TransparentScreenshot | 录屏尺寸转换及 UI 叠加 |
 | **ToonTextureConversion** | ToonMaterialConverter | ToonOutline 贴图转换（BC/N_M_R） |
 
 ---
@@ -170,6 +180,7 @@ Unity 中 `Editor` 文件夹下的代码**无法在 PlayMode 运行时访问**�
 | FogGridClickSystem + Fog Of War.shader | FogOfWarTool | 战争迷雾需运行时响应点击交互和渲染 |
 | LightCookieScroller | LightCookieScroller | Light Cookie UV 滚动需在 PlayMode 下持续更新 |
 | RockTools 运行时部分 | RockTools/Scripts | 与编辑器程序集分离，位于 Runtime/RockTools |
+| GameViewVideoRunner / GameViewUIOverlayPreview | TransparentScreenshot | 在编辑器 Play Mode 中抓帧、显示预览 |
 
 > 每个 Runtime 组件目录下都有 `README.md` 说明其作用和放置路径。
 

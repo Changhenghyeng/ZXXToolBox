@@ -17,6 +17,8 @@ internal static class PathBuilderGenerator
     private const float MinimumRiverHalfWidth = 0.005f;
     private const int MaximumMountainPlacements = 100000;
     private const float MountainDecalMaximumStretchFactor = 4f;
+    private static readonly Dictionary<PathSpline, InteractiveMeshState> InteractiveMeshes =
+        new Dictionary<PathSpline, InteractiveMeshState>();
 
     private sealed class MountainDecalProjection
     {
@@ -61,17 +63,41 @@ internal static class PathBuilderGenerator
             return false;
 
         builder.EnsureDefaults();
-        ClearGenerated(builder);
+
+        PathOutputLayer output = GetPrimaryOutput(builder);
+        if (output == null)
+        {
+            ClearGenerated(builder);
+            if (logWarnings)
+                Debug.LogWarning("[Path Builder] Output 未启用。请开启 Enabled，或点击面板里的“启用生成并预览”。", builder);
+            return false;
+        }
+
+        if (output.type == PathOutputType.MeshDeform && output.flattenFromCamera
+            && !ResolveMeshFlattenCamera(builder))
+        {
+            if (logWarnings)
+                Debug.LogWarning("[Path Builder] 未找到拍平参考摄像机，已保留原预览。请在 Output 中拖入 Game 使用的摄像机。", builder);
+            return false;
+        }
 
         List<PathSample> arcTable =
             PathSplineUtility.BuildArcTable(builder);
         if (arcTable.Count < 2
             || arcTable[arcTable.Count - 1].distance <= 0.001f)
         {
+            ClearGenerated(builder);
             if (logWarnings)
                 Debug.LogWarning("[Path Builder] 样条长度不足，无法生成。", builder);
             return false;
         }
+
+        // Camera projection can fail (missing camera, parallel rays or a plane
+        // outside clipping range). Keep the last working preview until success.
+        Transform previousRoot = output.type == PathOutputType.MeshDeform
+            ? builder.GeneratedRoot : null;
+        if (previousRoot) EndInteractiveMeshPreview(builder);
+        else ClearGenerated(builder);
 
         GameObject root = new GameObject(
             builder.mode == PathBuildMode.Mountain
@@ -81,7 +107,6 @@ internal static class PathBuilderGenerator
         builder.GeneratedRoot = root.transform;
         EditorUtility.SetDirty(builder);
 
-        PathOutputLayer output = GetPrimaryOutput(builder);
         bool built = false;
         try
         {
@@ -137,13 +162,18 @@ internal static class PathBuilderGenerator
 
         if (!built)
         {
-            builder.GeneratedRoot = null;
+            builder.GeneratedRoot = previousRoot;
             DestroyGeneratedPreviewResources(root.transform);
             Object.DestroyImmediate(root);
             EditorUtility.SetDirty(builder);
             return false;
         }
 
+        if (previousRoot)
+        {
+            DestroyGeneratedPreviewResources(previousRoot);
+            Object.DestroyImmediate(previousRoot.gameObject);
+        }
         root.hideFlags = HideFlags.DontSaveInBuild;
         EditorUtility.SetDirty(root);
         return true;
@@ -161,8 +191,39 @@ internal static class PathBuilderGenerator
         return null;
     }
 
+    internal static Camera ResolveMeshFlattenCamera(PathSpline builder)
+    {
+        Camera assigned = PathBuilderAuthoringStorage.ResolveMountainFacingCamera(builder);
+        if (assigned) return assigned;
+        if (Camera.main) return Camera.main;
+
+        Camera onlyCamera = null, onlyActive = null, mainNamed = null;
+        int total = 0, active = 0, named = 0;
+        foreach (Camera candidate in Object.FindObjectsOfType<Camera>(true))
+        {
+            if (candidate.cameraType != CameraType.Game
+                || !candidate.gameObject.scene.IsValid() || !candidate.gameObject.scene.isLoaded
+                || EditorUtility.IsPersistent(candidate)
+                || (candidate.hideFlags & HideFlags.HideAndDontSave) != 0)
+                continue;
+            onlyCamera = candidate;
+            total++;
+            if (candidate.isActiveAndEnabled) { onlyActive = candidate; active++; }
+            if (candidate.name.StartsWith("Main Camera", StringComparison.OrdinalIgnoreCase)
+                || candidate.name.Equals("MainCamera", StringComparison.OrdinalIgnoreCase))
+            {
+                mainNamed = candidate;
+                named++;
+            }
+        }
+        if (named == 1) return mainNamed;
+        if (active == 1) return onlyActive;
+        return total == 1 ? onlyCamera : null;
+    }
+
     public static void ClearGenerated(PathSpline builder)
     {
+        EndInteractiveMeshPreview(builder);
         if (!builder)
             return;
 
@@ -198,7 +259,11 @@ internal static class PathBuilderGenerator
             return false;
         }
 
-        if (!builder.GeneratedRoot && !Rebuild(builder))
+        // A failed flatten keeps the previous preview visible. Bake must first
+        // validate/rebuild the requested projection, rather than save that fallback.
+        bool requiresProjection = primaryOutput.type == PathOutputType.MeshDeform
+            && primaryOutput.flattenFromCamera;
+        if ((!builder.GeneratedRoot || requiresProjection) && !Rebuild(builder))
             return false;
 
         Transform authoringRoot = builder.GeneratedRoot;
@@ -2461,6 +2526,278 @@ internal static class PathBuilderGenerator
         return material;
     }
 
+    private sealed class MeshDeformTrack
+    {
+        public List<PathSample> samples;
+        public Vector3[] rights, ups;
+        public float[] leftWidths, rightWidths;
+        public float[] requestedWidths;
+        public float halfWidth, step, length;
+        public bool interactive;
+        public Camera flattenCamera;
+        public Dictionary<MeshFilter, Mesh> liveMeshes;
+        public Dictionary<(MeshFilter filter, int divisions), SweepSourceMesh> sourceMeshes =
+            new Dictionary<(MeshFilter, int), SweepSourceMesh>();
+    }
+
+    private sealed class InteractiveMeshState
+    {
+        public Transform root;
+        public GameObject source;
+        public readonly Dictionary<(MeshFilter filter, int divisions), SweepSourceMesh> sources =
+            new Dictionary<(MeshFilter, int), SweepSourceMesh>();
+        public readonly Dictionary<MeshFilter, Mesh> meshes = new Dictionary<MeshFilter, Mesh>();
+    }
+
+    internal static void EndInteractiveMeshPreview(PathSpline builder)
+    {
+        if (builder) InteractiveMeshes.Remove(builder);
+    }
+
+    internal static bool UpdateInteractiveMeshPreview(PathSpline builder)
+    {
+        if (!builder || !builder.Anchor || !builder.GeneratedRoot) return false;
+        PathOutputLayer output = GetPrimaryOutput(builder);
+        if (output == null || output.type != PathOutputType.MeshDeform) return false;
+        GameObject source = ResolveMeshDeformSource(output);
+        if (!source || !TryGetPrefabAxisBounds(source, output, out float minimum,
+            out float maximum, out float lateralCenter, out float verticalMinimum, out float verticalCenter))
+            return false;
+        Transform root = builder.GeneratedRoot;
+        if (root.childCount == 0) return false;
+        if (!InteractiveMeshes.TryGetValue(builder, out InteractiveMeshState state)
+            || state.root != root || state.source != source)
+        {
+            state = new InteractiveMeshState { root = root, source = source };
+            InteractiveMeshes[builder] = state;
+        }
+        List<PathSample> table = PathSplineUtility.BuildArcTable(builder);
+        if (table.Count < 2 || table[table.Count - 1].distance <= 0.001f) return false;
+        MeshDeformTrack track = BuildMeshDeformTrack(source, output, table,
+            Mathf.Max(0.05f, maximum - minimum), lateralCenter, builder.closed);
+        track.interactive = true;
+        track.flattenCamera = ResolveMeshFlattenCamera(builder);
+        if (output.flattenFromCamera && !track.flattenCamera) return false;
+        track.sourceMeshes = state.sources;
+        track.liveMeshes = state.meshes;
+        // Keep existing instances while dragging. Their spans cover the new
+        // path immediately; release recalculates the exact repeat count.
+        float span = track.length / root.childCount;
+        for (int i = 0; i < root.childCount; i++)
+            if (!DeformPrefabMeshes(output, source, root.GetChild(i).gameObject, root,
+                table, i * span, span, minimum, maximum, lateralCenter,
+                verticalMinimum, verticalCenter, track)) return false;
+        SceneView.RepaintAll();
+        return true;
+    }
+
+    private sealed class SweepSourceMesh
+    {
+        public Mesh mesh;
+        public bool ownsMesh;
+        public Vector3[] vertices, normals;
+        public Vector4[] tangents;
+    }
+
+    private static MeshDeformTrack BuildMeshDeformTrack(GameObject source, PathOutputLayer output,
+        IList<PathSample> input, float moduleLength, float lateralCenter, bool closed)
+    {
+        float halfWidth = 0.01f;
+        Matrix4x4 basis = Matrix4x4.Rotate(Quaternion.Euler(output.rotationOffset))
+            * Matrix4x4.Scale(output.scale)
+            * GetSourceRootBasis(source.transform, output.useRootPosition)
+            * source.transform.worldToLocalMatrix;
+        foreach (MeshFilter filter in source.GetComponentsInChildren<MeshFilter>(true))
+        {
+            PathMeshPartSetting part = GetMeshPartSetting(output, GetMeshPartPath(source, filter));
+            if (!filter.sharedMesh || (part != null && part.mode != PathMeshPartMode.Deform)) continue;
+            Matrix4x4 transform = basis * filter.transform.localToWorldMatrix;
+            foreach (Vector3 vertex in filter.sharedMesh.vertices)
+            {
+                Vector3 point = transform.MultiplyPoint3x4(vertex);
+                float lateral = output.forwardAxis == PathForwardAxis.X ? point.z : point.x;
+                if (output.pivotAlignment != PathPivotAlignment.SourcePivot) lateral -= lateralCenter;
+                halfWidth = Mathf.Max(halfWidth, Mathf.Abs(lateral));
+            }
+        }
+        halfWidth += Mathf.Abs(output.positionOffset.x);
+        return BuildMeshDeformTrack(input, moduleLength, halfWidth, output, closed);
+    }
+
+    private static MeshDeformTrack BuildMeshDeformTrack(IList<PathSample> input,
+        float moduleLength, float halfWidth, PathOutputLayer output, bool closed)
+    {
+        float length = input[input.Count - 1].distance;
+        float requestedStep = Mathf.Max(0.05f, Mathf.Min(moduleLength / 24f, halfWidth / 8f));
+        int count = Mathf.Clamp(Mathf.CeilToInt(length / requestedStep) + 1, 2, 16385);
+        var track = new MeshDeformTrack
+        {
+            samples = new List<PathSample>(count), halfWidth = halfWidth,
+            step = length / (count - 1), length = length,
+            leftWidths = new float[count], rightWidths = new float[count], requestedWidths = new float[count]
+        };
+        // Uniform world-distance frames are shared by every module. Orientation
+        // uses a footprint-sized chord, not the tiny intervals at Bezier knots.
+        float reach = Mathf.Max(requestedStep * 2f, halfWidth);
+        for (int i = 0; i < count; i++)
+        {
+            float distance = i * track.step;
+            PathSplineUtility.TryEvaluateAtDistance(input, distance, out PathSample sample);
+            float before = closed ? Mathf.Repeat(distance - reach, length) : Mathf.Max(0, distance - reach);
+            float after = closed ? Mathf.Repeat(distance + reach, length) : Mathf.Min(length, distance + reach);
+            PathSplineUtility.TryEvaluateAtDistance(input, before, out PathSample a);
+            PathSplineUtility.TryEvaluateAtDistance(input, after, out PathSample b);
+            Vector3 direction = b.position - a.position;
+            if (direction.sqrMagnitude > 0.000001f) sample.tangent = direction.normalized;
+            sample.distance = distance;
+            track.samples.Add(sample);
+            float width = halfWidth * (output.useSplineWidth ? Mathf.Max(0.01f, sample.meshWidthScale) : 1f);
+            track.requestedWidths[i] = width;
+            track.leftWidths[i] = track.rightWidths[i] = width;
+        }
+        BuildTransportFrames(track.samples, out track.rights, out track.ups);
+        if (closed)
+        {
+            track.rights[count - 1] = track.rights[0];
+            track.ups[count - 1] = track.ups[0];
+        }
+        if (output.cornerHandling != PathCornerHandling.Off)
+            LimitMeshSweepWidths(track.samples, track.rights, track.leftWidths,
+                track.rightWidths, output.cornerSafety, closed,
+                output.cornerHandling == PathCornerHandling.TrimInner ? 4f : 0.15f);
+        return track;
+    }
+
+    private static void LimitMeshSweepWidths(IList<PathSample> samples, Vector3[] rights,
+        float[] left, float[] right, float safety, bool closed, float transitionSlope = 0.15f)
+    {
+        int count = samples.Count;
+        float[] footprint = new float[count];
+        for (int i = 0; i < count; i++) footprint[i] = Mathf.Max(left[i], right[i]);
+        // Bound the complete cross-section together. A changing radius must not
+        // squash each bank vertex by a different nonlinear tanh deformation.
+        for (int i = 0; i < count - 1; i++)
+        {
+            Vector3 forward = (samples[i].tangent + samples[i + 1].tangent).normalized;
+            float progress = Vector3.Dot(samples[i + 1].position - samples[i].position, forward);
+            float turn = Vector3.Dot(rights[i + 1] - rights[i], forward);
+            if (Mathf.Abs(turn) < 0.000001f) continue;
+            float limit = Mathf.Max(0.001f, progress * Mathf.Clamp(safety, 0.5f, 0.95f) / Mathf.Abs(turn));
+            float[] inner = turn < 0 ? right : left;
+            inner[i] = Mathf.Min(inner[i], limit);
+            inner[i + 1] = Mathf.Min(inner[i + 1], limit);
+        }
+        // A hairpin may approach another reach of the same river. Local radius
+        // checks alone cannot detect that the two otherwise valid banks overlap.
+        float total = samples[count - 1].distance;
+        float cellSize = 0.01f;
+        foreach (float width in footprint) cellSize = Mathf.Max(cellSize, width * 2f);
+        var grid = new Dictionary<Vector3Int, List<int>>();
+        for (int i = 0; i < count; i++)
+        {
+            Vector3 point = samples[i].position / cellSize;
+            Vector3Int cell = new Vector3Int(Mathf.FloorToInt(point.x), Mathf.FloorToInt(point.y), Mathf.FloorToInt(point.z));
+            for (int x = -1; x <= 1; x++)
+                for (int y = -1; y <= 1; y++)
+                    for (int z = -1; z <= 1; z++)
+                    {
+                        if (!grid.TryGetValue(cell + new Vector3Int(x, y, z), out List<int> nearby)) continue;
+                        foreach (int j in nearby)
+                        {
+                            if (i - j <= 1) continue;
+                            float along = samples[i].distance - samples[j].distance;
+                            if (closed) along = Mathf.Min(along, total - along);
+                            float reach = footprint[i] + footprint[j];
+                            if (along <= reach * 1.25f) continue;
+                            Vector3 offset = samples[j].position - samples[i].position;
+                            float squared = offset.sqrMagnitude;
+                            if (squared >= reach * reach || squared < 0.00000001f) continue;
+                            float limit = Mathf.Sqrt(squared) * 0.45f;
+                            float[] bankI = Vector3.Dot(offset, rights[i]) > 0 ? right : left;
+                            float[] bankJ = Vector3.Dot(-offset, rights[j]) > 0 ? right : left;
+                            bankI[i] = Mathf.Min(bankI[i], limit);
+                            bankJ[j] = Mathf.Min(bankJ[j], limit);
+                        }
+                    }
+            if (!grid.TryGetValue(cell, out List<int> bucket)) { bucket = new List<int>(); grid.Add(cell, bucket); }
+            bucket.Add(i);
+        }
+        // Spread narrow sections over a physical distance, preventing repeated
+        // pinches at individual control points or module boundaries.
+        foreach (float[] widths in new[] { left, right })
+        {
+            for (int pass = 0; pass < (closed ? 4 : 1); pass++)
+            {
+                for (int i = 1; i < count; i++)
+                    widths[i] = Mathf.Min(widths[i], widths[i - 1]
+                        + (samples[i].distance - samples[i - 1].distance) * transitionSlope);
+                for (int i = count - 2; i >= 0; i--)
+                    widths[i] = Mathf.Min(widths[i], widths[i + 1]
+                        + (samples[i + 1].distance - samples[i].distance) * transitionSlope);
+                if (closed) widths[0] = widths[count - 1] = Mathf.Min(widths[0], widths[count - 1]);
+            }
+        }
+    }
+
+    private static Vector3 EvaluateMeshSweep(MeshDeformTrack track, PathOutputLayer output,
+        float distance, float lateral, float height, out Vector3 right, out Vector3 up,
+        out Vector3 forward, out float lateralScale)
+    {
+        distance = Mathf.Clamp(distance, 0, track.length);
+        float coordinate = distance / track.step;
+        int lower = Mathf.Clamp(Mathf.FloorToInt(coordinate), 0, track.samples.Count - 2);
+        int upper = lower + 1;
+        float t = Mathf.Clamp01(coordinate - lower);
+        PathSample a = track.samples[lower], b = track.samples[upper];
+        forward = Vector3.Lerp(a.tangent, b.tangent, t).normalized;
+        right = Vector3.Lerp(track.rights[lower], track.rights[upper], t);
+        right = Vector3.ProjectOnPlane(right, forward).normalized;
+        up = Vector3.Cross(forward, right).normalized;
+        float[] widths = output.cornerHandling == PathCornerHandling.TrimInner
+            ? track.requestedWidths : lateral < 0 ? track.leftWidths : track.rightWidths;
+        lateralScale = Mathf.Lerp(widths[lower], widths[upper], t) / track.halfWidth;
+        return Vector3.Lerp(a.position, b.position, t)
+            + right * (lateral * lateralScale + output.positionOffset.x)
+            + up * (height + output.positionOffset.y) + forward * output.positionOffset.z;
+    }
+
+    private static float GetMeshSweepTrimClearance(MeshDeformTrack track, PathOutputLayer output,
+        float distance, float lateral, float lateralScale)
+    {
+        float coordinate = Mathf.Clamp(distance, 0, track.length) / track.step;
+        int lower = Mathf.Clamp(Mathf.FloorToInt(coordinate), 0, track.samples.Count - 2);
+        float t = Mathf.Clamp01(coordinate - lower);
+        float across = lateral * lateralScale + output.positionOffset.x;
+        float[] limits = across < 0 ? track.leftWidths : track.rightWidths;
+        return Mathf.Lerp(limits[lower], limits[lower + 1], t) - Mathf.Abs(across);
+    }
+
+    private static void TransformSweepVertexBasis(Vector3[] normals, Vector4[] tangents, int index,
+        Matrix4x4 pointTransform, Matrix4x4 normalTransform, PathForwardAxis axis,
+        Vector3 across, Vector3 up, Vector3 along, Matrix4x4 worldToLocal, Matrix4x4 worldNormalToLocal,
+        Vector3[] outputNormals, Vector4[] outputTangents)
+    {
+        Vector3 x = axis == PathForwardAxis.X ? along : across;
+        Vector3 z = axis == PathForwardAxis.X ? across : along;
+        if (outputNormals != null)
+        {
+            Vector3 n = normalTransform.MultiplyVector(normals[index]);
+            float determinant = Vector3.Dot(x, Vector3.Cross(up, z));
+            Vector3 world = n.x * Vector3.Cross(up, z)
+                + n.y * Vector3.Cross(z, x) + n.z * Vector3.Cross(x, up);
+            if (determinant < 0) world = -world;
+            outputNormals[index] = worldNormalToLocal.MultiplyVector(world).normalized;
+        }
+        if (outputTangents != null)
+        {
+            Vector4 original = tangents[index];
+            Vector3 t = pointTransform.MultiplyVector(new Vector3(original.x, original.y, original.z));
+            Vector3 world = (x * t.x + up * t.y + z * t.z).normalized;
+            Vector3 local = worldToLocal.MultiplyVector(world).normalized;
+            outputTangents[index] = new Vector4(local.x, local.y, local.z, original.w);
+        }
+    }
+
     private static bool BuildMeshDeform(
         PathSpline builder,
         PathOutputLayer output,
@@ -2491,55 +2828,68 @@ internal static class PathBuilderGenerator
 
         float sourceLength = Mathf.Max(0.05f, axisMaximum - axisMinimum);
         float totalLength = arcTable[arcTable.Count - 1].distance;
-        BuildTransportFrames(arcTable, out Vector3[] frameRights,
-            out Vector3[] frameUps);
+        MeshDeformTrack deformTrack = BuildMeshDeformTrack(sourceObject, output,
+            arcTable, sourceLength, lateralCenter, builder.closed);
+        deformTrack.flattenCamera = ResolveMeshFlattenCamera(builder);
+        if (output.flattenFromCamera && !deformTrack.flattenCamera)
+        {
+            if (logWarnings) Debug.LogWarning("[Path Builder] 请在 Output 中指定拍平参考摄像机，或给 Game 摄像机设置 MainCamera 标签。", builder);
+            return false;
+        }
         float moduleLength = output.repeat ? sourceLength : totalLength;
         moduleLength = Mathf.Max(0.05f, moduleLength);
         float moduleStep = Mathf.Max(
             0.01f, moduleLength + output.spacing);
         float distance = 0f;
         int moduleIndex = 0;
-        while (distance < totalLength - 0.0001f && moduleIndex < 100000)
+        try
         {
-            float remaining = totalLength - distance;
-            float span = output.repeat ? Mathf.Min(moduleLength, remaining) : totalLength;
-            if (output.repeat && !output.fitLastSegment && remaining < moduleLength)
-                break;
-
-            GameObject instance = InstantiateMeshDeformSource(
-                output, sourceObject);
-            if (!instance)
-                return false;
-            instance.name = $"{sourceObject.name}_{moduleIndex:D3}";
-            instance.transform.SetParent(root, false);
-            instance.transform.localPosition = Vector3.zero;
-            instance.transform.localRotation = Quaternion.identity;
-            instance.transform.localScale = Vector3.one;
-            if (!DeformPrefabMeshes(
-                output,
-                sourceObject,
-                instance,
-                root,
-                arcTable,
-                distance,
-                span,
-                axisMinimum,
-                axisMaximum,
-                lateralCenter,
-                verticalMinimum,
-                verticalCenter,
-                frameRights,
-                frameUps))
+            while (distance < totalLength - 0.0001f && moduleIndex < 100000)
             {
-                Object.DestroyImmediate(instance);
-                return false;
+                float remaining = totalLength - distance;
+                float span = output.repeat ? Mathf.Min(moduleLength, remaining) : totalLength;
+                if (output.repeat && !output.fitLastSegment && remaining < moduleLength)
+                    break;
+
+                GameObject instance = InstantiateMeshDeformSource(
+                    output, sourceObject);
+                if (!instance)
+                    return false;
+                instance.name = $"{sourceObject.name}_{moduleIndex:D3}";
+                instance.transform.SetParent(root, false);
+                instance.transform.localPosition = Vector3.zero;
+                instance.transform.localRotation = Quaternion.identity;
+                instance.transform.localScale = Vector3.one;
+                if (!DeformPrefabMeshes(
+                    output,
+                    sourceObject,
+                    instance,
+                    root,
+                    arcTable,
+                    distance,
+                    span,
+                    axisMinimum,
+                    axisMaximum,
+                    lateralCenter,
+                    verticalMinimum,
+                    verticalCenter,
+                    deformTrack))
+                {
+                    Object.DestroyImmediate(instance);
+                    return false;
+                }
+                distance += output.repeat ? moduleStep : totalLength;
+                moduleIndex++;
+                if (!output.repeat)
+                    break;
             }
-            distance += output.repeat ? moduleStep : totalLength;
-            moduleIndex++;
-            if (!output.repeat)
-                break;
+            return moduleIndex > 0;
         }
-        return moduleIndex > 0;
+        finally
+        {
+            foreach (SweepSourceMesh cached in deformTrack.sourceMeshes.Values)
+                if (cached.ownsMesh && cached.mesh) Object.DestroyImmediate(cached.mesh);
+        }
     }
 
     private static bool BuildPrefabPlace(
@@ -2826,8 +3176,7 @@ internal static class PathBuilderGenerator
         float lateralCenter,
         float verticalMinimum,
         float verticalCenter,
-        Vector3[] frameRights,
-        Vector3[] frameUps)
+        MeshDeformTrack deformTrack)
     {
         MeshFilter[] sourceFilters = source.GetComponentsInChildren<MeshFilter>(true);
         MeshFilter[] targetFilters = instance.GetComponentsInChildren<MeshFilter>(true);
@@ -2869,20 +3218,37 @@ internal static class PathBuilderGenerator
             int subdivisionCount = partSetting != null
                 ? Mathf.Clamp(partSetting.segments, 1, 32)
                 : 1;
-            Mesh workingMesh = partMode == PathMeshPartMode.Deform
-                && subdivisionCount > 1
+            if (partMode == PathMeshPartMode.Deform)
+                subdivisionCount = Mathf.Max(subdivisionCount, Mathf.Clamp(
+                    Mathf.CeilToInt(spanDistance / deformTrack.step), 1, 32));
+            if (deformTrack.interactive) subdivisionCount = 1;
+            var cacheKey = (sourceFilters[filterIndex], subdivisionCount);
+            if (!deformTrack.sourceMeshes.TryGetValue(cacheKey, out SweepSourceMesh sourceData))
+            {
+                Mesh divided = partMode == PathMeshPartMode.Deform && subdivisionCount > 1
                     ? CreateLongitudinallySubdividedMesh(
                         sourceMesh,
                         pointTransform,
                         output.forwardAxis,
                         subdivisionCount)
                     : null;
-            if (!workingMesh)
-                workingMesh = sourceMesh;
-            Vector3[] sourceVertices = workingMesh.vertices;
+                Mesh template = divided ? divided : sourceMesh;
+                sourceData = new SweepSourceMesh
+                {
+                    mesh = template, ownsMesh = divided,
+                    vertices = template.vertices, normals = template.normals, tangents = template.tangents
+                };
+                deformTrack.sourceMeshes.Add(cacheKey, sourceData);
+            }
+            Mesh workingMesh = sourceData.mesh;
+            Vector3[] sourceVertices = sourceData.vertices;
             Vector3[] targetVertices = new Vector3[sourceVertices.Length];
-            Vector3[] sourceNormals = workingMesh.normals;
-            Vector4[] sourceTangents = workingMesh.tangents;
+            float[] trimClearances = output.cornerHandling == PathCornerHandling.TrimInner
+                && partMode == PathMeshPartMode.Deform ? new float[sourceVertices.Length] : null;
+            Vector3[] trimCoordinates = trimClearances != null && !deformTrack.interactive
+                ? new Vector3[sourceVertices.Length] : null;
+            Vector3[] sourceNormals = sourceData.normals;
+            Vector4[] sourceTangents = sourceData.tangents;
             bool hasNormals = sourceNormals != null
                 && sourceNormals.Length == sourceVertices.Length;
             bool hasTangents = sourceTangents != null
@@ -2894,6 +3260,8 @@ internal static class PathBuilderGenerator
                 ? new Vector4[sourceVertices.Length]
                 : null;
             Matrix4x4 normalTransform = pointTransform.inverse.transpose;
+            Matrix4x4 targetWorldToLocal = targetFilter.transform.worldToLocalMatrix;
+            Matrix4x4 worldNormalToTarget = targetFilter.transform.localToWorldMatrix.transpose;
             PathSample rigidSample = default;
             Vector3 rigidForward = Vector3.forward;
             Vector3 rigidRight = Vector3.right;
@@ -2916,9 +3284,9 @@ internal static class PathBuilderGenerator
                 }
                 rigidForward = rigidSample.tangent.normalized;
                 EvaluateTransportFrame(
-                    arcTable,
-                    frameRights,
-                    frameUps,
+                    deformTrack.samples,
+                    deformTrack.rights,
+                    deformTrack.ups,
                     rigidSample.distance,
                     rigidForward,
                     out rigidRight,
@@ -2969,55 +3337,61 @@ internal static class PathBuilderGenerator
 
                 float normalized = (axis - axisMinimum)
                     / Mathf.Max(0.0001f, axisMaximum - axisMinimum);
-                if (!PathSplineUtility.TryEvaluateAtDistance(
-                    arcTable,
-                    startDistance + normalized * spanDistance,
-                    out PathSample sample))
+                float pathDistance = startDistance + normalized * spanDistance;
+                Vector3 world = EvaluateMeshSweep(deformTrack, output, pathDistance,
+                    lateral, height, out Vector3 right, out Vector3 up, out Vector3 forward,
+                    out float lateralScale);
+                if (trimClearances != null)
                 {
-                    return false;
+                    if (trimCoordinates != null)
+                        trimCoordinates[vertexIndex] = new Vector3(pathDistance, lateral, height);
+                    float clearance = GetMeshSweepTrimClearance(deformTrack, output, pathDistance, lateral, lateralScale);
+                    trimClearances[vertexIndex] = clearance;
+                    // Fixed-topology approximation while dragging; release clips
+                    // triangles and interpolates new edge UVs without compressing
+                    // the retained cross-section.
+                    if (deformTrack.interactive && clearance < 0f)
+                        world += right * (Mathf.Sign(lateral * lateralScale + output.positionOffset.x) * clearance);
                 }
-                Vector3 forward = sample.tangent.normalized;
-                EvaluateTransportFrame(
-                    arcTable,
-                    frameRights,
-                    frameUps,
-                    sample.distance,
-                    forward,
-                    out Vector3 right,
-                    out Vector3 up);
-                if (output.cornerHandling
-                    == PathCornerHandling.CompressInner)
-                {
-                    lateral = ApplyInnerCornerCompression(
-                        arcTable,
-                        sample.distance,
-                        lateral,
-                        up,
-                        output.cornerSafety);
-                }
-                Vector3 world = sample.position
-                    + right * (lateral + output.positionOffset.x)
-                    + up * (height + output.positionOffset.y)
-                    + forward * output.positionOffset.z;
                 targetVertices[vertexIndex] =
-                    targetFilter.transform.InverseTransformPoint(world);
-                TransformDeformedVertexBasis(
-                    sourceNormals,
-                    sourceTangents,
-                    vertexIndex,
-                    pointTransform,
-                    normalTransform,
-                    output.forwardAxis,
-                    right,
-                    up,
-                    forward,
-                    targetFilter,
-                    targetNormals,
-                    targetTangents);
+                    targetWorldToLocal.MultiplyPoint3x4(world);
+                if (deformTrack.interactive)
+                {
+                    TransformSweepVertexBasis(sourceNormals, sourceTangents, vertexIndex,
+                        pointTransform, normalTransform, output.forwardAxis,
+                        right * lateralScale, up, forward, targetWorldToLocal, worldNormalToTarget,
+                        targetNormals, targetTangents);
+                    continue;
+                }
+                float probe = Mathf.Max(0.002f, deformTrack.step * 0.25f);
+                float beforeDistance = Mathf.Max(0f, pathDistance - probe);
+                float afterDistance = Mathf.Min(deformTrack.length, pathDistance + probe);
+                Vector3 before = EvaluateMeshSweep(deformTrack, output, beforeDistance,
+                    lateral, height, out _, out _, out _, out _);
+                Vector3 after = EvaluateMeshSweep(deformTrack, output, afterDistance,
+                    lateral, height, out _, out _, out _, out _);
+                Vector3 along = (after - before) / Mathf.Max(0.0001f, afterDistance - beforeDistance)
+                    * (spanDistance / Mathf.Max(0.0001f, axisMaximum - axisMinimum));
+                TransformSweepVertexBasis(sourceNormals, sourceTangents, vertexIndex,
+                    pointTransform, normalTransform, output.forwardAxis,
+                    right * lateralScale, up, along, targetWorldToLocal, worldNormalToTarget, targetNormals, targetTangents);
             }
-            Mesh mesh = workingMesh == sourceMesh
-                ? Object.Instantiate(sourceMesh)
-                : workingMesh;
+            Mesh mesh;
+            if (deformTrack.interactive && deformTrack.liveMeshes.TryGetValue(targetFilter, out Mesh cachedMesh) && cachedMesh)
+                mesh = cachedMesh;
+            else
+            {
+                mesh = Object.Instantiate(workingMesh);
+                if (deformTrack.interactive)
+                {
+                    Mesh previous = targetFilter.sharedMesh;
+                    targetFilter.sharedMesh = mesh;
+                    deformTrack.liveMeshes[targetFilter] = mesh;
+                    if (previous && !AssetDatabase.Contains(previous)
+                        && previous.name.EndsWith("_PathDeformPreview", StringComparison.Ordinal))
+                        Object.DestroyImmediate(previous);
+                }
+            }
             mesh.name = sourceMesh.name + "_PathDeformPreview";
             mesh.hideFlags = HideFlags.DontSaveInBuild;
             mesh.vertices = targetVertices;
@@ -3029,9 +3403,54 @@ internal static class PathBuilderGenerator
                 mesh.tangents = targetTangents;
             else if (mesh.uv != null && mesh.uv.Length == targetVertices.Length)
                 mesh.RecalculateTangents();
+            if (trimClearances != null && !deformTrack.interactive)
+            {
+                float ClearanceAt(int a, int b, float t)
+                {
+                    Vector3 coordinate = Vector3.LerpUnclamped(trimCoordinates[a], trimCoordinates[b], t);
+                    EvaluateMeshSweep(deformTrack, output, coordinate.x, coordinate.y, coordinate.z,
+                        out _, out _, out _, out float scale);
+                    return GetMeshSweepTrimClearance(deformTrack, output, coordinate.x, coordinate.y, scale);
+                }
+                float RefineIntersection(int a, int b, float guess)
+                {
+                    float low = 0f, high = 1f;
+                    bool lowInside = trimClearances[a] >= 0f;
+                    for (int iteration = 0; iteration < 14; iteration++)
+                    {
+                        float middle = (low + high) * 0.5f;
+                        if ((ClearanceAt(a, b, middle) >= 0f) == lowInside) low = middle;
+                        else high = middle;
+                    }
+                    return (low + high) * 0.5f;
+                }
+                Vector3 IntersectionPosition(int a, int b, float t)
+                {
+                    Vector3 coordinate = Vector3.LerpUnclamped(trimCoordinates[a], trimCoordinates[b], t);
+                    Vector3 point = EvaluateMeshSweep(deformTrack, output, coordinate.x, coordinate.y, coordinate.z,
+                        out _, out _, out _, out _);
+                    return targetWorldToLocal.MultiplyPoint3x4(point);
+                }
+                TrimGeneratedMeshToClearance(mesh, trimClearances, RefineIntersection, IntersectionPosition);
+            }
+            if (output.flattenFromCamera && partMode == PathMeshPartMode.Deform
+                && !TryFlattenGeneratedMeshFromCamera(mesh, targetFilter.transform,
+                    deformTrack.flattenCamera, output.flattenPlaneHeight))
+            {
+                if (deformTrack.interactive)
+                {
+                    mesh.SetUVs(7, new List<Vector4>());
+                    mesh.RecalculateBounds();
+                    targetFilter.sharedMesh = mesh;
+                    return false;
+                }
+                Object.DestroyImmediate(mesh);
+                targetFilter.sharedMesh = null;
+                return false;
+            }
             mesh.RecalculateBounds();
             targetFilter.sharedMesh = mesh;
-            if (output.updateCollider)
+            if (output.updateCollider && !deformTrack.interactive)
             {
                 MeshCollider collider = targetFilter.GetComponent<MeshCollider>();
                 if (collider)
@@ -3041,76 +3460,216 @@ internal static class PathBuilderGenerator
         return true;
     }
 
-    private static float ApplyInnerCornerCompression(
-        IList<PathSample> arcTable,
-        float distance,
-        float lateral,
-        Vector3 up,
-        float safety)
+    // Trim only the conflicting region. Retained vertices keep their original
+    // sweep positions and UVs instead of scaling an entire bank cross-section.
+    internal static void TrimGeneratedMeshToClearance(Mesh mesh, float[] clearances,
+        Func<int, int, float, float> refineIntersection = null,
+        Func<int, int, float, Vector3> intersectionPosition = null)
     {
-        float curvature = EvaluateSignedCurvature(
-            arcTable, distance, up);
-        if (Mathf.Abs(curvature) < 0.00001f
-            || curvature * lateral <= 0f)
+        Vector3[] sourcePositions = mesh.vertices;
+        if (clearances.Length != sourcePositions.Length)
+            throw new ArgumentException("Trim clearance count does not match mesh vertices.");
+        bool needsTrim = false;
+        for (int i = 0; i < clearances.Length; i++)
         {
-            return lateral;
+            if (Mathf.Abs(clearances[i]) < 0.00001f) clearances[i] = 0f;
+            needsTrim |= clearances[i] < 0f;
+        }
+        if (!needsTrim) return;
+
+        var positions = new List<Vector3>(sourcePositions);
+        Vector3[] sourceNormals = mesh.normals;
+        Vector4[] sourceTangents = mesh.tangents;
+        Color[] sourceColors = mesh.colors;
+        var normals = sourceNormals.Length == sourcePositions.Length ? new List<Vector3>(sourceNormals) : null;
+        var tangents = sourceTangents.Length == sourcePositions.Length ? new List<Vector4>(sourceTangents) : null;
+        var colors = sourceColors.Length == sourcePositions.Length ? new List<Color>(sourceColors) : null;
+        var uv = new List<Vector4>[8];
+        var dimensions = new int[8];
+        for (int channel = 0; channel < 8; channel++)
+        {
+            var attribute = (VertexAttribute)((int)VertexAttribute.TexCoord0 + channel);
+            if (!mesh.HasVertexAttribute(attribute)) continue;
+            uv[channel] = new List<Vector4>();
+            mesh.GetUVs(channel, uv[channel]);
+            dimensions[channel] = mesh.GetVertexAttributeDimension(attribute);
+        }
+        var intersections = new Dictionary<long, int>();
+        int Intersect(int a, int b)
+        {
+            if (clearances[a] == 0f) return a;
+            if (clearances[b] == 0f) return b;
+            int low = Mathf.Min(a, b), high = Mathf.Max(a, b);
+            long key = ((long)low << 32) | (uint)high;
+            if (intersections.TryGetValue(key, out int found)) return found;
+            float t = Mathf.Clamp01(clearances[low] / (clearances[low] - clearances[high]));
+            if (refineIntersection != null) t = refineIntersection(low, high, t);
+            int index = positions.Count;
+            positions.Add(intersectionPosition != null ? intersectionPosition(low, high, t)
+                : Vector3.LerpUnclamped(positions[low], positions[high], t));
+            if (normals != null) normals.Add(Vector3.LerpUnclamped(normals[low], normals[high], t).normalized);
+            if (tangents != null)
+            {
+                Vector4 tangent = Vector4.LerpUnclamped(tangents[low], tangents[high], t);
+                Vector3 direction = new Vector3(tangent.x, tangent.y, tangent.z).normalized;
+                tangents.Add(new Vector4(direction.x, direction.y, direction.z, t < 0.5f ? tangents[low].w : tangents[high].w));
+            }
+            if (colors != null) colors.Add(Color.LerpUnclamped(colors[low], colors[high], t));
+            for (int channel = 0; channel < 8; channel++)
+                if (uv[channel] != null)
+                    uv[channel].Add(Vector4.LerpUnclamped(uv[channel][low], uv[channel][high], t));
+            intersections.Add(key, index);
+            return index;
         }
 
-        // 当内侧横向距离接近局部曲率半径时，普通样条挤出会越过
-        // 曲率中心并翻折。tanh 保持中心附近近似不变，再平滑限制内侧宽度。
-        float safeRadius = Mathf.Max(
-            0.01f,
-            Mathf.Clamp(safety, 0.5f, 0.95f)
-                / Mathf.Abs(curvature));
-        float ratio = Mathf.Min(Mathf.Abs(lateral) / safeRadius, 20f);
-        double exponent = Math.Exp(2.0 * ratio);
-        float compressed = safeRadius
-            * (float)((exponent - 1.0) / (exponent + 1.0));
-        return Mathf.Sign(lateral) * compressed;
-    }
-
-    private static float EvaluateSignedCurvature(
-        IList<PathSample> arcTable,
-        float distance,
-        Vector3 up)
-    {
-        if (arcTable == null || arcTable.Count < 3)
-            return 0f;
-
-        int low = 0;
-        int high = arcTable.Count - 1;
-        while (low < high)
+        int subMeshCount = mesh.subMeshCount;
+        var indices = new List<int>[subMeshCount];
+        var topologies = new MeshTopology[subMeshCount];
+        var polygon = new List<int>(4);
+        for (int subMesh = 0; subMesh < subMeshCount; subMesh++)
         {
-            int middle = (low + high) / 2;
-            if (arcTable[middle].distance < distance)
-                low = middle + 1;
+            topologies[subMesh] = mesh.GetTopology(subMesh);
+            int[] input = mesh.GetIndices(subMesh);
+            var output = indices[subMesh] = new List<int>(input.Length);
+            if (topologies[subMesh] != MeshTopology.Triangles) { output.AddRange(input); continue; }
+            for (int i = 0; i + 2 < input.Length; i += 3)
+            {
+                polygon.Clear();
+                int previous = input[i + 2];
+                bool previousInside = clearances[previous] >= 0f;
+                for (int corner = 0; corner < 3; corner++)
+                {
+                    int current = input[i + corner];
+                    bool inside = clearances[current] >= 0f;
+                    if (inside != previousInside) polygon.Add(Intersect(previous, current));
+                    if (inside && (polygon.Count == 0 || polygon[polygon.Count - 1] != current)) polygon.Add(current);
+                    previous = current;
+                    previousInside = inside;
+                }
+                if (polygon.Count > 1 && polygon[0] == polygon[polygon.Count - 1]) polygon.RemoveAt(polygon.Count - 1);
+                for (int corner = 1; corner + 1 < polygon.Count; corner++)
+                {
+                    int a = polygon[0], b = polygon[corner], c = polygon[corner + 1];
+                    if (a == b || b == c || a == c
+                        || Vector3.Cross(positions[b] - positions[a], positions[c] - positions[a]).sqrMagnitude < 1e-14f)
+                        continue;
+                    output.Add(a); output.Add(b); output.Add(c);
+                }
+            }
+        }
+
+        // Remove unused outside vertices too: bounds, sorting and subsequent
+        // camera flattening must see only the surviving geometry.
+        var remap = new int[positions.Count];
+        for (int i = 0; i < remap.Length; i++) remap[i] = -1;
+        var used = new List<int>();
+        foreach (List<int> subMesh in indices)
+            for (int i = 0; i < subMesh.Count; i++)
+            {
+                int old = subMesh[i];
+                if (remap[old] < 0) { remap[old] = used.Count; used.Add(old); }
+                subMesh[i] = remap[old];
+            }
+        mesh.Clear();
+        mesh.indexFormat = used.Count > 65535 ? IndexFormat.UInt32 : IndexFormat.UInt16;
+        var compactPositions = new List<Vector3>(used.Count);
+        var compactNormals = normals != null ? new List<Vector3>(used.Count) : null;
+        var compactTangents = tangents != null ? new List<Vector4>(used.Count) : null;
+        var compactColors = colors != null ? new List<Color>(used.Count) : null;
+        foreach (int old in used)
+        {
+            compactPositions.Add(positions[old]);
+            compactNormals?.Add(normals[old]);
+            compactTangents?.Add(tangents[old]);
+            compactColors?.Add(colors[old]);
+        }
+        mesh.SetVertices(compactPositions);
+        if (compactNormals != null) mesh.SetNormals(compactNormals);
+        if (compactTangents != null) mesh.SetTangents(compactTangents);
+        if (compactColors != null) mesh.SetColors(compactColors);
+        for (int channel = 0; channel < 8; channel++)
+        {
+            if (uv[channel] == null) continue;
+            if (dimensions[channel] <= 2)
+            {
+                var values = new List<Vector2>(used.Count);
+                foreach (int old in used) values.Add(new Vector2(uv[channel][old].x, uv[channel][old].y));
+                mesh.SetUVs(channel, values);
+            }
+            else if (dimensions[channel] == 3)
+            {
+                var values = new List<Vector3>(used.Count);
+                foreach (int old in used) values.Add(new Vector3(uv[channel][old].x, uv[channel][old].y, uv[channel][old].z));
+                mesh.SetUVs(channel, values);
+            }
             else
-                high = middle;
+            {
+                var values = new List<Vector4>(used.Count);
+                foreach (int old in used) values.Add(uv[channel][old]);
+                mesh.SetUVs(channel, values);
+            }
         }
-
-        int center = Mathf.Clamp(low, 1, arcTable.Count - 2);
-        int lower = Mathf.Max(0, center - 1);
-        int upper = Mathf.Min(arcTable.Count - 1, center + 1);
-        float distanceSpan = arcTable[upper].distance
-            - arcTable[lower].distance;
-        if (distanceSpan <= 0.0001f)
-            return 0f;
-
-        Vector3 lowerTangent = arcTable[lower].tangent.normalized;
-        Vector3 upperTangent = arcTable[upper].tangent.normalized;
-        if (lowerTangent.sqrMagnitude < 0.000001f
-            || upperTangent.sqrMagnitude < 0.000001f)
-        {
-            return 0f;
-        }
-
-        return Vector3.SignedAngle(
-                lowerTangent,
-                upperTangent,
-                up)
-            * Mathf.Deg2Rad
-            / distanceSpan;
+        mesh.subMeshCount = subMeshCount;
+        for (int subMesh = 0; subMesh < subMeshCount; subMesh++)
+            mesh.SetIndices(indices[subMesh].ToArray(), topologies[subMesh], subMesh, false);
+        if (compactNormals == null && used.Count > 0) mesh.RecalculateNormals();
+        if (compactTangents == null && uv[0] != null && used.Count > 0) mesh.RecalculateTangents();
+        mesh.RecalculateBounds();
     }
+
+    // Project the generated copy along the reference camera's rays. Keeping
+    // viewport XY preserves the silhouette; UV7 stores projective interpolation
+    // weights so the bank shader also preserves perspective textures and fades.
+    internal static bool TryFlattenGeneratedMeshFromCamera(
+        Mesh mesh, Transform meshTransform, Camera camera, float planeHeight)
+    {
+        if (!mesh || !meshTransform || !camera) return false;
+        Vector3[] vertices = mesh.vertices;
+        var projected = new Vector3[vertices.Length];
+        var projectionData = new List<Vector4>(vertices.Length);
+        Matrix4x4 localToWorld = meshTransform.localToWorldMatrix;
+        Matrix4x4 worldToLocal = meshTransform.worldToLocalMatrix;
+        Matrix4x4 view = camera.worldToCameraMatrix;
+        Matrix4x4 viewProjection = GL.GetGPUProjectionMatrix(
+            camera.projectionMatrix, camera.targetTexture != null) * view;
+        Vector3 origin = camera.transform.position;
+        Vector3 forward = camera.transform.forward;
+
+        for (int i = 0; i < vertices.Length; i++)
+        {
+            Vector3 world = localToWorld.MultiplyPoint3x4(vertices[i]);
+            Vector3 ray = camera.orthographic ? forward : world - origin;
+            if (Mathf.Abs(ray.y) < 0.000001f)
+            {
+                Debug.LogWarning("[Path Builder] 摄像机视线接近平行于目标平面，无法拍平。请调整参考摄像机或目标平面。");
+                return false;
+            }
+            Vector3 flat = world + ray * ((planeHeight - world.y) / ray.y);
+            flat.y = planeHeight;
+            float flatEyeDepth = -view.MultiplyPoint3x4(flat).z;
+            Vector4 originalCS = viewProjection * new Vector4(world.x, world.y, world.z, 1f);
+            Vector4 flatCS = viewProjection * new Vector4(flat.x, flat.y, flat.z, 1f);
+            if (flatEyeDepth <= camera.nearClipPlane || flatEyeDepth >= camera.farClipPlane
+                || originalCS.w <= 0.000001f || flatCS.w <= 0.000001f)
+            {
+                Debug.LogWarning("[Path Builder] 目标平面的投影超出参考摄像机的近远裁剪范围，无法保持 Game 视图外形。请调整目标平面 Y 或摄像机裁剪范围。");
+                return false;
+            }
+            projected[i] = worldToLocal.MultiplyPoint3x4(flat);
+            projectionData.Add(new Vector4(flatCS.w / originalCS.w, originalCS.z, 1f, 0f));
+        }
+
+        mesh.vertices = projected;
+        mesh.SetUVs(7, projectionData);
+        mesh.RecalculateNormals();
+        if (mesh.HasVertexAttribute(VertexAttribute.TexCoord0)) mesh.RecalculateTangents();
+        mesh.RecalculateBounds();
+        return true;
+    }
+
+
+
+
 
     private static void TransformDeformedVertexBasis(
         Vector3[] sourceNormals,
@@ -3301,6 +3860,9 @@ internal static class PathBuilderGenerator
                         polygonIndex + 1 < polygon.Count;
                         polygonIndex++)
                     {
+                        if (Vector3.Cross(polygon[polygonIndex].position - polygon[0].position,
+                            polygon[polygonIndex + 1].position - polygon[0].position).sqrMagnitude < 1e-14f)
+                            continue;
                         int second = AddSliceVertex(
                             polygon[polygonIndex],
                             outputPositions,
@@ -4691,6 +5253,7 @@ internal static class PathBuilderGenerator
             current = next;
         }
     }
+
 
     private static string MakeSafeFileName(string value)
     {

@@ -451,6 +451,7 @@ namespace FogOfWarTool.Editor
 
         private void CreateGrid()
         {
+            var usageTimer = ZXXToolUsageStats.Begin();
             Type gridType = FindRuntimeGridType(true);
             if (gridType == null) return;
 
@@ -493,6 +494,7 @@ namespace FogOfWarTool.Editor
 
             InvokeNoArg(grid, "RebuildGrid");
 
+            ZXXToolUsageStats.Complete("Fog Of War Tool", 1, usageTimer);
             Selection.activeGameObject = root;
             _viewMode = 1;
             EditorGUIUtility.PingObject(root);
@@ -916,6 +918,7 @@ namespace FogOfWarTool.Editor
 
         private void ExportRuntimeMask(object grid)
         {
+            var usageTimer = ZXXToolUsageStats.Begin();
             Texture2D mask = GetTextureProperty(grid, "MaskTexture");
             if (mask == null) return;
 
@@ -923,6 +926,7 @@ namespace FogOfWarTool.Editor
             Directory.CreateDirectory(AssetPathToFullPath(folder));
             string path = AssetDatabase.GenerateUniqueAssetPath(folder + "/FogGrid_RuntimeMask.png");
             File.WriteAllBytes(AssetPathToFullPath(path), mask.EncodeToPNG());
+            ZXXToolUsageStats.Complete("Fog Of War Tool", 1, usageTimer);
             AssetDatabase.ImportAsset(path);
             EditorGUIUtility.PingObject(AssetDatabase.LoadAssetAtPath<Texture2D>(path));
         }

@@ -364,6 +364,7 @@ public sealed class ToonMaterialConverterWindow : EditorWindow
 
     private void ConvertAll()
     {
+        var usageTimer = ZXXToolUsageStats.Begin();
         _materials.RemoveAll(material => material == null);
         if (_materials.Count == 0)
             return;
@@ -453,6 +454,7 @@ public sealed class ToonMaterialConverterWindow : EditorWindow
             EditorGUIUtility.PingObject(outputs[0]);
         }
 
+        ZXXToolUsageStats.Complete("Toon Material Converter", outputs.Count, usageTimer);
         string message = $"转换完成：{outputs.Count} 个材质";
         if (_deleteOldMaterial || _deleteOldTextures)
         {

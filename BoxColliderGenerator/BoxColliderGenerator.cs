@@ -683,6 +683,7 @@ public class BoxColliderGenerator : EditorWindow
 
     private void CommitPlan()
     {
+        var usageTimer = ZXXToolUsageStats.Begin();
         if (pendingPlan == null) return;
 
         List<PlanItem> toWrite = pendingPlan
@@ -745,6 +746,7 @@ public class BoxColliderGenerator : EditorWindow
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
 
+        ZXXToolUsageStats.Complete("Box Collider Generator", written, usageTimer);
         record.totalWritten = written;
         lastRun = record;
         pendingPlan = null;

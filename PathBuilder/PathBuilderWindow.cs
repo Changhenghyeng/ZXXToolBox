@@ -599,6 +599,9 @@ public class PathBuilderWindow : EditorWindow
 
     private void DrawSplineWorkspace()
     {
+        if (GUILayout.Button(new GUIContent("From Model / 从模型提取中心线",
+            "选择长条模型，预览中心线后生成新的可编辑样条；保留原模型")))
+            PathModelCenterlineWindow.Show(Selection.activeGameObject, ImportModelCenterline);
         if (!_builder || !_builder.Anchor)
         {
             GUILayout.FlexibleSpace();
@@ -717,7 +720,22 @@ public class PathBuilderWindow : EditorWindow
             if (!_builder)
                 return;
 
-            if (_builder.mode == PathBuildMode.Mountain)
+            PathOutputLayer deformOutput = _builder.outputs.Find(
+                layer => layer != null && layer.enabled && layer.type == PathOutputType.MeshDeform);
+            if (deformOutput != null)
+            {
+                bool flatten = GUILayout.Toggle(deformOutput.flattenFromCamera,
+                    new GUIContent("按摄像机视角拍平", "沿 Output 中参考摄像机的视线投到目标平面，保持 Game 视图外形"),
+                    "Button", GUILayout.Height(26f));
+                if (flatten != deformOutput.flattenFromCamera)
+                {
+                    Undo.RecordObject(_builder, "Toggle Mesh Camera Flatten");
+                    deformOutput.flattenFromCamera = flatten;
+                    EditorUtility.SetDirty(_builder);
+                    PathBuilderGenerator.Rebuild(_builder);
+                }
+            }
+            else if (_builder.mode == PathBuildMode.Mountain)
             {
                 DrawSelectedMountainBatchControls();
 
@@ -963,6 +981,50 @@ public class PathBuilderWindow : EditorWindow
         CreateSession(mode);
     }
 
+    private void ImportModelCenterline(GameObject source, List<Vector3> centers, List<float> widths)
+    {
+        SaveCurrentSession();
+        DestroyEditor();
+        ResetPenDrag();
+        _isDrawing = false;
+        _drawingChanged = false;
+        _hasHoverPosition = false;
+        PathSpline imported = PathBuilderAuthoringStorage.Create(CurrentSplineMode);
+        imported.projectToSurface = false;
+        imported.autoRebuild = true;
+        foreach (PathOutputLayer output in imported.outputs)
+        {
+            output.enabled = true;
+            output.type = PathOutputType.MeshDeform;
+            output.name = "Model Along Centerline";
+        }
+        GameObject anchor = new GameObject(GameObjectUtility.GetUniqueNameForSibling(
+            null, GetImportedAuthoringName(imported.mode, source.name)));
+        anchor.hideFlags = HideFlags.DontSaveInBuild;
+        Undo.RegisterCreatedObjectUndo(anchor, "Create Model Centerline");
+        anchor.transform.position = centers[0];
+        PathBuilderAuthoringStorage.Bind(imported, anchor.transform);
+        float averageWidth = 0f;
+        foreach (float width in widths)
+            averageWidth += width / widths.Count;
+        for (int i = 0; i < centers.Count; i++)
+        {
+            imported.knots.Add(new PathKnot(anchor.transform.InverseTransformPoint(centers[i]))
+            {
+                width = Mathf.Max(0.01f, widths[i]),
+                meshWidthScale = Mathf.Max(0.01f, widths[i] / Mathf.Max(0.01f, averageWidth)),
+                tangentMode = PathTangentMode.Auto,
+                tangentIn = Vector3.zero,
+                tangentOut = Vector3.zero
+            });
+        }
+        imported.RefreshAutoTangents();
+        PathBuilderAuthoringStorage.Save(imported);
+        ActivateSession(imported);
+        Selection.activeGameObject = anchor;
+        ShowNotification(new GUIContent("已生成样条；在 Source Object 放入模型后自动沿样条生成。"));
+    }
+
     private bool CreateSession(PathBuildMode mode)
     {
         if (_builder && _builder.Anchor)
@@ -1157,11 +1219,13 @@ public class PathBuilderWindow : EditorWindow
 
     private void BakeCurrentSession()
     {
+        var usageTimer = ZXXToolUsageStats.Begin();
         PathSpline completedBuilder = _builder;
         if (!completedBuilder
             || !PathBuilderGenerator.Bake(completedBuilder))
             return;
 
+        ZXXToolUsageStats.Complete("Path Builder", 1, usageTimer);
         bool keepAuthoring = completedBuilder.mode == PathBuildMode.Mountain
             && completedBuilder.keepMountainAuthoringAfterBake;
         if (keepAuthoring)
@@ -1313,6 +1377,7 @@ public class PathBuilderWindow : EditorWindow
 
     private void BakeSelectedMountainPaths()
     {
+        var usageTimer = ZXXToolUsageStats.Begin();
         if (!TryValidateBatchMountainCamera(out _))
             return;
 
@@ -1395,6 +1460,7 @@ public class PathBuilderWindow : EditorWindow
         }
 
         RefreshSelectedMountainBuilders(true);
+        ZXXToolUsageStats.Complete("Path Builder", succeeded, usageTimer);
         string summary = $"选中山脉烘焙完成：成功 {succeeded}，失败 {failed}";
         ShowNotification(new GUIContent(summary));
         Debug.Log($"[Path Builder] {summary}");
@@ -1404,6 +1470,7 @@ public class PathBuilderWindow : EditorWindow
 
     private void BakeAllCurrentScenePaths()
     {
+        var usageTimer = ZXXToolUsageStats.Begin();
         if (!_builder || !_builder.Anchor)
             return;
 
@@ -1470,6 +1537,7 @@ public class PathBuilderWindow : EditorWindow
             }
         }
 
+        ZXXToolUsageStats.Complete("Path Builder", succeeded, usageTimer);
         string summary = $"批量烘焙完成：成功 {succeeded}，失败 {failed}";
         ShowNotification(new GUIContent(summary));
         Debug.Log($"[Path Builder] {summary}");
@@ -1518,10 +1586,33 @@ public class PathBuilderWindow : EditorWindow
     private void RecreateEditor()
     {
         DestroyEditor();
+        RenameLegacyCenterlineAnchor();
         if (_builder)
             _builderEditor =
                 Editor.CreateEditor(_builder)
                     as PathSplineEditor;
+    }
+
+    private static string GetImportedAuthoringName(PathBuildMode mode, string sourceName)
+    {
+        return (mode == PathBuildMode.Mountain ? "Mountain" : "River")
+            + " Spline Authoring (" + sourceName + ")";
+    }
+
+    private void RenameLegacyCenterlineAnchor()
+    {
+        if (!_builder || !_builder.Anchor)
+            return;
+        GameObject anchor = _builder.Anchor.gameObject;
+        const string suffix = "_Centerline";
+        if (!anchor.name.EndsWith(suffix, System.StringComparison.Ordinal))
+            return;
+        string sourceName = anchor.name.Substring(0, anchor.name.Length - suffix.Length);
+        Undo.RecordObject(anchor, "Rename Centerline Authoring");
+        anchor.name = GameObjectUtility.GetUniqueNameForSibling(anchor.transform.parent,
+            GetImportedAuthoringName(_builder.mode, sourceName));
+        EditorUtility.SetDirty(anchor);
+        UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(anchor.scene);
     }
 
     private void DestroyEditor()
@@ -2031,5 +2122,359 @@ internal sealed class PathBuilderSceneOverlay : IMGUIOverlay, ITransientOverlay
             return;
 
         window.DrawSceneWorkspaceOverlayContent();
+    }
+}
+
+internal sealed class PathModelCenterlineWindow : EditorWindow
+{
+    private static readonly string[] Directions = { "Auto / 沿网格连接", "UV U", "UV V", "Local X", "Local Y", "Local Z" };
+    private GameObject _source;
+    private int _direction;
+    private int _pointCount = 64;
+    private List<Vector3> _centers;
+    private List<float> _widths;
+    private string _message;
+    private System.Action<GameObject, List<Vector3>, List<float>> _onCreate;
+
+    internal static void Show(GameObject source,
+        System.Action<GameObject, List<Vector3>, List<float>> onCreate)
+    {
+        var window = GetWindow<PathModelCenterlineWindow>(true, "从模型提取中心线", true);
+        window._source = source;
+        window._onCreate = onCreate;
+        window._centers = null;
+        window._message = null;
+        window.minSize = new Vector2(420f, 260f);
+        window.Show();
+    }
+
+    private void OnEnable() { SceneView.duringSceneGui += DrawPreview; }
+    private void OnDisable() { SceneView.duringSceneGui -= DrawPreview; SceneView.RepaintAll(); }
+
+    private void OnGUI()
+    {
+        EditorGUILayout.HelpBox("适用于连通、无分叉的长条模型。Auto 沿网格连接追踪河道，不依赖 UV。先检查青色中心线，再生成样条；控制点太少会切过急弯，可增加点数。", MessageType.Info);
+        EditorGUI.BeginChangeCheck();
+        _source = (GameObject)EditorGUILayout.ObjectField("Source / 来源模型", _source, typeof(GameObject), true);
+        _direction = EditorGUILayout.Popup("Length Direction / 长度方向", _direction, Directions);
+        _pointCount = EditorGUILayout.IntSlider("Points / 控制点数", _pointCount, 4, 256);
+        if (EditorGUI.EndChangeCheck())
+        {
+            _centers = null;
+            _message = null;
+            SceneView.RepaintAll();
+        }
+        using (new EditorGUI.DisabledScope(!_source))
+        {
+            if (GUILayout.Button("预览中心线", GUILayout.Height(30f)))
+            {
+                _centers = null;
+                try
+                {
+                    if (TryExtract(_source, _direction, _pointCount, out _centers, out _widths, out _message))
+                        SceneView.lastActiveSceneView?.Frame(new Bounds(_centers[_centers.Count / 2], Vector3.one * GetPathLength(_centers)), false);
+                }
+                catch (System.Exception exception)
+                {
+                    _message = "无法读取模型网格：" + exception.Message;
+                }
+                SceneView.RepaintAll();
+            }
+        }
+        if (!string.IsNullOrEmpty(_message))
+            EditorGUILayout.HelpBox(_message, _centers != null ? MessageType.Info : MessageType.Warning);
+        using (new EditorGUI.DisabledScope(_centers == null || !_source || _onCreate == null))
+        {
+            if (GUILayout.Button("生成可编辑样条", GUILayout.Height(32f)))
+            {
+                _onCreate(_source, _centers, _widths);
+                Close();
+            }
+        }
+        EditorGUILayout.LabelField("生成独立路径，保留原模型；填入 Source Object 后沿线生成。", EditorStyles.miniLabel);
+    }
+
+    private void DrawPreview(SceneView view)
+    {
+        if (_centers == null || _centers.Count < 2)
+            return;
+        Color previous = Handles.color;
+        Handles.color = Color.cyan;
+        Handles.DrawAAPolyLine(4f, _centers.ToArray());
+        foreach (Vector3 point in _centers)
+            Handles.DotHandleCap(0, point, Quaternion.identity, HandleUtility.GetHandleSize(point) * 0.035f, EventType.Repaint);
+        Handles.color = previous;
+    }
+
+    internal static bool TryExtract(GameObject source, int direction, int count,
+        out List<Vector3> centers, out List<float> widths, out string message)
+    {
+        centers = null;
+        widths = null;
+        message = null;
+        MeshFilter[] filters = source.GetComponentsInChildren<MeshFilter>(true);
+        MeshFilter filter = null;
+        foreach (MeshFilter candidate in filters)
+        {
+            if (!candidate.sharedMesh)
+                continue;
+            if (filter)
+            {
+                message = "选中了多个网格。请选择具体的河道、道路或围墙子物体，避免把不同模型混在一起。";
+                return false;
+            }
+            filter = candidate;
+        }
+        if (!filter)
+        {
+            message = "来源物体没有可读取的 MeshFilter。请选择模型或它的网格子物体。";
+            return false;
+        }
+        Mesh mesh = filter.sharedMesh;
+        Vector3[] local = mesh.vertices;
+        int[] triangles = mesh.triangles;
+        Vector2[] uv = mesh.uv;
+        if (local.Length < 3 || triangles.Length < 3)
+        {
+            message = "网格没有可用的三角面。";
+            return false;
+        }
+        Vector3[] world = new Vector3[local.Length];
+        for (int i = 0; i < world.Length; i++)
+            world[i] = filter.transform.TransformPoint(local[i]);
+        int chosen = direction;
+        if (direction == 0)
+        {
+            if (!TryTopologyCenterline(world, triangles, Mathf.Clamp(count, 4, 256),
+                out centers, out widths))
+            {
+                message = "网格无法形成连通的长条中心线。请检查断开的河段、分叉或未焊接的接缝；不会再自动退回可能跨弯串段的坐标切片。";
+                return false;
+            }
+            message = $"已沿网格连接提取 {centers.Count} 个点，不使用重复 UV 或世界坐标排序。检查急弯，必要时增加控制点数。";
+            return true;
+        }
+        if (!TrySlice(local, world, uv, triangles, chosen, Mathf.Clamp(count, 4, 256), out centers, out widths))
+        {
+            message = "该方向无法形成连续中心线，可能是 UV 缺失、断开或选错长度方向。请更换方向后预览。";
+            return false;
+        }
+        message = $"提取方向：{Directions[chosen]}，{centers.Count} 个点。检查中心线是否沿模型中间；有跳线时请更换方向。";
+        return true;
+    }
+
+    private static bool TrySlice(Vector3[] local, Vector3[] world, Vector2[] uv,
+        int[] triangles, int direction, int count, out List<Vector3> centers, out List<float> widths)
+    {
+        centers = null;
+        widths = null;
+        if (direction <= 2 && uv.Length != local.Length)
+            return false;
+        float[] coordinate = new float[local.Length];
+        float minimum = float.PositiveInfinity, maximum = float.NegativeInfinity;
+        for (int i = 0; i < local.Length; i++)
+        {
+            float value = direction == 1 ? uv[i].x : direction == 2 ? uv[i].y
+                : direction == 3 ? local[i].x : direction == 4 ? local[i].y : local[i].z;
+            if (float.IsNaN(value) || float.IsInfinity(value)) return false;
+            coordinate[i] = value;
+            minimum = Mathf.Min(minimum, value);
+            maximum = Mathf.Max(maximum, value);
+        }
+        float range = maximum - minimum;
+        if (range < 0.000001f) return false;
+        return TrySliceCoordinates(world, triangles, coordinate, minimum, maximum, count, out centers, out widths);
+    }
+
+    private static bool TrySliceCoordinates(Vector3[] world, int[] triangles, float[] coordinate,
+        float minimum, float maximum, int count, out List<Vector3> centers, out List<float> widths)
+    {
+        centers = null;
+        widths = null;
+        float range = maximum - minimum;
+        var result = new List<Vector3>(count);
+        var resultWidths = new List<float>(count);
+        var intersections = new List<Vector3>();
+        for (int section = 0; section < count; section++)
+        {
+            intersections.Clear();
+            // Slightly inset end cuts avoid coplanar cap faces and degenerate UV triangles.
+            float cut = Mathf.Lerp(minimum, maximum, Mathf.Lerp(0.00001f, 0.99999f, section / (float)(count - 1)));
+            for (int triangle = 0; triangle < triangles.Length; triangle += 3)
+            {
+                for (int edge = 0; edge < 3; edge++)
+                {
+                    int a = triangles[triangle + edge];
+                    int b = triangles[triangle + (edge + 1) % 3];
+                    float ca = coordinate[a], cb = coordinate[b];
+                    if (Mathf.Abs(cb - ca) < range * 0.0000001f
+                        || cut < Mathf.Min(ca, cb) || cut > Mathf.Max(ca, cb))
+                        continue;
+                    intersections.Add(Vector3.Lerp(world[a], world[b], (cut - ca) / (cb - ca)));
+                }
+            }
+            if (intersections.Count < 2) return false;
+            // Cross-section extrema avoid vertex-density bias and UV seam duplicates.
+            Vector3[] extremes = new Vector3[6];
+            for (int i = 0; i < 6; i++) extremes[i] = intersections[0];
+            foreach (Vector3 point in intersections)
+            {
+                for (int axis = 0; axis < 3; axis++)
+                {
+                    if (point[axis] < extremes[axis * 2][axis]) extremes[axis * 2] = point;
+                    if (point[axis] > extremes[axis * 2 + 1][axis]) extremes[axis * 2 + 1] = point;
+                }
+            }
+            float farthest = -1f;
+            Vector3 center = Vector3.zero;
+            for (int a = 0; a < 6; a++)
+                for (int b = a + 1; b < 6; b++)
+                {
+                    float distance = (extremes[a] - extremes[b]).sqrMagnitude;
+                    if (distance > farthest)
+                    {
+                        farthest = distance;
+                        center = (extremes[a] + extremes[b]) * 0.5f;
+                    }
+                }
+            result.Add(center);
+            resultWidths.Add(Mathf.Max(0.01f, Mathf.Sqrt(farthest)));
+        }
+        if (GetPathLength(result) < 0.001f) return false;
+        centers = result;
+        widths = resultWidths;
+        return true;
+    }
+
+    private static bool TryTopologyCenterline(Vector3[] world, int[] triangles, int count,
+        out List<Vector3> centers, out List<float> widths)
+    {
+        centers = null;
+        widths = null;
+        if (world.Length < 3 || triangles.Length < 3) return false;
+        Bounds bounds = new Bounds(world[0], Vector3.zero);
+        foreach (Vector3 point in world) bounds.Encapsulate(point);
+        float weld = Mathf.Max(0.000001f, bounds.size.magnitude * 0.000001f);
+        var buckets = new Dictionary<Vector3Int, List<int>>();
+        var positions = new List<Vector3>();
+        int[] vertexMap = new int[world.Length];
+        // Welding by position reconnects UV/normal seams without using UV order.
+        for (int i = 0; i < world.Length; i++)
+        {
+            Vector3 relative = (world[i] - bounds.min) / weld;
+            Vector3Int cell = new Vector3Int(Mathf.FloorToInt(relative.x), Mathf.FloorToInt(relative.y), Mathf.FloorToInt(relative.z));
+            int found = -1;
+            for (int x = -1; x <= 1 && found < 0; x++)
+                for (int y = -1; y <= 1 && found < 0; y++)
+                    for (int z = -1; z <= 1 && found < 0; z++)
+                        if (buckets.TryGetValue(cell + new Vector3Int(x, y, z), out List<int> nearby))
+                            foreach (int index in nearby)
+                                if ((world[i] - positions[index]).sqrMagnitude <= weld * weld)
+                                { found = index; break; }
+            if (found < 0)
+            {
+                found = positions.Count;
+                positions.Add(world[i]);
+                if (!buckets.TryGetValue(cell, out List<int> bucket))
+                { bucket = new List<int>(); buckets.Add(cell, bucket); }
+                bucket.Add(found);
+            }
+            vertexMap[i] = found;
+        }
+        var graph = new HashSet<int>[positions.Count];
+        for (int i = 0; i < graph.Length; i++) graph[i] = new HashSet<int>();
+        int seed = -1;
+        for (int t = 0; t < triangles.Length; t += 3)
+            for (int edge = 0; edge < 3; edge++)
+            {
+                int a = vertexMap[triangles[t + edge]], b = vertexMap[triangles[t + (edge + 1) % 3]];
+                if (a == b) continue;
+                graph[a].Add(b); graph[b].Add(a); seed = a;
+            }
+        if (seed < 0) return false;
+        GraphDistances(positions, graph, seed, out int first);
+        float[] fromFirst = GraphDistances(positions, graph, first, out int last);
+        float[] fromLast = GraphDistances(positions, graph, last, out _);
+        for (int i = 0; i < graph.Length; i++)
+            if (graph[i].Count > 0 && float.IsInfinity(fromFirst[i])) return false;
+        float[] coordinate = new float[world.Length];
+        float minimum = float.PositiveInfinity, maximum = float.NegativeInfinity;
+        for (int i = 0; i < world.Length; i++)
+        {
+            int vertex = vertexMap[i];
+            if (graph[vertex].Count == 0) continue;
+            coordinate[i] = (fromFirst[vertex] - fromLast[vertex]) * 0.5f;
+            minimum = Mathf.Min(minimum, coordinate[i]);
+            maximum = Mathf.Max(maximum, coordinate[i]);
+        }
+        if (maximum - minimum < weld) return false;
+        if (!TrySliceCoordinates(world, triangles, coordinate, minimum, maximum,
+            count, out centers, out widths)) return false;
+        // A graph diameter ends at a corner vertex. Use the nearby full sections
+        // to center each cap instead of making the river taper to that corner.
+        CenterTopologyCap(positions, fromFirst, centers, widths, false);
+        CenterTopologyCap(positions, fromLast, centers, widths, true);
+        return true;
+    }
+
+    private static void CenterTopologyCap(List<Vector3> positions, float[] distances,
+        List<Vector3> centers, List<float> widths, bool reverse)
+    {
+        int n = centers.Count;
+        int end = reverse ? n - 1 : 0;
+        int step = reverse ? -1 : 1;
+        float typicalWidth = widths[reverse ? n - 1 - n / 4 : n / 4];
+        int interior = 1;
+        while (interior < n / 4 && Vector3.Distance(centers[end], centers[end + step * interior]) < typicalWidth * 1.5f)
+            interior++;
+        int index = end + step * interior;
+        Vector3 origin = centers[index];
+        Vector3 tangent = (centers[index + step] - origin).normalized;
+        if (tangent.sqrMagnitude < 0.5f) return;
+        float projection = 0f;
+        float neighborhood = Vector3.Distance(origin, centers[end]) + typicalWidth * 2f;
+        for (int i = 0; i < positions.Count; i++)
+            if (distances[i] <= neighborhood)
+                projection = Mathf.Min(projection, Vector3.Dot(positions[i] - origin, tangent));
+        Vector3 cap = origin + tangent * projection;
+        for (int i = 0; i < interior; i++)
+        {
+            centers[end + step * i] = Vector3.Lerp(cap, origin, i / (float)interior);
+            widths[end + step * i] = widths[index];
+        }
+    }
+
+    private static float[] GraphDistances(List<Vector3> positions, HashSet<int>[] graph,
+        int start, out int farthest)
+    {
+        float[] distances = new float[positions.Count];
+        for (int i = 0; i < distances.Length; i++) distances[i] = float.PositiveInfinity;
+        var queue = new SortedSet<(float distance, int vertex)>();
+        distances[start] = 0f;
+        queue.Add((0f, start));
+        farthest = start;
+        while (queue.Count > 0)
+        {
+            var current = queue.Min;
+            queue.Remove(current);
+            if (current.distance > distances[current.vertex]) continue;
+            if (current.distance > distances[farthest]) farthest = current.vertex;
+            foreach (int neighbor in graph[current.vertex])
+            {
+                float distance = current.distance + Vector3.Distance(positions[current.vertex], positions[neighbor]);
+                if (distance >= distances[neighbor]) continue;
+                if (!float.IsInfinity(distances[neighbor])) queue.Remove((distances[neighbor], neighbor));
+                distances[neighbor] = distance;
+                queue.Add((distance, neighbor));
+            }
+        }
+        return distances;
+    }
+
+    private static float GetPathLength(List<Vector3> points)
+    {
+        float length = 0f;
+        for (int i = 1; i < points.Count; i++) length += Vector3.Distance(points[i - 1], points[i]);
+        return length;
     }
 }

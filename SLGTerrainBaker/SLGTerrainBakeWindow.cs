@@ -652,6 +652,7 @@ namespace SLGTerrainBakerTool.Editor
 
         private void Bake()
         {
+            var usageTimer = ZXXToolUsageStats.Begin();
             RefreshValidation();
             if (_validationErrors.Count > 0)
             {
@@ -704,6 +705,7 @@ namespace SLGTerrainBakerTool.Editor
                     return;
                 }
 
+                ZXXToolUsageStats.Complete("SLG Terrain Baker", 1, usageTimer);
                 RefreshValidation();
                 EditorUtility.DisplayDialog(
                     "Bake Complete",

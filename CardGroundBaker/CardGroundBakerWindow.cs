@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using UnityEditor;
 using UnityEditorInternal;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -94,6 +95,19 @@ namespace ZXXTools.CardGroundBaker
             }
 
             EditorGUILayout.EndScrollView();
+            DrawAuthorFooter();
+        }
+
+        private static void DrawAuthorFooter()
+        {
+            GUILayout.FlexibleSpace();
+            var authorStyle = new GUIStyle(EditorStyles.miniLabel)
+            {
+                alignment = TextAnchor.MiddleRight,
+                normal = { textColor = new Color(0.45f, 0.45f, 0.45f, 0.5f) }
+            };
+            EditorGUILayout.LabelField("Developed by ZXX", authorStyle);
+            EditorGUILayout.LabelField("114.21, 30.56", authorStyle);
         }
 
         private void DrawTargets()
@@ -221,14 +235,17 @@ namespace ZXXTools.CardGroundBaker
                 }
             }
 
-            GUI.backgroundColor = new Color(0.65f, 1f, 0.65f);
-            if (GUILayout.Button("Bake Ground Meshes", GUILayout.Height(36f)))
-                Bake();
+            if (GUILayout.Button("Bake To New Group", GUILayout.Height(32f)))
+                Bake(false);
+
+            GUI.backgroundColor = new Color(1f, 0.78f, 0.48f);
+            if (GUILayout.Button("Bake And Overwrite Original Prefab / Mesh", GUILayout.Height(36f)))
+                Bake(true);
             GUI.backgroundColor = Color.white;
 
             EditorGUILayout.HelpBox(
-                $"正式 Mesh 输出到：{OutputFolder}\n"
-                + "场景中会创建普通的 CardGround_Baked 组，不会自动保存 Prefab。",
+                $"普通 Bake：生成新 Mesh 和场景组，资源输出到 {OutputFolder}。\n"
+                + "覆盖 Bake：写回原 Mesh；FBX 内嵌 Mesh 会生成独立 Mesh 并替换原 Prefab 的引用。",
                 MessageType.None);
         }
 
@@ -321,8 +338,9 @@ namespace ZXXTools.CardGroundBaker
                 MessageType.Info);
         }
 
-        private void Bake()
+        private void Bake(bool overwriteSourceAssets)
         {
+            var usageTimer = ZXXToolUsageStats.Begin();
             ClearPreview();
             if (!TryBuildProjectedMeshes(out List<ProjectedMesh> projected, out string error))
             {
@@ -331,6 +349,12 @@ namespace ZXXTools.CardGroundBaker
             }
 
             EnsureAssetFolder(OutputFolder);
+            if (overwriteSourceAssets)
+            {
+                BakeOverSourceAssets(projected, usageTimer);
+                return;
+            }
+
             string rootName = _targets.Count == 1 && _targets[0]
                 ? _targets[0].name + "_CardGround_Baked"
                 : "CardGround_Baked";
@@ -354,6 +378,7 @@ namespace ZXXTools.CardGroundBaker
                 }
 
                 AssetDatabase.SaveAssets();
+                ZXXToolUsageStats.Complete("Card Ground Baker", created, usageTimer);
                 Selection.activeGameObject = bakedRoot;
                 EditorGUIUtility.PingObject(bakedRoot);
                 SceneView.RepaintAll();
@@ -366,6 +391,199 @@ namespace ZXXTools.CardGroundBaker
                 Debug.LogException(exception);
                 SetStatus("Bake 中断，请查看 Console。已生成的资产会保留以便检查。", MessageType.Error);
             }
+        }
+
+        private void BakeOverSourceAssets(
+            List<ProjectedMesh> projected,
+            System.Diagnostics.Stopwatch usageTimer)
+        {
+            var prefabRootsToApply = new HashSet<GameObject>();
+            var prefabStageRootsToSave = new HashSet<GameObject>();
+            var prefabPathsByRoot = new Dictionary<GameObject, string>();
+            var meshPathCounts = new Dictionary<string, int>();
+            PrefabStage currentPrefabStage = PrefabStageUtility.GetCurrentPrefabStage();
+            foreach (ProjectedMesh item in projected)
+            {
+                string meshPath = AssetDatabase.GetAssetPath(item.sourceFilter.sharedMesh);
+                if (!string.IsNullOrEmpty(meshPath))
+                    meshPathCounts[meshPath] = meshPathCounts.TryGetValue(meshPath, out int count) ? count + 1 : 1;
+
+                bool inCurrentPrefabStage = currentPrefabStage != null
+                    && item.sourceFilter.gameObject.scene == currentPrefabStage.scene;
+                GameObject prefabRoot = inCurrentPrefabStage
+                    ? currentPrefabStage.prefabContentsRoot
+                    : PrefabUtility.GetNearestPrefabInstanceRoot(item.sourceFilter.gameObject);
+                if (!prefabRoot)
+                {
+                    DestroyProjectedMeshes(projected);
+                    SetStatus($"“{item.sourceFilter.name}”不属于场景中的预制体实例，无法覆盖原预制体。", MessageType.Error);
+                    return;
+                }
+
+                string prefabPath = inCurrentPrefabStage
+                    ? currentPrefabStage.assetPath
+                    : PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(prefabRoot);
+                if (string.IsNullOrEmpty(prefabPath)
+                    || !prefabPath.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase)
+                    || (!inCurrentPrefabStage && PrefabUtility.IsPartOfModelPrefab(prefabRoot)))
+                {
+                    DestroyProjectedMeshes(projected);
+                    SetStatus($"“{prefabRoot.name}”不是可写入的普通预制体资源。", MessageType.Error);
+                    return;
+                }
+
+                prefabPathsByRoot[prefabRoot] = prefabPath;
+                if (inCurrentPrefabStage)
+                    prefabStageRootsToSave.Add(prefabRoot);
+            }
+
+            int updated = 0;
+            try
+            {
+                foreach (ProjectedMesh item in projected)
+                {
+                    bool itemInPrefabStage = currentPrefabStage != null
+                        && item.sourceFilter.gameObject.scene == currentPrefabStage.scene;
+                    Mesh sourceMesh = item.sourceFilter.sharedMesh;
+                    Mesh bakedMesh = CreateMeshInSourceLocalSpace(item);
+                    string sourcePath = AssetDatabase.GetAssetPath(sourceMesh);
+                    bool canOverwriteMesh = !string.IsNullOrEmpty(sourcePath)
+                        && sourcePath.EndsWith(".asset", StringComparison.OrdinalIgnoreCase)
+                        && meshPathCounts[sourcePath] == 1;
+                    Mesh meshToAssign;
+
+                    if (canOverwriteMesh)
+                    {
+                        Undo.RecordObject(sourceMesh, "Overwrite Card Ground Mesh");
+                        OverwriteMeshVertices(sourceMesh, bakedMesh);
+                        EditorUtility.SetDirty(sourceMesh);
+                        DestroyImmediate(bakedMesh);
+                        meshToAssign = sourceMesh;
+                    }
+                    else
+                    {
+                        string replacementPath = OutputFolder + "/"
+                            + SanitizeFileName(GetSourceObjectPath(item.sourceFilter.transform))
+                            + "_CardGround_Overwrite.asset";
+                        Mesh replacementAsset = AssetDatabase.LoadAssetAtPath<Mesh>(replacementPath);
+                        if (replacementAsset)
+                        {
+                            Undo.RecordObject(replacementAsset, "Update Card Ground Mesh");
+                            OverwriteMeshVertices(replacementAsset, bakedMesh);
+                            EditorUtility.SetDirty(replacementAsset);
+                            DestroyImmediate(bakedMesh);
+                        }
+                        else
+                        {
+                            bakedMesh.name = Path.GetFileNameWithoutExtension(replacementPath);
+                            AssetDatabase.CreateAsset(bakedMesh, replacementPath);
+                            replacementAsset = bakedMesh;
+                        }
+
+                        meshToAssign = replacementAsset;
+                    }
+
+                    // Reassign the source MeshFilter itself so the selected object visibly
+                    // adopts the flattened geometry before the prefab write-back completes.
+                    Undo.RecordObject(item.sourceFilter, "Apply Card Ground Mesh To Prefab");
+                    item.sourceFilter.sharedMesh = meshToAssign;
+                    EditorUtility.SetDirty(item.sourceFilter);
+                    if (meshToAssign != sourceMesh)
+                    {
+                        PrefabUtility.RecordPrefabInstancePropertyModifications(item.sourceFilter);
+                        GameObject targetRoot = itemInPrefabStage
+                            ? currentPrefabStage.prefabContentsRoot
+                            : PrefabUtility.GetNearestPrefabInstanceRoot(item.sourceFilter.gameObject);
+                        if (!itemInPrefabStage)
+                            prefabRootsToApply.Add(targetRoot);
+                    }
+                    updated++;
+                }
+
+                foreach (GameObject prefabRoot in prefabRootsToApply)
+                {
+                    PrefabUtility.ApplyPrefabInstance(prefabRoot, InteractionMode.AutomatedAction);
+                }
+                foreach (GameObject prefabRoot in prefabStageRootsToSave)
+                {
+                    GameObject savedPrefab = PrefabUtility.SaveAsPrefabAsset(
+                        prefabRoot,
+                        prefabPathsByRoot[prefabRoot],
+                        out bool saveSucceeded);
+                    if (!saveSucceeded || !savedPrefab)
+                        throw new InvalidOperationException(
+                            $"无法保存原预制体：{prefabPathsByRoot[prefabRoot]}");
+                }
+                AssetDatabase.SaveAssets();
+                ZXXToolUsageStats.Complete("Card Ground Baker", updated, usageTimer);
+                SceneView.RepaintAll();
+                SetStatus($"覆盖完成：处理 {updated} 个 Mesh；需要替换 Mesh 引用的预制体已写回。", MessageType.Info);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception);
+                SetStatus("覆盖中断，请查看 Console。已写入的资源可能需要检查。", MessageType.Error);
+            }
+            finally
+            {
+                DestroyProjectedMeshes(projected);
+            }
+        }
+
+        private static Mesh CreateMeshInSourceLocalSpace(ProjectedMesh item)
+        {
+            Mesh result = Instantiate(item.mesh);
+            Vector3[] vertices = result.vertices;
+            Vector3[] normals = result.normals;
+            Matrix4x4 worldToLocal = item.sourceFilter.transform.worldToLocalMatrix;
+            Matrix4x4 normalToLocal = item.sourceFilter.transform.localToWorldMatrix.transpose;
+            for (int i = 0; i < vertices.Length; i++)
+            {
+                vertices[i] = worldToLocal.MultiplyPoint3x4(item.pivot + vertices[i]);
+                if (i < normals.Length)
+                    normals[i] = normalToLocal.MultiplyVector(normals[i]).normalized;
+            }
+
+            result.vertices = vertices;
+            if (normals.Length == vertices.Length)
+                result.normals = normals;
+            result.name = item.sourceFilter.sharedMesh.name;
+            return result;
+        }
+
+        private static void OverwriteMeshVertices(Mesh target, Mesh source)
+        {
+            // 只覆盖顶点位置与法线，保留拓扑、UV、颜色、材质等其余属性。
+            // 不用 CopySerialized：它对 Mesh 的顶点/索引原生缓冲不可靠，覆盖后场景不刷新。
+            Vector3[] vertices = source.vertices;
+            Vector3[] normals = source.normals;
+            target.vertices = vertices;
+            if (normals.Length == vertices.Length)
+                target.normals = normals;
+            target.RecalculateBounds();
+            if (source.uv != null && source.uv.Length == vertices.Length)
+            {
+                try
+                {
+                    target.RecalculateTangents();
+                }
+                catch
+                {
+                    // 某些旧 Mesh 拓扑不支持 tangent 重算。
+                }
+            }
+        }
+
+        private static string GetSourceObjectPath(Transform target)
+        {
+            var parts = new Stack<string>();
+            Transform current = target;
+            while (current)
+            {
+                parts.Push(current.name);
+                current = current.parent;
+            }
+            return string.Join("_", parts);
         }
 
         private bool TryBuildProjectedMeshes(

@@ -239,6 +239,7 @@ public class ShadingModeToggleWindow : EditorWindow
     /// <summary>捕获选中物体</summary>
     private static void CaptureSelection(List<Component> renderers)
     {
+        var usageTimer = ZXXToolUsageStats.Begin();
         int count = 0;
 
         foreach (var r in renderers)
@@ -290,6 +291,7 @@ public class ShadingModeToggleWindow : EditorWindow
         if (count > 0)
         {
             SceneView.RepaintAll();
+            ZXXToolUsageStats.Complete("Shading Mode", count, usageTimer);
             Debug.Log($"[软硬边切换] 已捕获 {count} 个模型");
         }
     }
@@ -297,11 +299,13 @@ public class ShadingModeToggleWindow : EditorWindow
     /// <summary>统一设置所有模型的平滑度</summary>
     private void SetAllSmoothness(float t)
     {
+        var usageTimer = ZXXToolUsageStats.Begin();
         foreach (var rec in _records)
         {
             rec.smoothness = t;
             ApplySmoothnessToRecord(rec);
         }
+        ZXXToolUsageStats.Complete("Shading Mode", _records.Count, usageTimer);
         SceneView.RepaintAll();
     }
 

@@ -37,6 +37,8 @@ internal sealed class PathSplineEditor : Editor
     private readonly HashSet<int> _selectedKnots = new HashSet<int>();
     private int _selectionVersion;
     private bool _sceneChangePending;
+    private double _lastMeshEditTime;
+    private double _lastInteractiveEditTime = -1d;
     private double _lastLiveRebuildTime;
     private Tool _groupHandleTool = Tool.None;
     private int _groupHandleSelectionVersion = -1;
@@ -77,6 +79,7 @@ internal sealed class PathSplineEditor : Editor
         public Vector3 tangentIn;
         public Vector3 tangentOut;
         public float width;
+        public float meshWidthScale;
     }
 
     private SerializedProperty _closed;
@@ -159,6 +162,7 @@ internal sealed class PathSplineEditor : Editor
         EnsureSelection();
         CacheProperties();
         Undo.undoRedoPerformed += OnUndoRedo;
+        EditorApplication.update += FlushDeferredMeshRebuild;
 
         EditorApplication.delayCall += RebuildMissingPreview;
     }
@@ -167,6 +171,8 @@ internal sealed class PathSplineEditor : Editor
     {
         ReleaseNativeToolsVisibility();
         Undo.undoRedoPerformed -= OnUndoRedo;
+        EditorApplication.update -= FlushDeferredMeshRebuild;
+        PathBuilderGenerator.EndInteractiveMeshPreview(_builder);
     }
 
     public override void OnInspectorGUI()
@@ -182,6 +188,7 @@ internal sealed class PathSplineEditor : Editor
 
     internal void DrawAuthoringInspector()
     {
+        HandleFrameShortcut();
         _so.Update();
 
         EditorGUI.BeginChangeCheck();
@@ -194,6 +201,7 @@ internal sealed class PathSplineEditor : Editor
         {
             DrawModeSettings();
         }
+        DrawCameraFlattenPanel();
         EditorGUILayout.Space(5f);
         if (DrawSectionFoldout(
             ref _showControlPointSettings,
@@ -296,6 +304,9 @@ internal sealed class PathSplineEditor : Editor
             }
         }
 
+        EditorGUI.BeginChangeCheck();
+        DrawCameraFlattenPanel();
+        bool flattenChanged = EditorGUI.EndChangeCheck();
         EditorGUILayout.Space(6f);
         DrawOutputPathSettings();
 
@@ -303,6 +314,53 @@ internal sealed class PathSplineEditor : Editor
             "使用窗口底部的预览按钮检查实时结果，确认后点击烘焙按钮输出。",
             MessageType.Info);
         _so.ApplyModifiedProperties();
+        if (flattenChanged) MarkBuilderChanged(true);
+    }
+
+    private void DrawCameraFlattenPanel()
+    {
+        if (_outputs == null) return;
+        SerializedProperty output = null;
+        for (int i = 0; i < _outputs.arraySize; i++)
+        {
+            SerializedProperty candidate = _outputs.GetArrayElementAtIndex(i);
+            if (!candidate.FindPropertyRelative("enabled").boolValue) continue;
+            if ((PathOutputType)candidate.FindPropertyRelative("type").enumValueIndex != PathOutputType.MeshDeform)
+                return;
+            output = candidate;
+            break;
+        }
+        if (output == null) return;
+
+        EditorGUILayout.Space(5f);
+        using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+        {
+            EditorGUILayout.LabelField("摄像机拍平", EditorStyles.boldLabel);
+            SerializedProperty flatten = output.FindPropertyRelative("flattenFromCamera");
+            EditorGUILayout.PropertyField(flatten,
+                new GUIContent("启用摄像机拍平", "沿参考摄像机视线投到水平面，保持该摄像机下的屏幕外形"));
+            Camera assigned = PathBuilderAuthoringStorage.ResolveMountainFacingCamera(_builder);
+            Camera selected = EditorGUILayout.ObjectField(
+                new GUIContent("参考摄像机", "拖入 Game 视图使用的摄像机；留空自动识别场景主摄像机"),
+                assigned, typeof(Camera), true) as Camera;
+            if (selected != assigned)
+            {
+                Undo.RecordObject(_builder, "Set Mesh Flatten Camera");
+                PathBuilderAuthoringStorage.SetMountainFacingCamera(_builder, selected);
+                GUI.changed = true;
+            }
+            EditorGUILayout.PropertyField(output.FindPropertyRelative("flattenPlaneHeight"),
+                new GUIContent("平面世界高度 Y", "拍平后整个面片所在的世界坐标 Y；例如 2 表示 Y=2 的水平面，不是高度截断"));
+            if (flatten.boolValue)
+            {
+                Camera resolved = PathBuilderGenerator.ResolveMeshFlattenCamera(_builder);
+                EditorGUILayout.HelpBox(resolved
+                    ? $"使用摄像机：{resolved.name}" + (assigned ? "" : "（自动识别）")
+                        + "。调整高度后更新预览；摄像机移动或转动后需重新 Preview。"
+                    : "未找到唯一的 Game 摄像机，请拖入参考摄像机；拍平失败会保留原预览。",
+                    resolved ? MessageType.None : MessageType.Warning);
+            }
+        }
     }
 
     private string GetCurrentOutputLabel()
@@ -677,9 +735,23 @@ internal sealed class PathSplineEditor : Editor
                     outputType == PathOutputType.MeshDeform);
                 EditorGUILayout.HelpBox(
                     outputType == PathOutputType.MeshDeform
-                        ? "连续主体会沿样条变形。源 Mesh 沿长度方向的分段越多，弯曲越平滑。"
+                        ? "拖动控制点时模型实时跟随（简化预览），松开后恢复完整细分和碰撞体；重复段共享源网格。"
                         : "完整对象会沿样条刚性摆放，不会弯曲，适合建筑、石头和独立模块。",
                     MessageType.None);
+            }
+            if (!enabled.boolValue || !_autoRebuild.boolValue)
+            {
+                EditorGUILayout.HelpBox(
+                    !enabled.boolValue
+                        ? "当前 Output 已关闭，填入模型或点击 Preview 都不会生成。"
+                        : "当前 Auto Rebuild 已关闭，修改模型和参数后需要点击 Preview 才会生成。",
+                    MessageType.Warning);
+                if (GUILayout.Button("启用生成并预览"))
+                {
+                    enabled.boolValue = true;
+                    _autoRebuild.boolValue = true;
+                    GUI.changed = true;
+                }
             }
             return outputType;
         }
@@ -697,6 +769,16 @@ internal sealed class PathSplineEditor : Editor
         DrawSegmentMeshSelector(output);
         if (deform)
             DrawMeshPartSettings(output);
+
+        if (deform)
+        {
+            EditorGUILayout.PropertyField(
+                output.FindPropertyRelative("useSplineWidth"),
+                new GUIContent("Use Spline Width", "使用各控制点的 Model Width Scale 沿样条改变模型横向宽窄；只影响 Deform 部件，不改变高度和长度"));
+            if (output.FindPropertyRelative("useSplineWidth").boolValue)
+                EditorGUILayout.HelpBox("选中控制点调整 Model Width Scale：1 原宽，0.5 半宽，2 两倍宽。相邻点之间平滑过渡；Scene 中按 R 横向缩放也可调整。", MessageType.None);
+
+        }
 
         EditorGUILayout.Space(4f);
         EditorGUILayout.LabelField("Segment", EditorStyles.miniBoldLabel);
@@ -754,9 +836,9 @@ internal sealed class PathSplineEditor : Editor
                 cornerHandling,
                 new GUIContent(
                     "Corner Handling",
-                    "Off 不处理；Compress Inner 会根据局部曲率压缩弯道内侧，避免内侧翻折和重叠"));
+                    "Off 不处理；Compress Inner 压缩宽度；保宽裁切保留模型宽度和比例，只裁掉冲突的内侧部分"));
             if ((PathCornerHandling)cornerHandling.enumValueIndex
-                == PathCornerHandling.CompressInner)
+                != PathCornerHandling.Off)
             {
                 EditorGUILayout.Slider(
                     output.FindPropertyRelative("cornerSafety"),
@@ -764,8 +846,10 @@ internal sealed class PathSplineEditor : Editor
                     0.95f,
                     new GUIContent(
                         "Corner Safety",
-                        "内侧允许接近曲率中心的安全比例；数值越小越保守，急弯内侧压缩越明显"));
+                        "内侧允许接近曲率中心的安全比例；保宽裁切模式下只影响裁切边界，不压缩剩余模型"));
             }
+            if ((PathCornerHandling)cornerHandling.enumValueIndex == PathCornerHandling.TrimInner)
+                EditorGUILayout.HelpBox("保留控制点设定的宽度和未冲突部分的比例；内侧放不下的部分局部裁掉。拖点时简化预览，松开后生成准确裁切边界。", MessageType.None);
         }
 
         EditorGUILayout.Space(4f);
@@ -1786,13 +1870,31 @@ internal sealed class PathSplineEditor : Editor
                         new GUIContent("Reverse", "反转整条样条的方向")))
                         ReverseSpline();
                     if (GUILayout.Button(
-                        new GUIContent("Frame", "让场景视图聚焦到选中的控制点")))
+                        new GUIContent("Frame  F", "按 F 让场景视图聚焦到选中的控制点")))
                         FrameSelectedKnot();
                 }
             }
 
             if (knotCount > 0 && _selectedKnots.Count > 0)
                 DrawSelectedKnotFields(_builder.knots[_selectedKnot]);
+
+            bool hasLinearKnot = _builder.knots != null
+                && _builder.knots.Exists(knot => knot != null && knot.tangentMode == PathTangentMode.Linear);
+            if (hasLinearKnot && _builder.outputs != null
+                && _builder.outputs.Exists(output => output != null && output.enabled
+                    && output.type == PathOutputType.MeshDeform))
+            {
+                EditorGUILayout.HelpBox("当前路径含直线折点。较宽的河岸在折点处会出现扇形凸角、凹口；增加模型 Segments 不能消除这种转向突变。", MessageType.Warning);
+                if (GUILayout.Button("整条平滑并预览（保留控制点位置）"))
+                {
+                    Undo.RecordObject(_builder, "Smooth Entire Model Path");
+                    for (int i = 0; i < _builder.knots.Count; i++)
+                        _builder.SmoothKnot(i);
+                    MarkBuilderChanged(true);
+                    if (!_builder.autoRebuild)
+                        PathBuilderGenerator.Rebuild(_builder);
+                }
+            }
         }
 
         if (DrawSectionFoldout(
@@ -1845,6 +1947,11 @@ internal sealed class PathSplineEditor : Editor
                 new GUIContent("Tangent Out", "离开该控制点一侧的贝塞尔切线"),
                 knot.tangentOut);
         }
+        float meshWidthScale = knot.meshWidthScale;
+        if (UsesMeshSplineWidth())
+            meshWidthScale = EditorGUILayout.FloatField(
+                new GUIContent("Model Width Scale", "该点模型横向宽度倍率：1 原宽，0.5 半宽，2 两倍宽；多选时同时设置所有选中点"),
+                knot.meshWidthScale);
         float width = knot.width;
         if (_builder.mode == PathBuildMode.River)
             width = EditorGUILayout.FloatField(
@@ -1855,7 +1962,8 @@ internal sealed class PathSplineEditor : Editor
             && tangentMode == knot.tangentMode
             && tangentIn == knot.tangentIn
             && tangentOut == knot.tangentOut
-            && Mathf.Approximately(width, knot.width))
+            && Mathf.Approximately(width, knot.width)
+            && Mathf.Approximately(meshWidthScale, knot.meshWidthScale))
         {
             return;
         }
@@ -1863,6 +1971,11 @@ internal sealed class PathSplineEditor : Editor
         bool tangentInChanged = tangentIn != knot.tangentIn;
         bool tangentOutChanged = tangentOut != knot.tangentOut;
         Undo.RecordObject(_builder, "Edit Spline Point");
+        if (!Mathf.Approximately(meshWidthScale, knot.meshWidthScale))
+        {
+            foreach (int index in _selectedKnots)
+                _builder.knots[index].meshWidthScale = Mathf.Max(0.01f, meshWidthScale);
+        }
         knot.position = position;
         knot.width = Mathf.Max(0.01f, width);
         if (tangentMode != knot.tangentMode)
@@ -1878,6 +1991,19 @@ internal sealed class PathSplineEditor : Editor
                 _builder.SetTangent(_selectedKnot, true, tangentIn);
         }
         MarkBuilderChanged(true);
+    }
+
+    private bool UsesMeshSplineWidth()
+    {
+        if (_builder.outputs == null)
+            return false;
+        foreach (PathOutputLayer output in _builder.outputs)
+        {
+            if (output != null && output.enabled
+                && output.type == PathOutputType.MeshDeform && output.useSplineWidth)
+                return true;
+        }
+        return false;
     }
 
     private void DrawGenerationButtons()
@@ -1952,6 +2078,8 @@ internal sealed class PathSplineEditor : Editor
             return;
 
         EventType sceneEventType = Event.current.rawType;
+        if (HandleFrameShortcut())
+            return;
 
         DrawSplineCurve();
         if (_builder.mode == PathBuildMode.River)
@@ -2280,7 +2408,9 @@ internal sealed class PathSplineEditor : Editor
                 ? $"{_selectedKnots.Count} points"
                 : _builder.mode == PathBuildMode.River
                     ? $"{_selectedKnot}  W:{primary.width:F2}"
-                    : _selectedKnot.ToString());
+                    : UsesMeshSplineWidth()
+                        ? $"{_selectedKnot}  Width x{primary.meshWidthScale:F2}"
+                        : _selectedKnot.ToString());
     }
 
     private Vector3 GetSelectionPivot(Transform transform)
@@ -2395,7 +2525,7 @@ internal sealed class PathSplineEditor : Editor
             knot.tangentOut = transform.InverseTransformVector(
                 ScaleVectorInFrame(outWorld, _groupHandleFrame, scaled));
 
-            if (_builder.mode == PathBuildMode.River)
+            if (_builder.mode == PathBuildMode.River || UsesMeshSplineWidth())
             {
                 Vector3 riverRight = GetRiverRight(
                     state.tangentOut,
@@ -2404,7 +2534,10 @@ internal sealed class PathSplineEditor : Editor
                     riverRight,
                     _groupHandleFrame,
                     scaled).magnitude;
-                knot.width = Mathf.Max(0.01f, state.width * widthScale);
+                if (_builder.mode == PathBuildMode.River)
+                    knot.width = Mathf.Max(0.01f, state.width * widthScale);
+                if (UsesMeshSplineWidth())
+                    knot.meshWidthScale = Mathf.Max(0.01f, state.meshWidthScale * widthScale);
             }
         }
         MarkBuilderChanged(false);
@@ -2435,7 +2568,8 @@ internal sealed class PathSplineEditor : Editor
                 position = knot.position,
                 tangentIn = knot.tangentIn,
                 tangentOut = knot.tangentOut,
-                width = knot.width
+                width = knot.width,
+                meshWidthScale = knot.meshWidthScale
             };
         }
 
@@ -2945,6 +3079,30 @@ internal sealed class PathSplineEditor : Editor
         MarkBuilderChanged(true);
     }
 
+    private bool HandleFrameShortcut()
+    {
+        Event current = Event.current;
+        if (current == null || EditorGUIUtility.editingTextField
+            || GUIUtility.hotControl != 0
+            || !_builder || !_builder.Anchor
+            || _builder.knots == null || _builder.knots.Count == 0
+            || !SceneView.lastActiveSceneView)
+            return false;
+
+        bool frameKey = current.type == EventType.KeyDown
+            && current.keyCode == KeyCode.F && current.modifiers == EventModifiers.None;
+        bool frameCommand = (current.type == EventType.ValidateCommand
+                || current.type == EventType.ExecuteCommand)
+            && current.commandName == "FrameSelected";
+        if (!frameKey && !frameCommand)
+            return false;
+
+        if (current.type != EventType.ValidateCommand)
+            FrameSelectedKnot();
+        current.Use();
+        return true;
+    }
+
     private void FrameSelectedKnot()
     {
         if (!SceneView.lastActiveSceneView || _builder.knots.Count == 0)
@@ -2967,6 +3125,13 @@ internal sealed class PathSplineEditor : Editor
 
         if (!_builder.autoRebuild)
             return;
+        if (_builder.outputs != null && _builder.outputs.Exists(output => output != null
+            && output.enabled && output.type == PathOutputType.MeshDeform))
+        {
+            _sceneChangePending = true;
+            _lastMeshEditTime = EditorApplication.timeSinceStartup;
+            return;
+        }
         if (rebuildImmediately)
         {
             _sceneChangePending = false;
@@ -2995,6 +3160,31 @@ internal sealed class PathSplineEditor : Editor
                 _lastLiveRebuildTime = now;
             }
         }
+    }
+
+    private void FlushDeferredMeshRebuild()
+    {
+        if (!_sceneChangePending || !_builder || !_builder.autoRebuild
+            || EditorApplication.isCompiling || EditorApplication.isUpdating)
+            return;
+        if (_builder.outputs == null || !_builder.outputs.Exists(output => output != null
+            && output.enabled && output.type == PathOutputType.MeshDeform))
+            return;
+        double now = EditorApplication.timeSinceStartup;
+        bool interacting = GUIUtility.hotControl != 0 || now - _lastMeshEditTime < 0.15d;
+        if (interacting)
+        {
+            if (_lastInteractiveEditTime != _lastMeshEditTime && now - _lastLiveRebuildTime >= 0.1d)
+            {
+                PathBuilderGenerator.UpdateInteractiveMeshPreview(_builder);
+                _lastInteractiveEditTime = _lastMeshEditTime;
+                _lastLiveRebuildTime = EditorApplication.timeSinceStartup;
+            }
+            return;
+        }
+        _sceneChangePending = false;
+        PathBuilderGenerator.Rebuild(_builder, false);
+        _lastLiveRebuildTime = EditorApplication.timeSinceStartup;
     }
 
     private void OnUndoRedo()

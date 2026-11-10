@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
@@ -270,6 +270,7 @@ public sealed class BuildingCardTool : EditorWindow
         DrawExistingPrefabRefactor();
         EditorGUILayout.Space(4);
         DrawSourceModeSelector();
+        DrawPrefabEditingControls();
         if (sourceMode == SourceMode.Image)
         {
             DrawInputToolbar();
@@ -400,8 +401,8 @@ public sealed class BuildingCardTool : EditorWindow
             "4. Visual (Mesh Quad)",
             "Rotation = Reference Camera Rotation。\n" +
             "World Per Pixel = 1 ÷ Pixels Per Meter；Visual Scale = 有像素区域尺寸 × World Per Pixel × Margin Scale。\n" +
-            "Visual Position = Root 反向补偿 + 图片地面锚点补偿 + 底部贴地补偿 + 沿相机偏移。\n" +
-            "开启底面中心补偿后：Visual X 旋转归零，Y 缩放保持原相机画面高度，再沿相机方向对齐碰撞盒底面中心线；X 缩放不变。默认关闭，重复应用不累加。\n" +
+            "Visual Position = Root 反向补偿 + 图片地面锚点补偿 + 底部贴地补偿。\n" +
+            "仅开启底面中心补偿时：Visual X 旋转归零，Y 缩放保持投影高度，再将红色中心锚点对齐碰撞盒底面中心（Y=0）；与中心同高的左右锚点也落在 Y=0。新建、覆盖和另存为统一采用此基准；X 缩放不变，默认关闭，重复应用不累加。\n" +
             "Mesh 只裁掉全透明空白；低 Alpha 阴影仍保留显示。");
 
         DrawGuideSection(
@@ -478,17 +479,21 @@ public sealed class BuildingCardTool : EditorWindow
     private void DrawCameraCompensation()
     {
         settings.alignVisualToColliderDiagonal = EditorGUILayout.Toggle(
-            Content("面片穿过碰撞底面中心", "开启后将 Visual 本地 X 旋转归零，调整 Y 缩放保持正交相机画面，再沿相机方向移动到碰撞盒底面中心线。X 缩放不变；不要求面片两端落在角点。关闭后应用可撤回工具记录的补偿。"), settings.alignVisualToColliderDiagonal);
-        EditorGUILayout.LabelField("自动对齐位置，保持 X 缩放和原相机画面", EditorStyles.miniLabel);
+            Content("面片穿过碰撞底面中心", "仅开启时将 Visual 本地 X 旋转归零、补偿 Y 缩放，再以红色中心锚点对齐碰撞底面中心（Y=0）；图中与中心同高的左右锚点一起贴地。新建、覆盖和另存为均应用此规则。关闭时保留原有正对相机的定位方式。批量应用使用下面的独立按钮。"), settings.alignVisualToColliderDiagonal);
+        EditorGUILayout.LabelField("仅开启时按中心锚点补偿 Y；同高的左右锚点为地面基准", EditorStyles.miniLabel);
     }
 
     private static Vector3 ApplyCameraCompensation(Transform root, GameObject visual, BoxCollider collider,
-        Camera camera, bool enabled, out Quaternion sourceRotation, out Vector3 sourceScale)
+        Camera camera, bool enabled, out Quaternion sourceRotation, out Vector3 sourceScale,
+        Vector3? groundCenterLocal = null)
     {
         var transform = visual.transform;
         sourceRotation = transform.localRotation;
         sourceScale = transform.localScale;
+        // Ground-anchor height is only applied in the through-centre mode.
         if (!enabled) return Vector3.zero;
+        if (!groundCenterLocal.HasValue)
+            throw new InvalidOperationException("未保存建筑底面中心标注。请通过编辑已有 Prefab 核对地脚点并保存后，再应用底面中心补偿。");
         if (camera == null || !camera.orthographic) throw new InvalidOperationException("底面中心补偿需要正交相机。");
         if (Mathf.Abs(Vector3.Dot(collider.transform.up, Vector3.up)) < 0.9999f)
             throw new InvalidOperationException("碰撞盒底面需平行于世界 XZ 平面。");
@@ -516,38 +521,155 @@ public sealed class BuildingCardTool : EditorWindow
             Mathf.Abs(Vector3.Dot(upError, camera.transform.up)) > tolerance)
             throw new InvalidOperationException("当前朝向无法仅通过 X 旋转归零和 Y 缩放保持原画面，已跳过。");
 
-        // Square and rectangular footprints share the same rule: the upright card plane passes
-        // through the collider's ground centre, while its horizontal direction and X scale stay fixed.
-        var cardDirection = collider.transform.InverseTransformVector(transform.TransformVector(Vector3.right));
+        // Keep the authored image point on the footprint centre after rotation and Y scaling.
+        // A plane passing through that centre alone does not constrain the point's height.
         var cardUp = collider.transform.InverseTransformVector(transform.TransformVector(Vector3.up));
         if (new Vector2(cardUp.x, cardUp.z).magnitude > 0.0001f * Mathf.Max(1f, cardUp.magnitude))
             throw new InvalidOperationException("X 旋转归零后面片仍未竖直，无法对齐底面中心。");
-        cardDirection.y = 0f;
-        if (cardDirection.sqrMagnitude < 0.00000001f || collider.size.x <= 0f || collider.size.z <= 0f)
-            throw new InvalidOperationException("面片方向或碰撞盒 XZ 尺寸无效。");
-        cardDirection.Normalize();
-        var normal = new Vector3(cardDirection.z, 0f, -cardDirection.x);
         var groundCenter = collider.center - Vector3.up * collider.size.y * 0.5f;
-        var positionFromCenter = collider.transform.InverseTransformPoint(transform.position) - groundCenter;
-        var localForward = collider.transform.InverseTransformVector(camera.transform.forward);
-        var denominator = Vector3.Dot(normal, localForward);
-        if (Mathf.Abs(denominator) < 0.0001f)
-            throw new InvalidOperationException("相机方向与面片平行，无法沿视线移动到底面中心线上。");
-        var distance = -Vector3.Dot(normal, positionFromCenter) / denominator;
-        var worldOffset = camera.transform.forward * distance;
+        var worldGroundCenter = collider.transform.TransformPoint(groundCenter);
+        var worldOffset = worldGroundCenter - transform.TransformPoint(groundCenterLocal.Value);
         var offset = root.InverseTransformVector(worldOffset);
         if (!IsFinite(offset.x) || !IsFinite(offset.y) || !IsFinite(offset.z))
             throw new InvalidOperationException("计算出的底面中心偏移无效。");
         transform.position += worldOffset;
+        if (Vector3.Distance(transform.TransformPoint(groundCenterLocal.Value), worldGroundCenter) > 0.0001f)
+            throw new InvalidOperationException("补偿后的建筑标注中心未对齐碰撞底面中心，已取消保存。");
         return offset;
     }
 
+    private static Vector3 ImageGroundCenterLocal(Mesh mesh, Texture2D texture, Vector2 centerPixel)
+    {
+        if (!TryImagePointLocal(mesh, texture, centerPixel, out var center))
+            throw new InvalidOperationException("无法从原始贴图 UV 定位地面锚点，请检查面片与原始贴图。");
+        return center;
+    }
+
+    private static bool TryImagePointLocal(Mesh mesh, Texture2D texture, Vector2 pixel, out Vector3 point)
+    {
+        point = Vector3.zero;
+        if (texture == null || texture.width <= 1 || texture.height <= 1 ||
+            mesh == null || mesh.vertexCount != 4) return false;
+        var uv = mesh.uv;
+        var vertices = mesh.vertices;
+        if (uv.Length != 4) return false;
+        // Preview marks and UV0 both use pixel / (texture size - 1). Invert that exact
+        // mapping; dividing by the crop's pixel count (span + 1) shifts the ground anchor.
+        // UV0 remains the source mapping even when the material uses an atlas UV channel.
+        var a = uv[1] - uv[0];
+        var b = uv[3] - uv[0];
+        var determinant = a.x * b.y - a.y * b.x;
+        if (Mathf.Abs(determinant) < 0.00000001f) return false;
+        var delta = new Vector2(pixel.x / (texture.width - 1f), pixel.y / (texture.height - 1f)) - uv[0];
+        point = vertices[0] + (vertices[1] - vertices[0]) * ((delta.x * b.y - delta.y * b.x) / determinant) +
+                (vertices[3] - vertices[0]) * ((a.x * delta.y - a.y * delta.x) / determinant);
+        return IsFinite(point.x) && IsFinite(point.y) && IsFinite(point.z);
+    }
+
+    private static Vector3? LoadGroundCenterLocal(GameObject visual, BuildingCardAssetMetadata metadata)
+    {
+        if (metadata == null) return null;
+        // Recompute saved mesh marks before using the cache, which older versions derived
+        // from crop pixel count instead of the actual UV span. Spine keeps its saved local point.
+        if (!string.IsNullOrEmpty(metadata.editPointsJson))
+        {
+            var points = JsonUtility.FromJson<SavedEntry>(metadata.editPointsJson);
+            if (points != null && points.useManualGroundPoints &&
+                TrySegmentIntersection(points.manualNearPoint, points.manualFarPoint,
+                    points.manualLeftPoint, points.manualRightPoint, out var center))
+            {
+                var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                    AssetDatabase.GUIDToAssetPath(metadata.sourceTextureGuid ?? string.Empty));
+                var filter = visual.GetComponent<MeshFilter>();
+                if (TryImagePointLocal(filter == null ? null : filter.sharedMesh, texture, center, out var local))
+                    return local;
+            }
+        }
+        return metadata.hasVisualGroundCenter ? (Vector3?)metadata.visualGroundCenterLocal : null;
+    }
+
+    private static void ConvertToCameraFacing(GameObject visual, BoxCollider collider, Camera camera)
+    {
+        if (camera == null || !camera.orthographic)
+            throw new InvalidOperationException("恢复正对相机需要指定正交 Target Camera。");
+        var transform = visual.transform;
+        var originalPosition = transform.position;
+        var originalRight = transform.TransformVector(Vector3.right);
+        var originalUp = transform.TransformVector(Vector3.up);
+        var scale = transform.localScale;
+        transform.rotation = camera.transform.rotation;
+        var newProjectedUp = Vector3.Dot(transform.TransformVector(Vector3.up), camera.transform.up);
+        if (Mathf.Abs(newProjectedUp) < 0.0001f)
+            throw new InvalidOperationException("面片的 Y 缩放无效，无法恢复正对相机。");
+        scale.y *= Vector3.Dot(originalUp, camera.transform.up) / newProjectedUp;
+        if (!IsFinite(scale.y) || Mathf.Abs(scale.y) < 0.0001f)
+            throw new InvalidOperationException("面片没有有效的画面高度，无法恢复正对相机。");
+        transform.localScale = scale;
+        var rightError = transform.TransformVector(Vector3.right) - originalRight;
+        var upError = transform.TransformVector(Vector3.up) - originalUp;
+        var tolerance = 0.0001f * Mathf.Max(1f, originalRight.magnitude, originalUp.magnitude);
+        if (Mathf.Abs(Vector3.Dot(rightError, camera.transform.right)) > tolerance ||
+            Mathf.Abs(Vector3.Dot(rightError, camera.transform.up)) > tolerance ||
+            Mathf.Abs(Vector3.Dot(upError, camera.transform.right)) > tolerance ||
+            Mathf.Abs(Vector3.Dot(upError, camera.transform.up)) > tolerance)
+            throw new InvalidOperationException("当前水平朝向与 Target Camera 不匹配，无法在保持 X 缩放和画面不变时恢复，已跳过。");
+        var nearCorner = GetNearestColliderGroundCorner(collider, camera);
+        // Use the final card's actual plane, including its parent transform. Never use
+        // Mesh bounds / Spine animated extents as a ground anchor: those include blank margins.
+        var planeNormal = Vector3.Cross(transform.TransformVector(Vector3.right),
+            transform.TransformVector(Vector3.up)).normalized;
+        var forward = camera.transform.forward;
+        var denominator = Vector3.Dot(planeNormal, forward);
+        if (Mathf.Abs(denominator) < 0.0001f)
+            throw new InvalidOperationException("相机视线与面片平行，无法恢复地脚定位。");
+        var distance = Vector3.Dot(nearCorner - originalPosition, planeNormal) / denominator;
+        if (!IsFinite(distance)) throw new InvalidOperationException("恢复地脚定位的偏移无效。");
+        transform.position = originalPosition + forward * distance;
+        var finalNormal = Vector3.Cross(transform.TransformVector(Vector3.right),
+            transform.TransformVector(Vector3.up)).normalized;
+        if (Mathf.Abs(Vector3.Dot(nearCorner - transform.position, finalNormal)) > 0.0001f)
+            throw new InvalidOperationException("恢复后的实际面片平面未经过碰撞底面的近角点，已取消保存。");
+    }
+
+    private static Vector3 GetNearestColliderGroundCorner(BoxCollider collider, Camera camera)
+    {
+        if (collider == null || collider.size.x <= 0f || collider.size.z <= 0f)
+            throw new InvalidOperationException("碰撞底面的 XZ 尺寸无效。");
+        if (Vector3.Dot(collider.transform.up, Vector3.up) < 0.9999f)
+            throw new InvalidOperationException("碰撞底面需平行于世界 XZ 平面且 Y 轴朝上。");
+        var groundCenter = collider.center - Vector3.up * collider.size.y * 0.5f;
+        var nearCorner = Vector3.zero;
+        var nearestDepth = float.PositiveInfinity;
+        // Orthographic depth, rather than Euclidean distance to the camera, determines
+        // the image's near ground corner. Works for rectangles and off-centre colliders.
+        for (var i = 0; i < 4; i++)
+        {
+            var localCorner = groundCenter + new Vector3(
+                ((i & 1) == 0 ? -0.5f : 0.5f) * collider.size.x, 0f,
+                ((i & 2) == 0 ? -0.5f : 0.5f) * collider.size.z);
+            var worldCorner = collider.transform.TransformPoint(localCorner);
+            var depth = Vector3.Dot(worldCorner - camera.transform.position, camera.transform.forward);
+            if (depth < nearestDepth)
+            {
+                nearestDepth = depth;
+                nearCorner = worldCorner;
+            }
+        }
+        return nearCorner;
+    }
+
     private void RememberCameraOffset(string path, Vector3 offset, Camera camera,
-        Quaternion sourceRotation, Vector3 sourceScale, Vector3 rootRebaseOffset = default(Vector3))
+        Quaternion sourceRotation, Vector3 sourceScale, Vector3 rootRebaseOffset = default(Vector3),
+        Vector3? groundCenterLocal = null)
     {
         if (!BuildingCardMetadataStore.TryLoad(path, out var metadata)) metadata = new BuildingCardAssetMetadata();
         BuildingCardTransparentSortUtility.ApplyRootOffsetToMetadata(metadata, rootRebaseOffset);
         metadata.cameraOffsetLocal = offset;
+        if (groundCenterLocal.HasValue)
+        {
+            metadata.hasVisualGroundCenter = true;
+            metadata.visualGroundCenterLocal = groundCenterLocal.Value;
+        }
         metadata.hasCameraCompensationSource = settings.alignVisualToColliderDiagonal;
         metadata.cameraSourceLocalRotation = sourceRotation;
         metadata.cameraSourceLocalScale = sourceScale;
@@ -561,7 +683,20 @@ public sealed class BuildingCardTool : EditorWindow
         BuildingCardMetadataStore.Save(path, metadata);
     }
 
-    private void OffsetExistingPrefabs() => ProcessExistingPrefabs(false);
+    private void OffsetExistingPrefabs()
+    {
+        settings.alignVisualToColliderDiagonal = true;
+        SaveSettings();
+        ProcessExistingPrefabs(false);
+    }
+
+    private void RestoreExistingPrefabCompensation()
+    {
+        settings.alignVisualToColliderDiagonal = false;
+        SaveSettings();
+        ProcessExistingPrefabs(false);
+    }
+
     private void RepairExistingPrefabSorting() => ProcessExistingPrefabs(true);
 
     private void ProcessExistingPrefabs(bool sortingOnly)
@@ -591,18 +726,46 @@ public sealed class BuildingCardTool : EditorWindow
                     continue;
                 }
                 var hasMetadata = BuildingCardMetadataStore.TryLoad(path, out var metadata);
-                var previousOffset = hasMetadata ? metadata.cameraOffsetLocal : Vector3.zero;
-                if (hasMetadata && metadata.hasCameraCompensationSource)
+                var previouslyCompensated = hasMetadata && metadata.hasCameraCompensationSource;
+                var previousOffset = previouslyCompensated ? metadata.cameraOffsetLocal : Vector3.zero;
+                var appearancePosition = visual.transform.position;
+                var groundCenterLocal = LoadGroundCenterLocal(visual, metadata);
+                Vector3 offset;
+                Quaternion offsetSourceRotation;
+                Vector3 offsetSourceScale;
+                if (settings.alignVisualToColliderDiagonal)
                 {
-                    visual.transform.localRotation = metadata.cameraSourceLocalRotation;
-                    visual.transform.localScale = metadata.cameraSourceLocalScale;
+                    offset = ApplyCameraCompensation(root.transform, visual, collider, existingPrefabCamera,
+                        true, out offsetSourceRotation, out offsetSourceScale, groundCenterLocal);
+                    if (previouslyCompensated)
+                    {
+                        offset += previousOffset;
+                        offsetSourceRotation = metadata.cameraSourceLocalRotation;
+                        offsetSourceScale = metadata.cameraSourceLocalScale;
+                    }
                 }
-                visual.transform.position -= root.transform.TransformVector(previousOffset);
-                var offset = ApplyCameraCompensation(root.transform, visual, collider, existingPrefabCamera,
-                    settings.alignVisualToColliderDiagonal, out var offsetSourceRotation, out var offsetSourceScale);
+                else
+                {
+                    // Convert from the current pose without requiring any historical metadata.
+                    ConvertToCameraFacing(visual, collider, existingPrefabCamera);
+                    offset = Vector3.zero;
+                    offsetSourceRotation = visual.transform.localRotation;
+                    offsetSourceScale = visual.transform.localScale;
+                }
                 var rootRebaseOffset = BuildingCardTransparentSortUtility.UpdateSorting(root);
+                if (!settings.alignVisualToColliderDiagonal)
+                {
+                    var screenDelta = visual.transform.position - appearancePosition;
+                    if (Mathf.Abs(Vector3.Dot(screenDelta, existingPrefabCamera.transform.right)) > 0.0001f ||
+                        Mathf.Abs(Vector3.Dot(screenDelta, existingPrefabCamera.transform.up)) > 0.0001f)
+                        throw new InvalidOperationException("补偿改变了目标相机中的画面位置，已取消保存。");
+                }
                 if (PrefabUtility.SaveAsPrefabAsset(root, path) == null) throw new InvalidOperationException("Prefab 保存失败。");
-                RememberCameraOffset(path, offset, existingPrefabCamera, offsetSourceRotation, offsetSourceScale, rootRebaseOffset);
+                RememberCameraOffset(path, offset, existingPrefabCamera, offsetSourceRotation, offsetSourceScale, rootRebaseOffset, groundCenterLocal);
+                Debug.Log("[BuildingCardTool] " + (settings.alignVisualToColliderDiagonal ? "面片补偿已保存：" : "面片已恢复正对相机：") + path +
+                    " | Visual Position " + visual.transform.localPosition.ToString("F4") +
+                    " | Rotation " + visual.transform.localEulerAngles.ToString("F3") +
+                    " | Scale " + visual.transform.localScale.ToString("F4"));
                 successCount++;
             }
             catch (Exception exception)
@@ -615,7 +778,7 @@ public sealed class BuildingCardTool : EditorWindow
         }
         AssetDatabase.SaveAssets();
         Repaint();
-        EditorUtility.DisplayDialog("Building Card", (sortingOnly ? "排序修复完成 " : "补偿完成 ") + successCount + " / " + paths.Count + " 个 Prefab。" +
+        EditorUtility.DisplayDialog("Building Card", (sortingOnly ? "排序修复完成 " : settings.alignVisualToColliderDiagonal ? "面片补偿完成 " : "恢复正对相机完成 ") + successCount + " / " + paths.Count + " 个 Prefab。" +
             (errors.Count == 0 ? string.Empty : "\n" + string.Join("\n", errors.ToArray())), "确定");
     }
 
@@ -681,8 +844,12 @@ public sealed class BuildingCardTool : EditorWindow
         using (new EditorGUI.DisabledScope(!HasExistingPrefabs() || existingPrefabCamera == null ||
                                           !existingPrefabCamera.orthographic))
         {
-            if (GUILayout.Button(Content("应用面片补偿", "将 Visual X 旋转归零并补偿 Y 缩放，然后沿 Target Camera 移动到碰撞盒底面中心线。X 缩放及原相机画面保持不变。直接保存当前 Prefab；重复应用不累加。关闭开关后应用可恢复原始变换。"), GUILayout.Height(28f)))
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button(Content("应用面片补偿", "点击即启用补偿：将 Visual X 旋转归零，补偿 Y 缩放，让保存的标注底面中心点对齐碰撞底面中心。保留 X 缩放和投影尺寸，纠正位置偏差。缺少标注时请先编辑已有 Prefab 并核对地脚点。直接保存当前 Prefab；重复应用不累加。"), GUILayout.Height(28f)))
                 EditorApplication.delayCall += OffsetExistingPrefabs;
+            if (GUILayout.Button(Content("恢复正对相机", "不依赖历史记录，将当前竖直或倾斜面片恢复为正对 Target Camera。自动补偿 Y 缩放并沿视线将面片平面对齐碰撞底面离相机最近的角点，保持原相机画面和 X 缩放；保留底面中心 Root 和排序。"), GUILayout.Height(28f)))
+                EditorApplication.delayCall += RestoreExistingPrefabCompensation;
+            EditorGUILayout.EndHorizontal();
         }
         EditorGUILayout.HelpBox(
             "支持批量混合普通 Mesh 面片和 Spine。按现有 BoxCollider X/Z 尺寸重算 Visual 缩放与底面位置；BoxCollider、Mesh、材质、UV、SkeletonData、Atlas 与动画保持不变。",
@@ -851,6 +1018,7 @@ public sealed class BuildingCardTool : EditorWindow
 
             if (!BuildingCardMetadataStore.TryLoad(prefabPath, out var refactorMetadata))
                 refactorMetadata = new BuildingCardAssetMetadata();
+            var groundCenterLocal = LoadGroundCenterLocal(visual, refactorMetadata);
             if (refactorMetadata.hasCameraCompensationSource)
             {
                 visual.transform.localRotation = refactorMetadata.cameraSourceLocalRotation;
@@ -867,10 +1035,8 @@ public sealed class BuildingCardTool : EditorWindow
             var sourcePosition = rememberSourceTransform
                 ? visual.transform.position - contents.transform.TransformVector(refactorMetadata.cameraOffsetLocal)
                 : refactorMetadata.refactorSourcePosition;
-            if (rememberSourceTransform && !refactorMetadata.hasCameraCompensationSource &&
-                Quaternion.Angle(visual.transform.rotation, existingPrefabCamera.transform.rotation) < 0.1f)
-                throw new InvalidOperationException(
-                    "Visual 已与 Target Camera 同朝向，但 Prefab 没有原始 Transform 记录；疑似已手动修改，已安全跳过，避免再次缩小。");
+            // Matching the target camera is a valid initial state. Capture it as the baseline;
+            // orientation alone cannot tell whether a Prefab was manually edited or processed.
 
             var desiredWorldRotation = existingPrefabCamera.transform.rotation;
             var visualScaleFactor = CalculateInscribedFootprintScaleFactor(
@@ -919,7 +1085,12 @@ public sealed class BuildingCardTool : EditorWindow
             visual.transform.rotation = desiredWorldRotation;
             visual.transform.localScale = sourceScale * visualScaleFactor;
             var cameraOffset = ApplyCameraCompensation(contents.transform, visual, collider, existingPrefabCamera,
-                settings.alignVisualToColliderDiagonal, out var offsetSourceRotation, out var offsetSourceScale);
+                settings.alignVisualToColliderDiagonal, out var offsetSourceRotation, out var offsetSourceScale, groundCenterLocal);
+            if (groundCenterLocal.HasValue)
+            {
+                refactorMetadata.hasVisualGroundCenter = true;
+                refactorMetadata.visualGroundCenterLocal = groundCenterLocal.Value;
+            }
             refactorMetadata.cameraOffsetLocal = cameraOffset;
             refactorMetadata.hasCameraCompensationSource = settings.alignVisualToColliderDiagonal;
             refactorMetadata.cameraSourceLocalRotation = offsetSourceRotation;
@@ -1036,6 +1207,8 @@ public sealed class BuildingCardTool : EditorWindow
     private static float CalculateInscribedFootprintScaleFactor(
         Quaternion sourceRotation, Quaternion targetRotation, BoxCollider collider)
     {
+        // Identical orientations require no footprint resizing, including float round-off.
+        if (Quaternion.Angle(sourceRotation, targetRotation) < 0.1f) return 1f;
         var groundNormal = collider.transform.up;
         var sourceForward = Vector3.ProjectOnPlane(sourceRotation * Vector3.forward, groundNormal);
         var targetForward = Vector3.ProjectOnPlane(targetRotation * Vector3.forward, groundNormal);
@@ -1209,7 +1382,7 @@ public sealed class BuildingCardTool : EditorWindow
         SaveSettings();
     }
 
-    private void DrawInputToolbar()
+    private void DrawPrefabEditingControls()
     {
         prefabToEdit = (GameObject)EditorGUILayout.ObjectField("编辑已有 Prefab", prefabToEdit, typeof(GameObject), false);
         using (new EditorGUI.DisabledScope(!IsPersistentPrefab(prefabToEdit)))
@@ -1218,9 +1391,13 @@ public sealed class BuildingCardTool : EditorWindow
         {
             EditorGUILayout.LabelField("正在编辑：" + loadedEditingPrefab.name, EditorStyles.miniBoldLabel);
             saveEditedPrefabAsNew = EditorGUILayout.Toggle("另存为新 Prefab", saveEditedPrefabAsNew);
-            EditorGUILayout.HelpBox("调整右侧地脚点、Grid 和上方参数后点击保存。另存会复制 Mesh，保留当前材质与图集。", MessageType.Info);
+            EditorGUILayout.HelpBox("支持普通面片和 Spine。调整地脚点、Grid 和上方参数后保存；Spine 保留 SkeletonData、Atlas、材质及现有组件。", MessageType.Info);
             if (GUILayout.Button("退出 Prefab 编辑")) loadedEditingPrefab = null;
         }
+    }
+
+    private void DrawInputToolbar()
+    {
         EditorGUILayout.BeginHorizontal();
         if (GUILayout.Button(Content("Add Selected", "把 Project 窗口当前选中的 PNG 加入列表，并立即按当前参数自动分析。"), GUILayout.Height(25)))
         {
@@ -1415,8 +1592,21 @@ public sealed class BuildingCardTool : EditorWindow
 
         try
         {
-            spinePreviewSkeleton = EditorInstantiation.InstantiateSkeletonAnimation(
-                spineDataAsset, "", useObjectFactory: false);
+            if (loadedEditingPrefab != null && sourceMode == SourceMode.Spine)
+            {
+                var sourceVisual = FindRefactorVisual(loadedEditingPrefab);
+                var previewVisual = sourceVisual == null ? null : Instantiate(sourceVisual);
+                spinePreviewSkeleton = previewVisual == null ? null : previewVisual.GetComponent<SkeletonAnimation>();
+                if (previewVisual != null)
+                {
+                    previewVisual.transform.SetParent(null, false);
+                    previewVisual.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+                    previewVisual.transform.localScale = Vector3.one;
+                }
+            }
+            else
+                spinePreviewSkeleton = EditorInstantiation.InstantiateSkeletonAnimation(
+                    spineDataAsset, "", useObjectFactory: false);
             if (spinePreviewSkeleton == null) throw new InvalidOperationException("SkeletonAnimation 初始化失败。 ");
             spinePreviewSkeleton.gameObject.hideFlags = HideFlags.HideAndDontSave;
             spinePreviewSkeleton.UpdateTiming = Spine.Unity.UpdateTiming.ManualUpdate;
@@ -1651,7 +1841,7 @@ public sealed class BuildingCardTool : EditorWindow
             var tooltip = sourceMode == SourceMode.Image
                 ? "生成所有已勾选的图片建筑；如启用 Place In Scene，也会实例化到当前场景。"
                 : "生成当前 Spine 建筑预制体。";
-            if (GUILayout.Button(Content(loadedEditingPrefab != null && sourceMode == SourceMode.Image ? (saveEditedPrefabAsNew ? "另存为新 Prefab" : "覆盖当前 Prefab") : "Generate", tooltip), GUILayout.Height(34)))
+            if (GUILayout.Button(Content(loadedEditingPrefab != null ? (saveEditedPrefabAsNew ? "另存为新 Prefab" : "覆盖当前 Prefab") : "Generate", tooltip), GUILayout.Height(34)))
                 EditorApplication.delayCall += GenerateCurrentSource;
             GUI.backgroundColor = Color.white;
         }
@@ -3132,7 +3322,7 @@ public sealed class BuildingCardTool : EditorWindow
         GameObject prefabAsset = null;
         try
         {
-            prefabAsset = CreateSpinePrefab();
+            prefabAsset = loadedEditingPrefab != null ? SaveEditedSpinePrefab() : CreateSpinePrefab();
             if (settings.placePrefabsInScene)
             {
                 var previewRoot = GetOrCreateScenePreviewRoot();
@@ -3232,8 +3422,11 @@ public sealed class BuildingCardTool : EditorWindow
                 collider.center = new Vector3(0f, result.clickCenterY, 0f);
                 collider.size = new Vector3(outputGeometry.colliderWidth, result.clickHeight,
                     outputGeometry.colliderDepth);
+                var groundCenterLocal = nearLocal + new Vector3(
+                    (result.rootPixel.x - result.nearCorner.x) / pixelsPerLocalUnit,
+                    (result.rootPixel.y - result.nearCorner.y) / pixelsPerLocalUnit, 0f);
                 var cameraOffset = ApplyCameraCompensation(root.transform, visual, collider, referenceCamera,
-                    settings.alignVisualToColliderDiagonal, out var offsetSourceRotation, out var offsetSourceScale);
+                    settings.alignVisualToColliderDiagonal, out var offsetSourceRotation, out var offsetSourceScale, groundCenterLocal);
                 CreateBuildingCardQueueMaterials(renderer, cleanName);
 
                 // A regular card has a fixed quad, so Unity's transparent distance sorting uses a
@@ -3248,7 +3441,8 @@ public sealed class BuildingCardTool : EditorWindow
 
                 prefabAsset = PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
                 if (prefabAsset == null) throw new InvalidOperationException("Prefab 保存失败：" + prefabPath);
-                RememberCameraOffset(prefabPath, cameraOffset, referenceCamera, offsetSourceRotation, offsetSourceScale);
+                RememberCameraOffset(prefabPath, cameraOffset, referenceCamera, offsetSourceRotation, offsetSourceScale,
+                    groundCenterLocal: groundCenterLocal);
                 Debug.Log("[BuildingCardTool] " + spineDataAsset.name + " → " + prefabPath +
                           " | Animation " + (string.IsNullOrEmpty(spineAnimation) ? "<none>" : spineAnimation) +
                           " | 最小高度帧 " + collisionSampleTime.ToString("F3") + "s / " +
@@ -3435,6 +3629,7 @@ public sealed class BuildingCardTool : EditorWindow
 
     private void GenerateAll()
     {
+        var usageTimer = ZXXToolUsageStats.Begin();
         CancelScheduledAnalysis();
         if (!ValidateInputs(true)) return;
         if (!TryPrepareGeneration(out var generationEntries)) return;
@@ -3481,6 +3676,7 @@ public sealed class BuildingCardTool : EditorWindow
         {
             Selection.objects = placedObjects.ToArray();
         }
+        ZXXToolUsageStats.Complete("Building Card Prefab", generated, usageTimer);
         var dialogMessage = "已生成 " + generated + " 个预制体。失败 " + failed + " 个。";
         if (failureMessages.Count > 0)
         {
@@ -3677,8 +3873,9 @@ public sealed class BuildingCardTool : EditorWindow
 
             var filter = visual.AddComponent<MeshFilter>();
             filter.sharedMesh = mesh;
+            var groundCenterLocal = ImageGroundCenterLocal(mesh, entry.texture, result.rootPixel);
             var cameraOffset = ApplyCameraCompensation(root.transform, visual, collider, referenceCamera,
-                settings.alignVisualToColliderDiagonal, out var offsetSourceRotation, out var offsetSourceScale);
+                settings.alignVisualToColliderDiagonal, out var offsetSourceRotation, out var offsetSourceScale, groundCenterLocal);
             var renderer = visual.AddComponent<MeshRenderer>();
             renderer.sharedMaterial = material;
             renderer.shadowCastingMode = ShadowCastingMode.Off;
@@ -3691,7 +3888,8 @@ public sealed class BuildingCardTool : EditorWindow
             BuildingCardMetadataStore.RecordGeneratedPrefab(
                 prefabPath, entry.texture, material, entry.gridWidth, entry.gridDepth);
             SaveEditingParameters(prefabPath, entry);
-            RememberCameraOffset(prefabPath, cameraOffset, referenceCamera, offsetSourceRotation, offsetSourceScale);
+            RememberCameraOffset(prefabPath, cameraOffset, referenceCamera, offsetSourceRotation, offsetSourceScale,
+                groundCenterLocal: groundCenterLocal);
             Debug.Log("[BuildingCardTool] " + entry.texture.name +
                 " → " + prefabPath +
                 " | 原点像素 " + result.rootPixel.ToString("F1") +
@@ -3709,9 +3907,14 @@ public sealed class BuildingCardTool : EditorWindow
         if (!IsPersistentPrefab(prefabToEdit)) return;
         var path = AssetDatabase.GetAssetPath(prefabToEdit);
         var visual = FindRefactorVisual(prefabToEdit);
-        if (visual == null || visual.GetComponent<SkeletonRenderer>() != null)
+        if (visual == null)
         {
-            EditorUtility.DisplayDialog("Building Card", "此入口支持普通图片面片 Prefab。", "确定");
+            EditorUtility.DisplayDialog("Building Card", "找不到唯一的 Visual。", "确定");
+            return;
+        }
+        if (visual.GetComponent<SkeletonRenderer>() != null)
+        {
+            LoadSpinePrefabForEditing(path, visual);
             return;
         }
         Texture2D texture = null;
@@ -3773,12 +3976,150 @@ public sealed class BuildingCardTool : EditorWindow
         Repaint();
     }
 
+    private void LoadSpinePrefabForEditing(string path, GameObject visual)
+    {
+        var animation = visual.GetComponent<SkeletonAnimation>();
+        if (animation == null || animation.skeletonDataAsset == null)
+        {
+            EditorUtility.DisplayDialog("Building Card", "需要带 SkeletonData 的 SkeletonAnimation 建筑。", "确定");
+            return;
+        }
+        CancelScheduledAnalysis();
+        ClearSpinePreview();
+        entries.Clear();
+        loadedEditingPrefab = prefabToEdit;
+        loadedEditingTexture = null;
+        sourceMode = SourceMode.Spine;
+        spineDataAsset = animation.skeletonDataAsset;
+        spineAnimation = animation.AnimationName;
+        spineLoop = animation.loop;
+        spineUseManualGroundPoints = false;
+        BuildingCardMetadataStore.TryLoad(path, out var metadata);
+        settings.alignVisualToColliderDiagonal = metadata != null && metadata.hasCameraCompensationSource;
+        if (metadata != null && !string.IsNullOrEmpty(metadata.editSettingsJson))
+        {
+            JsonUtility.FromJsonOverwrite(metadata.editSettingsJson, settings);
+            if (GlobalObjectId.TryParse(metadata.editCameraId, out var cameraId))
+            {
+                var camera = GlobalObjectId.GlobalObjectIdentifierToObjectSlow(cameraId) as Camera;
+                if (camera != null) referenceCamera = camera;
+            }
+            var points = string.IsNullOrEmpty(metadata.editPointsJson) ? null : JsonUtility.FromJson<SavedEntry>(metadata.editPointsJson);
+            if (points != null)
+            {
+                spineUseManualGroundPoints = points.useManualGroundPoints;
+                spineManualNearPoint = points.manualNearPoint;
+                spineManualLeftPoint = points.manualLeftPoint;
+                spineManualRightPoint = points.manualRightPoint;
+                spineManualFarPoint = points.manualFarPoint;
+            }
+        }
+        var collider = FindRefactorCollider(prefabToEdit);
+        var cell = Mathf.Max(0.0001f, settings.cellWorldSize);
+        spineGridWidth = metadata != null && metadata.gridWidth > 0 ? metadata.gridWidth :
+            collider == null ? 1 : Mathf.Max(1, Mathf.RoundToInt(collider.size.x / cell));
+        spineGridDepth = metadata != null && metadata.gridDepth > 0 ? metadata.gridDepth :
+            collider == null ? 1 : Mathf.Max(1, Mathf.RoundToInt(collider.size.z / cell));
+        SaveWorkspaceState();
+        RefreshSpinePreview();
+        Repaint();
+    }
+
+    private GameObject SaveEditedSpinePrefab()
+    {
+        var sourcePath = AssetDatabase.GetAssetPath(loadedEditingPrefab);
+        var destination = sourcePath;
+        if (saveEditedPrefabAsNew)
+        {
+            destination = EditorUtility.SaveFilePanelInProject("另存 Spine 建筑", loadedEditingPrefab.name + "_Edited", "prefab", "选择新 Prefab 的位置");
+            if (string.IsNullOrEmpty(destination)) throw new OperationCanceledException("已取消另存。");
+            if (AssetDatabase.LoadMainAssetAtPath(destination) != null) throw new InvalidOperationException("另存路径已存在。");
+        }
+        var root = PrefabUtility.LoadPrefabContents(sourcePath);
+        Texture2D renderedTexture = null;
+        try
+        {
+            var visual = FindRefactorVisual(root);
+            var collider = FindRefactorCollider(root);
+            var animation = visual == null ? null : visual.GetComponent<SkeletonAnimation>();
+            if (animation == null || collider == null || visual.transform.parent != root.transform || collider.transform != root.transform)
+                throw new InvalidOperationException("需要 Root 上的 BoxCollider 和直接子物体 SkeletonAnimation Visual。");
+            if (animation.skeletonDataAsset != spineDataAsset)
+                throw new InvalidOperationException("编辑已有 Spine 时请保留原 SkeletonData；换数据请退出编辑后生成新建筑。");
+            if (root.transform.localScale != Vector3.one || Quaternion.Angle(root.transform.rotation, Quaternion.identity) > 0.01f)
+                throw new InvalidOperationException("Root 旋转需为零、缩放需为一。");
+            // Analyse the same local pose used by the preview, without changing the original data assets.
+            root.transform.position = Vector3.zero;
+            visual.transform.SetLocalPositionAndRotation(Vector3.zero, Quaternion.identity);
+            visual.transform.localScale = Vector3.one;
+            var timing = animation.UpdateTiming;
+            var renderer = visual.GetComponent<Renderer>();
+            var materials = renderer.sharedMaterials;
+            animation.UpdateTiming = Spine.Unity.UpdateTiming.ManualUpdate;
+            animation.AnimationName = spineAnimation;
+            animation.loop = spineLoop;
+            animation.Initialize(true);
+            if (!string.IsNullOrEmpty(spineAnimation) && animation.valid)
+                animation.AnimationState.SetAnimation(0, spineAnimation, spineLoop);
+            animation.Update(0f);
+            animation.LateUpdate();
+            renderedTexture = RenderSpineAnalysisTexture(animation, out var viewCenter, out var viewWidth, out var viewHeight);
+            var entry = new Entry
+            {
+                texture = renderedTexture, gridWidth = spineGridWidth, gridDepth = spineGridDepth,
+                useManualGroundPoints = spineUseManualGroundPoints,
+                manualNearPoint = spineManualNearPoint, manualLeftPoint = spineManualLeftPoint,
+                manualRightPoint = spineManualRightPoint, manualFarPoint = spineManualFarPoint
+            };
+            var result = Analyze(entry);
+            if (!result.success) throw new InvalidOperationException(result.message);
+            if (!TryGetOutputGeometry(entry, out var geometry, out var error)) throw new InvalidOperationException(error);
+            var uniformScale = result.worldPerSourcePixel * (renderedTexture.width / viewWidth) * geometry.scaleFactor;
+            var near = new Vector3(viewCenter.x - viewWidth * 0.5f + (result.nearCorner.x + 0.5f) / renderedTexture.width * viewWidth,
+                viewCenter.y - viewHeight * 0.5f + (result.nearCorner.y + 0.5f) / renderedTexture.height * viewHeight, 0f);
+            var rotation = GetVisualRotation();
+            visual.transform.localRotation = rotation;
+            visual.transform.localScale = Vector3.one * uniformScale;
+            visual.transform.localPosition = -result.colliderCenterFromRoot * geometry.scaleFactor -
+                rotation * (near * uniformScale) + Vector3.up * (result.visualGroundLift * geometry.scaleFactor);
+            collider.center = new Vector3(0f, result.clickCenterY, 0f);
+            collider.size = new Vector3(geometry.colliderWidth, result.clickHeight, geometry.colliderDepth);
+            var groundCenterLocal = near + new Vector3(
+                (result.rootPixel.x - result.nearCorner.x) * viewWidth / renderedTexture.width,
+                (result.rootPixel.y - result.nearCorner.y) * viewWidth / renderedTexture.width, 0f);
+            var offset = ApplyCameraCompensation(root.transform, visual, collider, referenceCamera,
+                settings.alignVisualToColliderDiagonal, out var sourceRotation, out var sourceScale, groundCenterLocal);
+            animation.UpdateTiming = timing;
+            renderer.sharedMaterials = materials;
+            BuildingCardTransparentSortUtility.UpdateSorting(root);
+            var prefab = PrefabUtility.SaveAsPrefabAsset(root, destination);
+            if (prefab == null) throw new InvalidOperationException("Prefab 保存失败。");
+            if (BuildingCardMetadataStore.TryLoad(sourcePath, out var metadata)) BuildingCardMetadataStore.Save(destination, metadata);
+            SaveEditingParameters(destination, entry);
+            RememberCameraOffset(destination, offset, referenceCamera, sourceRotation, sourceScale,
+                groundCenterLocal: groundCenterLocal);
+            loadedEditingPrefab = prefab;
+            prefabToEdit = prefab;
+            return prefab;
+        }
+        finally
+        {
+            if (renderedTexture != null) DestroyImmediate(renderedTexture);
+            PrefabUtility.UnloadPrefabContents(root);
+        }
+    }
+
     private void SaveEditingParameters(string path, Entry entry)
     {
         if (!BuildingCardMetadataStore.TryLoad(path, out var metadata)) metadata = new BuildingCardAssetMetadata();
-        metadata.sourceTextureGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(entry.texture));
+        var texturePath = AssetDatabase.GetAssetPath(entry.texture);
+        if (!string.IsNullOrEmpty(texturePath)) metadata.sourceTextureGuid = AssetDatabase.AssetPathToGUID(texturePath);
         metadata.gridWidth = entry.gridWidth;
         metadata.gridDepth = entry.gridDepth;
+        // Editing changes the authored baseline; old refactor snapshots must not undo this edit later.
+        metadata.hasRefactorSourceTransform = false;
+        metadata.hasRefactorSourcePosition = false;
+        metadata.refactorVisualTransforms = new List<BuildingCardRefactorTransform>();
         metadata.editSettingsJson = JsonUtility.ToJson(settings);
         metadata.editPointsJson = JsonUtility.ToJson(new SavedEntry
         {
@@ -3842,8 +4183,10 @@ public sealed class BuildingCardTool : EditorWindow
                 rotation * (anchor * geometry.scaleFactor) + Vector3.up * (result.visualGroundLift * geometry.scaleFactor);
             collider.center = new Vector3(0f, result.clickCenterY, 0f);
             collider.size = new Vector3(geometry.colliderWidth, result.clickHeight, geometry.colliderDepth);
+            // UV0/crop remains unchanged when editing an existing mesh card.
+            var groundCenterLocal = ImageGroundCenterLocal(sourceMesh, entry.texture, result.rootPixel);
             var cameraOffset = ApplyCameraCompensation(root.transform, visual, collider, referenceCamera,
-                settings.alignVisualToColliderDiagonal, out var offsetSourceRotation, out var offsetSourceScale);
+                settings.alignVisualToColliderDiagonal, out var offsetSourceRotation, out var offsetSourceScale, groundCenterLocal);
             meshCopy = sourceMesh;
             if (saveEditedPrefabAsNew)
             {
@@ -3864,7 +4207,7 @@ public sealed class BuildingCardTool : EditorWindow
             savedSuccessfully = true;
             if (BuildingCardMetadataStore.TryLoad(sourcePath, out var metadata)) BuildingCardMetadataStore.Save(destination, metadata);
             SaveEditingParameters(destination, entry);
-            RememberCameraOffset(destination, cameraOffset, referenceCamera, offsetSourceRotation, offsetSourceScale, rootRebaseOffset);
+            RememberCameraOffset(destination, cameraOffset, referenceCamera, offsetSourceRotation, offsetSourceScale, rootRebaseOffset, groundCenterLocal);
             loadedEditingPrefab = prefab;
             prefabToEdit = prefab;
             return prefab;

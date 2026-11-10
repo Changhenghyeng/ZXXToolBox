@@ -27,6 +27,7 @@ namespace PrefabTools
 
         public static void WrapSelected()
         {
+            var usageTimer = ZXXToolUsageStats.Begin();
             var targets = Selection.gameObjects;
             if (targets == null || targets.Length == 0)
             {
@@ -124,6 +125,7 @@ namespace PrefabTools
                 AssetDatabase.Refresh();
             }
 
+            ZXXToolUsageStats.Complete("Normalize Prefab Root", success, usageTimer);
             var msg = $"规范化完成。成功: {success}";
             if (renormalized > 0) msg += $", 重新规范化: {renormalized}";
             if (saved > 0) msg += $", 存回 Prefab: {saved}";

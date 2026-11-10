@@ -70,6 +70,9 @@ Shader "Custom/Terrain Blend Mobile Transparent"
         _GlobalTint("Global Tint", Color) = (1, 1, 1, 1)
         _Saturation("Saturation", Range(0, 2)) = 1
         _Opacity("Overall Opacity", Range(0, 1)) = 0.5
+        [HideInInspector] _SrcBlend("Source Blend", Float) = 1
+        [HideInInspector] _DstBlend("Destination Blend", Float) = 0
+        [HideInInspector] _ZWrite("Depth Write", Float) = 1
 
     }
 
@@ -77,8 +80,8 @@ Shader "Custom/Terrain Blend Mobile Transparent"
     {
         Tags
         {
-            "RenderType" = "Transparent"
-            "Queue" = "Transparent"
+            "RenderType" = "Opaque"
+            "Queue" = "Geometry"
             "RenderPipeline" = "UniversalPipeline"
         }
 
@@ -88,8 +91,8 @@ Shader "Custom/Terrain Blend Mobile Transparent"
             Tags { "LightMode" = "UniversalForward" }
 
             Cull Back
-            Blend SrcAlpha OneMinusSrcAlpha
-            ZWrite Off
+            Blend [_SrcBlend] [_DstBlend]
+            ZWrite [_ZWrite]
             ZTest LEqual
 
             HLSLPROGRAM
@@ -165,6 +168,7 @@ Shader "Custom/Terrain Blend Mobile Transparent"
                 float _LodTransitionRatio;
                 float _Saturation;
                 float _Opacity;
+                float _ZWrite;
                 float _ShadowStrength;
             CBUFFER_END
 
@@ -886,11 +890,12 @@ Shader "Custom/Terrain Blend Mobile Transparent"
                     normalize(input.normalWS),
                     input.positionWS);
                 albedo = MixFog(albedo, input.fogFactor);
-                return half4(albedo, saturate((half)_Opacity));
+                return half4(albedo, _ZWrite > 0.5 ? 1.0h : saturate((half)_Opacity));
             }
             ENDHLSL
         }
     }
 
+    CustomEditor "X26Art.Editor.TerrainBlendOpacityShaderGUI"
     FallBack Off
 }
