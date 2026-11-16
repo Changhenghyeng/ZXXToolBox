@@ -186,3 +186,8 @@
 ## 通用桌面工具
 
 通用工具使用独立的 [DesktopTools~/SOURCE_INDEX.md](DesktopTools~/SOURCE_INDEX.md) 维护来源及哈希，不混入 Unity 源码映射。
+
+
+## DCC 插件
+
+Maya 等软件插件使用独立的 [DCCPlugins~/SOURCE_INDEX.md](DCCPlugins~/SOURCE_INDEX.md) 管理来源和哈希。

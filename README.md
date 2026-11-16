@@ -1,9 +1,9 @@
 # ZXX ToolBox
 
 
-## v0.9.0 — 2026-11-16
+## v0.10.0 — 2026-11-16
 
-新增独立的 [通用桌面工具模块](DesktopTools~/README.md)：AI 图片工作室、应用联网控制、素材搜图，包含源码、运行/打包说明及第三方许可。原 Unity 工具和 Shader 位置保持不变。逐项变化见 [更新日志](CHANGELOG.md)。
+新增独立 [DCC 插件模块](DCCPlugins~/README.md)：Maya 切线空间法线烘焙工具和选中网格批量 FBX 导出工具。现有 Unity 开发与通用桌面工具继续独立维护。详细变化见 [更新日志](CHANGELOG.md)。
 
 ## 模块导航
 
@@ -11,10 +11,11 @@
 |---|---|---|
 | Unity 开发 | Unity 2022.3+ / URP 14+ 编辑器工具、运行时组件与 Shader | 下方工具列表、[操作说明](Docs/工具使用说明.md) |
 | 通用桌面工具 | 独立 Windows 应用，不依赖 Unity | [DesktopTools~](DesktopTools~/README.md) |
+| DCC 插件 | Maya 法线数据烘焙、批量 FBX 导出 | [DCCPlugins~](DCCPlugins~/README.md) |
 
 ## Unity 模块安装
 
-通用桌面工具请按各自 README 单独运行；`DesktopTools~` 目录不会参与 Unity 导入。
+通用桌面工具与 DCC 插件请按各自 README 单独运行；`DesktopTools~` 和 `DCCPlugins~` 不参与 Unity 导入。
 
 将仓库 clone 到 Unity 项目的 `Assets/` 或 `Packages/` 目录下：
 
@@ -25,7 +26,7 @@ git clone https://github.com/Changhenghyeng/ZXXToolBox.git Assets/ZXXToolBox
 或通过 Unity Package Manager 以 git URL 导入：
 
 ```
-https://github.com/Changhenghyeng/ZXXToolBox.git#v0.9.0
+https://github.com/Changhenghyeng/ZXXToolBox.git#v0.10.0
 ```
 
 ---
@@ -151,6 +152,7 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.9.0
 
 ```
 ZXXToolBox/
+├── DCCPlugins~/ ← DCC 软件插件（Unity 忽略）
 ├── DesktopTools~/ ← 独立 Windows 工具（Unity 忽略）
 ├── Editor/     ← 待整理：大部分编辑器工具
 ├── Runtime/     ← 运行时组件
@@ -173,6 +175,7 @@ ZXXToolBox/
 
 | 目录 | 用途 | 说明 |
 |------|------|------|
+| `DCCPlugins~/` | **DCC 插件** | 按 Maya 等宿主软件分类，保留末尾 ~ |
 | `DesktopTools~/` | **通用桌面工具** | 独立 Python/.NET 应用；保留末尾 ~，避免 Unity 导入 |
 | 根目录各工具文件夹 | **Editor 工具** | 仅 Editor 下运行，入口在 `ArtTools > BIGBRO ToolBox` |
 | `Runtime/` | **运行时组件** | 需要 PlayMode 执行，对应公司项目 `HotUpdate/` 路径 |

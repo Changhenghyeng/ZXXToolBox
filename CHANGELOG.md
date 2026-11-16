@@ -1,5 +1,18 @@
 # Changelog
 
+## [v0.10.0] — 2026-11-16
+
+### 新增 DCC 插件
+
+- **Maya NormalTangentTool**：收录切线空间平滑法线 XY 写入 outlineData 的可编辑源码，包含固定量化分组、切线正交化、UV 补位和逐面顶点指派；补充操作入口、UV 通道约定与版本核对结果。
+- **Maya ExportSelectedMeshesToFBX**：收录选中对象及子级网格分别导出 FBX、菜单注册和安装逻辑；工作源码与通用 Maya scripts 副本一致。
+- 新增 `DCCPlugins~/Maya/`，首页形成 Unity / 通用桌面工具 / DCC 插件三类导航，建立独立源码哈希索引。
+- 明确现有两工具的切线导出设置冲突、UV 索引和菜单行为限制；此次不修改原有算法、不安装到 Maya，不复制个人 userSetup.py 或二进制字节码。
+
+验证：两份 Python 源码语法、依赖和来源哈希检查；尚未在 Maya 中测试运行或导出效果。
+
+
+
 ## [v0.9.0] — 2026-11-16
 
 ### 新增通用桌面工具模块
