@@ -1,0 +1,4 @@
+本程序使用 Python、Qt/PySide6、OpenCV、NumPy、Pillow 和 psd-tools 等开源组件。各组件许可见各目录。
+Qt/PySide6 为动态链接库；文件夹版依赖位于 _internal，单文件版将依赖及许可封装在 EXE 内，运行时临时解压加载。
+Qt/PySide6 项目和对应版本源码：https://code.qt.io/cgit/pyside/pyside-setup.git/ 和 https://code.qt.io/cgit/qt/
+开发工作区的源码和打包脚本位于 work/开发/素材搜图/源码，与成品分开存放。

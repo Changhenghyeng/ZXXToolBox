@@ -181,3 +181,8 @@
 - BuildingCardTool 与 Spine_Skeleton_LineClip 依赖 spine-unity；后者直接 include `Assets/Plugins/Spine/spine-unity/Runtime/spine-unity/Shaders/CGIncludes/Spine-Common.cginc`。第三方库不随源码同步上传，安装路径不同时需调整 include。
 - RockTools.Editor 通过 RockTools.Runtime 程序集名称引用运行时源码；所有 .meta 由各 Unity 项目自行生成，不随仓库分发。编辑器 asmdef 是发布整理时的配置转换，项目原文件保持原样。
 - 本次核对了源码复制、依赖文件及 Git 提交范围，未声称完成其他项目中的 Unity 编译或运行测试。
+
+
+## 通用桌面工具
+
+通用工具使用独立的 [DesktopTools~/SOURCE_INDEX.md](DesktopTools~/SOURCE_INDEX.md) 维护来源及哈希，不混入 Unity 源码映射。

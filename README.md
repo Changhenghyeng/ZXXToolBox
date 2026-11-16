@@ -1,13 +1,20 @@
 # ZXX ToolBox
 
 
-## v0.8.0 — 2026-11-10
+## v0.9.0 — 2026-11-16
 
-新增 Game View MP4 录屏、UI 叠加预览、本机使用统计，以及 8 个独立材质 Shader；更新建筑面片、路径生成、贴地烘焙和地形渲染。逐项变化见 [v0.8.0 更新日志](CHANGELOG.md#v080--2026-11-10)，原项目路径见 [源码位置索引](SOURCE_INDEX.md)，操作见 [工具使用说明](Docs/工具使用说明.md)。
+新增独立的 [通用桌面工具模块](DesktopTools~/README.md)：AI 图片工作室、应用联网控制、素材搜图，包含源码、运行/打包说明及第三方许可。原 Unity 工具和 Shader 位置保持不变。逐项变化见 [更新日志](CHANGELOG.md)。
 
-Unity 编辑器工具与 Shader 集合，适用于 **Unity 2022.3+ · URP 14+**。
+## 模块导航
 
-## 安装
+| 模块 | 内容 | 入口 |
+|---|---|---|
+| Unity 开发 | Unity 2022.3+ / URP 14+ 编辑器工具、运行时组件与 Shader | 下方工具列表、[操作说明](Docs/工具使用说明.md) |
+| 通用桌面工具 | 独立 Windows 应用，不依赖 Unity | [DesktopTools~](DesktopTools~/README.md) |
+
+## Unity 模块安装
+
+通用桌面工具请按各自 README 单独运行；`DesktopTools~` 目录不会参与 Unity 导入。
 
 将仓库 clone 到 Unity 项目的 `Assets/` 或 `Packages/` 目录下：
 
@@ -18,7 +25,7 @@ git clone https://github.com/Changhenghyeng/ZXXToolBox.git Assets/ZXXToolBox
 或通过 Unity Package Manager 以 git URL 导入：
 
 ```
-https://github.com/Changhenghyeng/ZXXToolBox.git#v0.8.0
+https://github.com/Changhenghyeng/ZXXToolBox.git#v0.9.0
 ```
 
 ---
@@ -144,6 +151,7 @@ https://github.com/Changhenghyeng/ZXXToolBox.git#v0.8.0
 
 ```
 ZXXToolBox/
+├── DesktopTools~/ ← 独立 Windows 工具（Unity 忽略）
 ├── Editor/     ← 待整理：大部分编辑器工具
 ├── Runtime/     ← 运行时组件
 │   ├── DayChangeTransition/
@@ -165,6 +173,7 @@ ZXXToolBox/
 
 | 目录 | 用途 | 说明 |
 |------|------|------|
+| `DesktopTools~/` | **通用桌面工具** | 独立 Python/.NET 应用；保留末尾 ~，避免 Unity 导入 |
 | 根目录各工具文件夹 | **Editor 工具** | 仅 Editor 下运行，入口在 `ArtTools > BIGBRO ToolBox` |
 | `Runtime/` | **运行时组件** | 需要 PlayMode 执行，对应公司项目 `HotUpdate/` 路径 |
 | `Shaders/` | **通用 Shader** | 独立于具体工具的渲染 Shader |

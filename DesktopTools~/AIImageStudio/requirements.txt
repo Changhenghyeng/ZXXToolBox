@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+requests
+python-dotenv
+python-multipart
+Pillow
+pywin32; sys_platform == "win32"
+pyinstaller>=6,<7

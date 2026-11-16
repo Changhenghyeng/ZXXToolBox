@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>应用联网控制</AssemblyName>
+    <RootNamespace>AppNetworkControl</RootNamespace>
+    <Version>1.1.1</Version>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <Authors>OpenAI Codex</Authors>
+    <Description>通过 Windows Defender Firewall 控制指定应用的联网权限。</Description>
+  </PropertyGroup>
+</Project>

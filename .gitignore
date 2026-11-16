@@ -69,3 +69,6 @@ Packages/
 *.unity
 *.scene
 *.asset
+
+# Explicit desktop source projects (Unity auto-generated projects remain ignored)
+!DesktopTools~/**/*.csproj

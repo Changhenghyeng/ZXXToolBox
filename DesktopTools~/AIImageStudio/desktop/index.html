@@ -1,0 +1,2809 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>我的 AI 出图工具</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Noto+Sans+SC:wght@300;400;500;600;700&family=Noto+Serif+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+/* ========== Leonardo / Krea 暗黑专业风 ========== */
+:root {
+  --bg:        #0a0a10;
+  --bg2:       #0f0f18;
+  --surface:   #13131c;
+  --surface2:  #181822;
+  --border:    rgba(255,255,255,.06);
+  --border2:   rgba(255,255,255,.10);
+  --text:      #ecedee;
+  --text2:     #9898a2;
+  --text3:     #5c5c66;
+  --purple:    #a259ff;
+  --purple2:   #7c3aed;
+  --amber:     #f59e0b;
+  --amber2:    #d97706;
+  --red:       #ef4444;
+  --green:     #22c55e;
+  --radius:    12px;
+  --radius-sm: 8px;
+  --font:      "Inter", "Noto Sans SC", system-ui, -apple-system, sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: var(--font);
+  color: var(--text);
+  background: var(--bg);
+  height: 100vh;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ===== App Shell ===== */
+.app {
+  display: flex;
+  height: 100vh;
+}
+
+/* ===== Left Rail ===== */
+.rail {
+  width: 56px;
+  min-width: 56px;
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 0;
+  gap: 4px;
+  z-index: 10;
+}
+.rail .logo {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  color: #fff;
+  display: grid; place-items: center;
+  font-size: 16px; font-weight: 700;
+  margin-bottom: 18px;
+  overflow: hidden;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: width .2s, height .2s, font-size .2s;
+}
+.rail .ico {
+  width: 40px; height: 40px;
+  border-radius: 10px;
+  display: grid; place-items: center;
+  color: var(--text3);
+  font-size: 18px;
+  cursor: pointer;
+  transition: all .2s cubic-bezier(.34,1.56,.64,1);
+}
+.rail .ico:hover { transform: scale(1.2); }
+.rail .ico:active { transform: scale(.85); }
+.rail .ico:hover, .rail .ico.active {
+  background: rgba(162,89,255,.12);
+  color: var(--purple);
+}
+.rail .spacer { flex: 1; }
+.rail .gear {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.04);
+  color: var(--text3);
+  display: grid; place-items: center;
+  cursor: pointer; font-size: 16px;
+  transition: all .2s ease;
+}
+.rail .gear:hover { background: rgba(255,255,255,.08); color: var(--text); transform: rotate(30deg); }
+
+/* ===== Left Panel ===== */
+.panel {
+  width: 380px;
+  min-width: 380px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.panel::-webkit-scrollbar { width: 4px; }
+.panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,.08); border-radius: 2px; }
+
+.panel-header {
+  padding: 24px 20px 16px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+.panel-header .brand {
+  font-size: 20px; font-weight: 700;
+  letter-spacing: -.01em;
+  color: var(--text);
+}
+.panel-header .sub {
+  font-size: 12px; color: var(--text3);
+  margin-top: 4px;
+  font-weight: 400;
+}
+
+/* field */
+.field { margin: 14px 20px 0; }
+.field label {
+  display: block;
+  font-size: 11px; font-weight: 600;
+  color: var(--text3); text-transform: uppercase;
+  letter-spacing: .06em; margin-bottom: 6px;
+}
+.field .hint {
+  font-size: 11px; color: var(--text3);
+  margin-bottom: 6px;
+}
+
+/* select */
+.field select {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface2);
+  font-family: var(--font);
+  font-size: 13px; font-weight: 500;
+  color: var(--text);
+  cursor: pointer; outline: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 2l5 5 5-5' fill='none' stroke='%239898a2' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 36px;
+  transition: border-color .15s, background-color .15s;
+}
+.field select:hover { border-color: var(--text3); background: var(--surface2); }
+.field select:focus { border-color: var(--purple); box-shadow: 0 0 0 3px rgba(162,89,255,.1); }
+.field select option {
+  background: var(--surface2);
+  color: var(--text);
+  padding: 10px;
+}
+.field select optgroup {
+  color: var(--text3);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+/* custom select */
+.custom-select { position: relative; user-select: none; }
+.cs-trigger {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface2);
+  cursor: pointer;
+  transition: border-color .15s, box-shadow .15s;
+}
+.cs-trigger:hover { border-color: var(--text3); }
+.custom-select.open .cs-trigger { border-color: var(--purple); box-shadow: 0 0 0 3px rgba(162,89,255,.1); }
+.cs-trigger .cs-text { font-size: 13px; font-weight: 500; color: var(--text); }
+.cs-trigger .cs-arrow { font-size: 11px; color: var(--text3); transition: transform .2s; }
+.custom-select.open .cs-arrow { transform: rotate(180deg); }
+
+.cs-drop {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 12px 40px rgba(0,0,0,.5);
+  max-height: 320px; overflow-y: auto;
+  display: none; z-index: 50;
+  padding: 4px;
+}
+.custom-select.open .cs-drop { display: block; }
+.cs-drop::-webkit-scrollbar { width: 3px; }
+.cs-drop::-webkit-scrollbar-thumb { background: rgba(255,255,255,.08); border-radius: 2px; }
+
+.cs-group-label {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text3);
+  padding: 10px 10px 4px;
+}
+.cs-opt {
+  padding: 8px 10px; border-radius: 6px;
+  font-size: 13px; color: var(--text2);
+  cursor: pointer;
+  transition: background .1s;
+}
+.cs-opt:hover { background: rgba(255,255,255,.04); color: var(--text); }
+.cs-opt.selected { color: var(--purple); font-weight: 500; }
+.cs-opt .cs-desc { font-size: 11px; color: var(--text3); margin-left: 4px; font-weight: 400; }
+.model-gear {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  display: inline-grid; place-items: center;
+  color: var(--text3); font-size: 14px;
+  cursor: pointer; flex-shrink: 0;
+  transition: all .2s ease;
+}
+.model-gear:hover {
+  background: rgba(255,255,255,.08);
+  color: var(--text);
+  transform: rotate(30deg);
+}
+
+/* textarea */
+.prompt-wrap {
+  margin: 14px 20px 0;
+  position: relative;
+}
+.prompt-wrap textarea {
+  width: 100%;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface2);
+  font-family: var(--font);
+  font-size: 14px; line-height: 1.6;
+  color: var(--text);
+  min-height: 110px;
+  resize: vertical;
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.prompt-wrap textarea:hover { border-color: var(--text3); }
+.prompt-wrap textarea:focus { border-color: var(--purple); box-shadow: 0 0 0 3px rgba(162,89,255,.1); }
+.prompt-wrap textarea::placeholder { color: var(--text3); }
+.prompt-wrap .char-count {
+  text-align: right; font-size: 11px;
+  color: var(--text3); margin-top: 4px;
+}
+
+/* refs grid */
+.refs-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.ref-card {
+  width: 88px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface2);
+  transition: border-color .15s, transform .15s ease;
+}
+.ref-new {
+  animation: popIn .25s ease;
+}
+.ref-removing {
+  animation: popOut .2s ease forwards;
+  pointer-events: none;
+}
+@keyframes popOut {
+  to { transform: scale(.5); opacity: 0; }
+}
+.ref-card:not(.ref-new):not(.ref-removing):hover { border-color: var(--border2); transform: translateY(-3px) scale(1.05); }
+.ref-card .thumb-wrap {
+  position: relative;
+  width: 100%; height: 88px;
+  background: #0a0a10;
+  cursor: pointer;
+}
+.ref-card .thumb-wrap img {
+  width: 100%; height: 100%;
+  object-fit: cover; display: block;
+}
+.ref-card .thumb-wrap .ref-x {
+  position: absolute; top: 3px; right: 3px;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: rgba(0,0,0,.7); color: #fff;
+  border: none; cursor: pointer;
+  font-size: 11px; line-height: 1;
+  display: grid; place-items: center;
+  opacity: 0; transition: opacity .15s;
+}
+.ref-card:hover .thumb-wrap .ref-x { opacity: 1; }
+.ref-card .thumb-wrap .ref-x:hover { background: var(--red); }
+.ref-card .ref-label {
+  width: 100%; padding: 6px 8px;
+  border: none; border-top: 1px solid var(--border);
+  font-family: var(--font); font-size: 11px;
+  color: var(--text); background: transparent;
+  outline: none;
+}
+.ref-card .ref-label:focus { border-top-color: var(--purple); }
+.ref-card .ref-label::placeholder { color: var(--text3); }
+
+.ref-add-card {
+  width: 88px; height: 110px;
+  border: 1.5px dashed rgba(255,255,255,.1);
+  border-radius: var(--radius-sm);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  cursor: pointer; color: var(--text3);
+  transition: all .15s; gap: 2px;
+}
+.ref-add-card:hover {
+  border-color: var(--purple); color: var(--purple);
+  background: rgba(162,89,255,.04);
+}
+.ref-add-card .add-icon { font-size: 22px; font-weight: 300; }
+.ref-add-card .add-text { font-size: 10px; }
+
+.refs-grid.drag-over {
+  outline: 2px dashed var(--purple);
+  outline-offset: 4px;
+  border-radius: var(--radius);
+}
+
+/* generate button */
+.gen-btn {
+  margin: 18px 20px;
+  height: 48px; width: calc(100% - 40px);
+  border-radius: var(--radius);
+  border: none;
+  background: linear-gradient(135deg, var(--purple), #6366f1);
+  color: #fff; font-size: 15px; font-weight: 600;
+  cursor: pointer; font-family: var(--font);
+  letter-spacing: .02em;
+  display: flex; align-items: center; justify-content: center;
+  gap: 8px;
+  transition: transform .2s cubic-bezier(.34,1.56,.64,1), filter .2s, box-shadow .3s;
+  box-shadow: 0 4px 20px -4px rgba(162,89,255,.4);
+  animation: glowPulse 2.5s ease-in-out infinite;
+}
+.gen-btn:hover { filter: brightness(1.15); transform: translateY(-2px) scale(1.02); animation: none; box-shadow: 0 6px 30px -2px rgba(162,89,255,.6); }
+.gen-btn:active { transform: scale(.94); transition: transform .1s; }
+.gen-btn:disabled { opacity: .4; cursor: not-allowed; filter: none; transform: none; animation: none; }
+
+#scrollTopBtn:hover { filter: brightness(1.15); transform: translateX(-50%) scale(1.08) !important; box-shadow: 0 6px 28px rgba(162,89,255,.6); }
+#scrollTopBtn:active { transform: translateX(-50%) scale(.95) !important; }
+/* status */
+.status-bar {
+  margin: 8px 20px;
+  font-size: 12px; color: var(--text3);
+  min-height: 18px;
+  transition: color .3s;
+}
+.status-bar.error { color: var(--red); }
+.status-bar.ok { color: var(--green); }
+
+/* ===== Unviewed dot + shake ===== */
+@keyframes dot-breathe {
+  0%, 100% { box-shadow: 0 0 3px 1px rgba(34,197,94,.5); }
+  50% { box-shadow: 0 0 12px 5px rgba(34,197,94,.35); }
+}
+@keyframes card-shake {
+  0%, 100% { transform: rotate(0deg); }
+  1% { transform: rotate(-1.6deg); }
+  5% { transform: rotate(1.4deg); }
+  9% { transform: rotate(-1.2deg); }
+  13% { transform: rotate(1.6deg); }
+  17% { transform: rotate(-1deg); }
+  21% { transform: rotate(0.8deg); }
+  25% { transform: rotate(-0.4deg); }
+  29% { transform: rotate(0.3deg); }
+  33% { transform: rotate(0deg); }
+  50%, 100% { transform: rotate(0deg); }
+}
+.unviewed-dot {
+  position: absolute; top: 8px; left: 8px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--green); z-index: 10;
+  pointer-events: none;
+  animation: dot-breathe 1.6s ease-in-out infinite;
+}
+.card-shaking {
+  animation: card-shake 1s ease-in-out infinite !important;
+}
+
+/* ===== Main Area ===== */
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.topbar {
+  display: flex; align-items: center;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border);
+  height: 52px;
+  flex-shrink: 0;
+}
+.topbar .title {
+  font-size: 14px; font-weight: 600;
+  color: var(--text);
+}
+.topbar .count {
+  margin-left: auto;
+  font-size: 12px; color: var(--text3);
+}
+/* batch mode toolbar */
+.batch-bar {
+  display: none; align-items: center; gap: 10px;
+  margin-left: 12px;
+}
+.batch-bar.active { display: flex; }
+.batch-bar button {
+  padding: 5px 12px; border-radius: 6px;
+  font-size: 12px; font-family: var(--font);
+  cursor: pointer; transition: all .15s;
+  border: 1px solid var(--border);
+  background: transparent; color: var(--text2);
+}
+.batch-bar button:hover { background: rgba(255,255,255,.06); color: var(--text); }
+.batch-bar .batch-del-btn {
+  background: rgba(239,68,68,.15);
+  border-color: rgba(239,68,68,.3);
+  color: var(--red);
+}
+.batch-bar .batch-del-btn:hover { background: rgba(239,68,68,.3); }
+/* batch checkbox */
+.batch-checkbox {
+  display: none; position: absolute; top: 8px; left: 8px;
+  z-index: 6; width: 22px; height: 22px;
+  border-radius: 6px; cursor: pointer;
+  background: rgba(0,0,0,.5); border: 2px solid rgba(255,255,255,.25);
+  transition: all .15s; backdrop-filter: blur(4px);
+}
+.batch-checkbox.visible { display: block; }
+.batch-checkbox.checked {
+  background: var(--purple); border-color: var(--purple);
+}
+.batch-checkbox.checked::after {
+  content: ""; position: absolute;
+  top: 3px; left: 6px;
+  width: 6px; height: 11px;
+  border: 2px solid #fff;
+  border-top: none; border-left: none;
+  transform: rotate(45deg);
+}
+.feed-item.batch-mode { cursor: pointer; }
+.feed-item.batch-mode:hover { border-color: rgba(162,89,255,.5); }
+.feed-item.selected {
+  border-color: var(--purple) !important;
+  box-shadow: 0 0 0 1px var(--purple);
+}
+
+.gen-card {
+  position: relative;
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  animation: scaleIn .35s ease;
+  transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+  cursor: pointer;
+}
+.gen-card:hover { border-color: var(--border2); transform: translateY(-4px) scale(1.02); box-shadow: 0 12px 32px rgba(0,0,0,.4); }
+.gen-card .img-wrap {
+  position: relative;
+  aspect-ratio: 1/1;
+  background: #0a0a10;
+  display: grid; place-items: center;
+  overflow: hidden;
+}
+.gen-card .img-wrap img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
+.progress-ring-fill {
+  transition: stroke-dashoffset .5s ease;
+  animation: ring-pulse 2s ease-in-out infinite;
+}
+.progress-ring-text {
+  animation: text-pulse 1.5s ease-in-out infinite;
+}
+@keyframes ring-pulse {
+  0%, 100% { opacity: .7; }
+  50% { opacity: 1; }
+}
+@keyframes text-pulse {
+  0%, 100% { opacity: .6; }
+  50% { opacity: 1; }
+}
+.gen-card .meta {
+  padding: 12px 14px;
+}
+.gen-card .meta .p {
+  font-size: 13px; color: var(--text);
+  line-height: 1.4;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.gen-card .info {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0 14px 12px;
+  font-size: 11px; color: var(--text3);
+}
+.gen-card .info a {
+  color: var(--text2); cursor: pointer; text-decoration: none;
+  padding: 4px 8px; border-radius: 4px; transition: all .15s;
+}
+.gen-card .info a {
+  opacity: 0; transition: opacity .15s;
+}
+.gen-card:hover .info a { opacity: 1; }
+/* card cancel button */
+.card-cancel-btn {
+  position: absolute; top: 6px; right: 6px;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  border: none; background: rgba(0,0,0,.6);
+  color: rgba(255,255,255,.85);
+  cursor: pointer;
+  display: grid; place-items: center;
+  opacity: 0; transition: opacity .15s;
+  backdrop-filter: blur(4px);
+  z-index: 5;
+}
+.gen-card:hover .card-cancel-btn { opacity: 1; }
+.card-cancel-btn:hover { background: var(--red); color: #fff; }
+
+/* gallery feed */
+.feed {
+  flex: 1; overflow-y: auto; overflow-x: hidden;
+  padding: 20px 24px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: max-content;
+  gap: 16px;
+}
+.feed::-webkit-scrollbar { width: 4px; }
+.feed::-webkit-scrollbar-thumb { background: rgba(255,255,255,.06); border-radius: 2px; }
+
+/* history items inside feed */
+.feed-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+  position: relative;
+}
+.feed-item:hover { border-color: var(--border2); transform: translateY(-6px) scale(1.03); box-shadow: 0 16px 40px rgba(0,0,0,.5); }
+.feed-item:active { transform: scale(.96); }
+.feed-item .view-detail { display: none; }
+.feed-item:hover .view-detail { display: flex; }
+
+/* detail modal */
+.detail-overlay {
+  position: fixed; inset: 0; z-index: 55;
+  background: rgba(0,0,0,.85);
+  display: none; align-items: center; justify-content: center;
+  cursor: default;
+}
+.detail-overlay.open { display: flex; }
+.detail-card {
+  display: flex; gap: 24px;
+  max-width: 900px; max-height: 80vh;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius);
+  padding: 24px;
+}
+.detail-card .detail-img {
+  flex: 1; min-width: 0;
+  display: grid; place-items: center;
+}
+.detail-card .detail-img img {
+  max-width: 100%; max-height: 70vh;
+  object-fit: contain; border-radius: 6px;
+  cursor: zoom-in;
+}
+.detail-card .detail-info {
+  width: 280px; flex-shrink: 0;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.detail-card .detail-prompt { font-size: 14px; color: var(--text); line-height: 1.6; }
+.detail-card .detail-meta { font-size: 12px; color: var(--text3); }
+.detail-card .detail-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: auto; }
+.detail-card .detail-actions button {
+  padding: 6px 14px; border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent; color: var(--text2);
+  font-size: 12px; cursor: pointer; font-family: var(--font);
+  transition: all .15s;
+}
+.detail-card .detail-actions button:hover { background: rgba(255,255,255,.04); color: var(--text); }
+.detail-close {
+  position: absolute; top: 16px; right: 24px;
+  color: rgba(255,255,255,.6); font-size: 28px;
+  cursor: pointer; z-index: 56;
+}
+.detail-close:hover { color: #fff; }
+.feed-item .thumb {
+  position: relative;
+  aspect-ratio: 1/1; background: #0a0a10;
+  overflow: hidden;
+}
+.feed-item .thumb img {
+  position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%;
+  object-fit: cover; display: block;
+}
+.feed-item .info {
+  padding: 10px 12px 12px;
+}
+.feed-item .info .p {
+  font-size: 13px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; line-height: 1.5;
+}
+.feed-item .info .meta-row {
+  font-size: 11px; color: var(--text3);
+  margin-top: 4px;
+  display: flex; justify-content: space-between;
+}
+.feed-item .item-actions {
+  position: absolute; top: 6px; right: 6px;
+  display: flex; gap: 2px; opacity: 0;
+  transition: opacity .15s; z-index: 5;
+  background: rgba(0,0,0,.6);
+  border-radius: 8px; padding: 4px;
+  backdrop-filter: blur(6px);
+}
+.feed-item:hover .item-actions { opacity: 1; }
+.feed-item .item-actions button {
+  width: 30px; height: 30px;
+  padding: 0; border-radius: 6px;
+  border: none; cursor: pointer;
+  color: rgba(255,255,255,.7);
+  background: transparent;
+  display: grid; place-items: center;
+  transition: all .15s;
+}
+.feed-item .item-actions button:hover { color: #fff; }
+.feed-item .item-actions button svg { display: block; }
+.feed-item .item-actions button:hover { background: rgba(255,255,255,.08); }
+.feed-item .item-actions .act-del:hover { background: rgba(239,68,68,.3); }
+.feed-item .ref-badge {
+  position: absolute; top: 6px; left: 6px;
+  background: rgba(0,0,0,.6); color: #fff;
+  font-size: 10px; padding: 2px 6px;
+  border-radius: 4px; cursor: pointer; z-index: 2;
+}
+.ref-badge:hover { background: var(--green); }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes scaleIn {
+  0%   { opacity: 0; transform: scale(.7); }
+  70%  { opacity: 1; transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+@keyframes bounceIn {
+  0%   { opacity: 0; transform: scale(.3); }
+  50%  { opacity: 1; transform: scale(1.08); }
+  70%  { transform: scale(.94); }
+  85%  { transform: scale(1.03); }
+  100% { transform: scale(1); }
+}
+@keyframes slideDown {
+  0%   { opacity: 0; transform: translateY(-32px); }
+  70%  { opacity: 1; transform: translateY(4px); }
+  85%  { transform: translateY(-2px); }
+  100% { transform: translateY(0); }
+}
+@keyframes popIn {
+  0%   { transform: scale(.7); opacity: 0; }
+  60%  { transform: scale(1.04); opacity: 1; }
+  100% { transform: scale(1); }
+}
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 4px 20px -4px rgba(162,89,255,.4); }
+  50%      { box-shadow: 0 4px 36px -2px rgba(162,89,255,.7), 0 0 60px -10px rgba(162,89,255,.3); }
+}
+
+.empty-state {
+  grid-column: 1 / -1;
+  text-align: center; padding: 80px 20px;
+  color: var(--text3);
+}
+.empty-state .icon { font-size: 40px; margin-bottom: 12px; opacity: .5; }
+.empty-state p { font-size: 14px; }
+
+/* spinner */
+.spinner {
+  width: 28px; height: 28px;
+  border: 2px solid rgba(255,255,255,.08);
+  border-top-color: var(--purple);
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* debug log */
+.log-toggle {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 0; cursor: pointer;
+  font-size: 11px; font-weight: 600; color: var(--text3);
+  text-transform: uppercase; letter-spacing: .06em;
+  transition: color .15s;
+}
+.log-toggle:hover { color: var(--text); }
+.log-toggle .arrow { transition: transform .15s; font-size: 9px; }
+.log-toggle.open .arrow { transform: rotate(90deg); }
+
+.log-body { display: none; margin-top: 6px; }
+.log-body.open { display: block; }
+
+.log-toolbar {
+  display: flex; gap: 6px; margin-bottom: 8px;
+}
+.log-toolbar button, .log-toolbar label {
+  padding: 4px 10px; border-radius: 4px;
+  border: 1px solid var(--border);
+  background: transparent; color: var(--text3);
+  font-size: 10px; cursor: pointer; font-family: var(--font);
+  transition: all .15s;
+}
+.log-toolbar button:hover, .log-toolbar label:hover { border-color: var(--border2); color: var(--text); }
+
+.log-list {
+  max-height: 200px; overflow-y: auto;
+  font-family: "SF Mono", "JetBrains Mono", Consolas, monospace;
+  font-size: 10px; line-height: 1.5;
+  scrollbar-width: none;
+}
+.log-list::-webkit-scrollbar { display: none; }
+
+.log-row {
+  display: flex; gap: 6px; padding: 2px 0;
+  white-space: pre-wrap; word-break: break-all;
+}
+.log-row .tag {
+  flex-shrink: 0; width: 26px; height: 16px;
+  font-size: 8px; font-weight: 700;
+  display: grid; place-items: center;
+  border-radius: 3px;
+}
+.log-row .tag.APP { background: rgba(162,89,255,.2); color: #b794ff; }
+.log-row .tag.API { background: rgba(245,158,11,.15); color: #fbbf77; }
+.log-row .msg { color: #787880; }
+.log-row.warn { background: rgba(245,158,11,.04); }
+.log-row.err { background: rgba(239,68,68,.04); }
+
+/* lightbox */
+.lightbox {
+  display: none; position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,.92); cursor: zoom-out;
+  animation: lbFade .2s ease;
+}
+.lightbox.show { display: flex; align-items: center; justify-content: center; }
+.lightbox img {
+  max-width: 95vw; max-height: 95vh;
+  object-fit: contain;
+  box-shadow: 0 4px 40px rgba(0,0,0,.5);
+  cursor: default;
+  transform-origin: center center;
+  transition: transform .1s ease;
+}
+.lightbox img.dragging { transition: none; }
+.lightbox .close {
+  position: absolute; top: 20px; right: 28px;
+  color: rgba(255,255,255,.6); font-size: 32px;
+  cursor: pointer; line-height: 1;
+  transition: color .15s;
+}
+.lightbox .close:hover { color: #fff; }
+.lightbox .nav-arrow {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  color: rgba(255,255,255,.4); font-size: 40px;
+  cursor: pointer; padding: 10px 16px;
+  user-select: none; z-index: 2;
+  transition: color .15s;
+}
+.lightbox .nav-arrow:hover { color: #fff; }
+.lb-action-btn {
+  padding: 6px 14px; border-radius: 6px;
+  border: 1px solid rgba(255,255,255,.15);
+  background: rgba(0,0,0,.5); color: rgba(255,255,255,.7);
+  font-size: 12px; cursor: pointer; font-family: var(--font);
+  transition: all .15s; display: flex; align-items: center; gap: 4px;
+}
+.lb-action-btn:hover { background: rgba(255,255,255,.1); color: #fff; }
+.lightbox .nav-prev { left: 10px; }
+.lightbox .nav-next { right: 10px; }
+@keyframes lbFade { from { opacity: 0; } to { opacity: 1; } }
+
+/* settings modal */
+.modal {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.6);
+  display: none; align-items: center; justify-content: center;
+  z-index: 60;
+}
+.modal.open { display: flex; }
+.modal.open .box { animation: scaleIn .25s ease; }
+.modal .box {
+  width: 400px; background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius);
+  padding: 24px;
+}
+.modal h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
+.modal label { display: block; font-size: 12px; color: var(--text3); margin: 12px 0 4px; }
+.modal input, .modal select {
+  width: 100%; padding: 10px 12px;
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text); font-family: var(--font);
+  font-size: 13px; outline: none;
+}
+.modal input:focus, .modal select:focus { border-color: var(--purple); }
+.modal .btn-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+.modal .btn-row button {
+  padding: 8px 18px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border2);
+  background: transparent; color: var(--text2);
+  font-size: 13px; cursor: pointer; font-family: var(--font);
+}
+.modal .btn-row .primary {
+  background: var(--purple); color: #fff; border-color: var(--purple);
+}
+.modal .btn-row .primary:hover { background: var(--purple2); }
+.data-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px; }
+.data-card { border:1px solid var(--border2); background:var(--surface); border-radius:10px; padding:12px; }
+.data-card .name { font-size:12px; color:var(--text3); }
+.data-card .value { font-size:16px; color:var(--text); font-weight:600; margin-top:5px; }
+.data-path { margin-top:12px; padding:10px; border-radius:8px; background:var(--surface); border:1px solid var(--border); color:var(--text3); font:11px Consolas,monospace; word-break:break-all; }
+.data-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:14px; }
+.data-actions button { padding:9px; border:1px solid var(--border2); border-radius:8px; background:var(--surface); color:var(--text2); cursor:pointer; font-family:var(--font); }
+.data-actions button:hover { border-color:var(--purple); color:var(--text); }
+
+/* model manager */
+.model-manager-box {
+  width: 440px; max-height: 75vh;
+  display: flex; flex-direction: column;
+}
+.model-manager-box *::-webkit-scrollbar { display: none; }
+.model-manager-box * { scrollbar-width: none; }
+.mm-link {
+  background: none; border: none; color: var(--purple);
+  font-size: 12px; cursor: pointer;
+  font-family: var(--font);
+}
+.mm-link:hover { opacity: .7; }
+
+.mm-group { margin-bottom: 20px; }
+.mm-group-title {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text3); margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.mm-row {
+  display: flex; align-items: center;
+  padding: 8px 0;
+  cursor: pointer; user-select: none;
+}
+.mm-row .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--purple);
+  margin-right: 12px; flex-shrink: 0;
+  transition: background .15s, transform .2s cubic-bezier(.34,1.56,.64,1);
+}
+.mm-row:not(.off) .dot { transform: scale(1); }
+.mm-row.off .dot { transform: scale(.5); }
+.mm-row.off .dot { background: rgba(255,255,255,.12); }
+.mm-row .info { flex: 1; min-width: 0; }
+.mm-row .name {
+  font-size: 13px; color: var(--text);
+  transition: color .15s;
+}
+.mm-row.off .name { color: var(--text3); }
+.mm-row .desc {
+  font-size: 11px; color: var(--text3);
+  margin-top: 2px;
+  transition: color .15s;
+}
+.mm-row.off .desc { color: rgba(92,92,102,.4); }
+
+/* toast */
+.toast {
+  position: fixed; top: 50%; left: 50%;
+  transform: translate(-50%,-50%);
+  background: rgba(0,0,0,.88); color: #fff;
+  border: 1px solid rgba(255,255,255,.2);
+  padding: 16px 32px; border-radius: 12px;
+  font-size: 15px; font-weight: 500;
+  font-family: var(--font);
+  z-index: 70; pointer-events: none;
+  opacity: 0; transition: opacity .25s, transform .3s cubic-bezier(.34,1.56,.64,1);
+  transform: translate(-50%,-50%) translateY(12px);
+  box-shadow: 0 8px 32px rgba(0,0,0,.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.toast.show {
+  opacity: 1;
+  transform: translate(-50%,-50%) translateY(0);
+}
+
+/* responsive */
+@media (max-width: 900px) {
+  .panel { width: 320px; min-width: 320px; }
+}
+@media (max-width: 700px) {
+  .app { flex-direction: column; }
+  .rail { display: none; }
+  .panel { width: 100%; min-width: 100%; max-height: 50vh; }
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ====== Left Rail ====== -->
+  <aside class="rail">
+    <div class="logo" id="logoIcon">AI</div>
+    <div class="spacer"></div>
+    <div class="ico" id="openDataManager" title="本地数据">▣</div>
+    <div class="gear" id="openSettings" title="设置">⚙</div>
+  </aside>
+
+  <!-- ====== Left Panel ====== -->
+  <aside class="panel" id="dropPanel">
+    <div class="panel-header">
+      <div class="brand">AI 出图</div>
+      <div class="sub">Image Studio · v1.1.5</div>
+    </div>
+
+    <div class="field">
+      <label style="display:flex;align-items:center;justify-content:space-between;">
+        <span>模型</span>
+        <span style="display:flex;align-items:center;gap:8px;">
+          <span id="modelRefreshBtn" class="model-gear" title="刷新官网模型与价格" onclick="event.stopPropagation(); refreshModelsAndPrices(true);">↻</span>
+          <span id="modelSettingsBtn" class="model-gear" title="管理模型显示/隐藏" onclick="event.stopPropagation(); openModelManager();">⚙</span>
+        </span>
+      </label>
+      <div class="custom-select" id="modelSelect">
+        <div class="cs-trigger" id="modelTrigger" onclick="toggleCustomSelect('modelSelect')">
+          <span class="cs-text">nano-banana-2</span>
+          <span class="cs-arrow">▾</span>
+        </div>
+        <div class="cs-drop" id="modelDrop">
+          <div class="cs-group-label">Nano Banana</div>
+          <div class="cs-opt" data-value="nano-banana">nano-banana <span class="cs-desc">基础版</span></div>
+          <div class="cs-opt" data-value="nano-banana-fast">nano-banana-fast <span class="cs-desc">快速版</span></div>
+          <div class="cs-opt" data-value="nano-banana-pro">nano-banana-pro <span class="cs-desc">推荐 · 1–4K</span></div>
+          <div class="cs-opt" data-value="nano-banana-pro-vt">nano-banana-pro-vt <span class="cs-desc">4K</span></div>
+          <div class="cs-opt" data-value="nano-banana-pro-cl">nano-banana-pro-cl <span class="cs-desc">4K</span></div>
+          <div class="cs-opt" data-value="nano-banana-pro-vip">nano-banana-pro-vip <span class="cs-desc">付费</span></div>
+          <div class="cs-opt selected" data-value="nano-banana-2">nano-banana-2 <span class="cs-desc">第二代</span></div>
+          <div class="cs-opt" data-value="nano-banana-2-cl">nano-banana-2-cl <span class="cs-desc">1–2K</span></div>
+          <div class="cs-opt" data-value="nano-banana-2-4k-cl">nano-banana-2-4k-cl <span class="cs-desc">4K</span></div>
+          <div class="cs-group-label">GPT Image</div>
+          <div class="cs-opt" data-value="gpt-image-1.5">gpt-image-1.5</div>
+          <div class="cs-opt" data-value="gpt-image-2">gpt-image-2 <span class="cs-desc">ChatGPT Image 2.0</span></div>
+          <div class="cs-opt" data-value="gpt-image-2-vip">gpt-image-2-vip <span class="cs-desc">付费</span></div>
+          <div class="cs-group-label">Flux</div>
+          <div class="cs-opt" data-value="flux-pro">flux-pro</div>
+          <div class="cs-opt" data-value="flux-pro-1.1">flux-pro-1.1</div>
+        </div>
+      </div>
+      <select id="model" hidden></select>
+    </div>
+
+    <div class="field">
+      <label>参考图 · 最多 6 张</label>
+      <div class="refs-grid" id="refsGrid">
+        <div class="ref-add-card" id="refAdd" onclick="document.getElementById('refFileInput').click()">
+          <div class="add-icon">+</div>
+          <div class="add-text">添加</div>
+        </div>
+        <input type="file" id="refFileInput" accept="image/*" multiple hidden />
+      </div>
+    </div>
+
+    <div class="prompt-wrap">
+      <div style="display:flex;align-items:flex-start;gap:8px;">
+        <textarea id="prompt" placeholder="描述你想生成的画面…&#10;支持 Ctrl+V 粘贴图片，或拖拽到参考图区域" style="flex:1;"></textarea>
+      </div>
+      <div class="char-count" id="charCount">0 字</div>
+    </div>
+
+    <div class="field">
+      <label>宽高比</label>
+      <select id="aspectRatio">
+        <option value="auto" selected>自动</option>
+        <option value="1:1">1:1 正方形</option>
+        <option value="16:9">16:9 横屏</option>
+        <option value="9:16">9:16 竖屏</option>
+        <option value="4:3">4:3 横屏</option>
+        <option value="3:4">3:4 竖屏</option>
+        <option value="3:2">3:2 横屏</option>
+        <option value="2:3">2:3 竖屏</option>
+        <option value="21:9">21:9 超宽</option>
+      </select>
+    </div>
+
+    <div style="display:flex;gap:10px;margin:0 20px;">
+      <div class="field" style="flex:1;">
+        <label>分辨率</label>
+        <select id="imageSize">
+          <option value="" selected>默认</option>
+          <option value="1K">1K</option>
+          <option value="2K">2K</option>
+          <option value="4K">4K</option>
+        </select>
+      </div>
+      <div class="field" style="flex:1;">
+        <label>张数</label>
+        <select id="count">
+          <option value="1" selected>1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+        </select>
+      </div>
+    </div>
+
+    <button class="gen-btn" id="btn" onclick="generate()" style="margin:18px 20px;">✨ 生成图片</button>
+
+    <div class="status-bar" id="status"></div>
+
+    <div id="pingBar" style="margin:0 20px 8px;font-size:11px;color:var(--text3);display:flex;gap:12px;flex-wrap:wrap;"></div>
+
+    <div style="margin:0 20px 16px;">
+      <div class="log-toggle" id="logToggle" onclick="toggleLogs()">
+        <span>调试日志</span>
+        <span class="arrow">▸</span>
+      </div>
+      <div class="log-body" id="logBody">
+        <div class="log-toolbar">
+          <button onclick="fetchLogs()">刷新</button>
+          <label><input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()"> 自动刷新</label>
+        </div>
+        <div class="log-list" id="logLines"></div>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- ====== Main Area ====== -->
+  <main class="main">
+    <div class="topbar">
+      <div class="title">全部作品</div>
+      <div class="batch-bar" id="batchBar">
+        <button onclick="toggleSelectAll()" id="batchSelectBtn">全选</button>
+        <button class="batch-del-btn" onclick="batchDelete()" id="batchDelBtn">删除已选</button>
+        <button onclick="toggleBatchMode()">取消</button>
+      </div>
+      <button id="batchModeBtn" onclick="toggleBatchMode()" style="margin-left:14px;padding:4px 10px;border-radius:6px;font-size:11px;font-family:var(--font);cursor:pointer;background:transparent;border:1px solid var(--border);color:var(--text3);transition:all .15s;" title="批量管理">☰ 管理</button>
+      <div class="count" id="historyCount"></div>
+    </div>
+    <div class="feed" id="feed"></div>
+    <button id="scrollTopBtn" onclick="document.getElementById('feed').scrollTo({top:0,behavior:'smooth'})" title="回到顶部" style="position:fixed;bottom:24px;left:calc((436px + 100vw) / 2 - 2px);transform:translateX(-50%) scale(0.85);width:52px;height:52px;border-radius:10px;background:var(--purple);border:none;color:#fff;cursor:pointer;z-index:30;opacity:0;pointer-events:none;font-size:22px;font-weight:700;transition:opacity .25s ease,transform .25s cubic-bezier(.34,1.56,.64,1),box-shadow .25s ease;box-shadow:0 4px 20px rgba(162,89,255,.45);">↑</button>
+  </main>
+
+</div>
+
+<!-- Model Manager Modal -->
+<div class="modal" id="modelManager">
+  <div class="box model-manager-box">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+      <h2 style="font-size:16px;font-weight:600;margin:0;">管理模型</h2>
+      <div style="display:flex;gap:12px;">
+        <button class="mm-link" onclick="modelManagerSelectAll()">全部显示</button>
+        <button class="mm-link" onclick="modelManagerDeselectAll()">全部隐藏</button>
+      </div>
+    </div>
+    <div id="modelChecklist" style="flex:1;overflow-y:auto;"></div>
+    <div class="btn-row" style="justify-content:flex-end;margin-top:16px;">
+      <button class="primary" id="closeModelManager">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div class="modal" id="settings">
+  <div class="box" style="max-height:80vh;overflow-y:auto;scrollbar-width:none;">
+    <h2>设置</h2>
+
+    <label>左上角图标</label>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <input type="text" id="logoText" placeholder="AI / ✨ / 🎨" style="flex:1;">
+      <input type="number" id="logoSize" placeholder="36" min="24" max="64" style="width:64px;">
+      <span style="font-size:11px;color:var(--text3);">px</span>
+      <div id="logoBgSwatch" style="width:36px;height:36px;border-radius:6px;cursor:pointer;border:1px solid var(--border2);flex-shrink:0;" onclick="document.getElementById('logoBg').click()"></div>
+      <input type="color" id="logoBg" value="#a259ff" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+    </div>
+    <div style="display:flex;gap:8px;margin-top:6px;align-items:center;">
+      <input type="file" id="logoImage" accept="image/*" style="display:none;">
+      <button type="button" id="logoImageBtn" style="padding:6px 12px;border:1px solid var(--border2);border-radius:var(--radius-sm);background:var(--surface);color:var(--text2);cursor:pointer;font-size:12px;">上传图片</button>
+      <button type="button" id="logoImageClear" style="padding:6px 12px;border:1px solid var(--border2);border-radius:var(--radius-sm);background:var(--surface);color:var(--text3);cursor:pointer;font-size:12px;">清除图片</button>
+    </div>
+
+    <label style="margin-top:16px;">API Key</label>
+    <div style="display:flex;gap:6px;">
+      <input type="text" id="apiKey" placeholder="sk-..." style="flex:1;" spellcheck="false">
+      <button type="button" id="toggleKeyView" style="padding:10px 12px;border:1px solid var(--border2);border-radius:var(--radius-sm);background:var(--surface);color:var(--text3);cursor:pointer;font-size:13px;" title="隐藏/显示">👁</button>
+    </div>
+    <label>Host</label>
+    <select id="host">
+      <option value="">自动选择（最快可用）</option>
+      <option value="https://api.grsai.ai">https://api.grsai.ai</option>
+      <option value="https://api.grsai.com">https://api.grsai.com</option>
+      <option value="https://grsai.dakka.com.cn">https://grsai.dakka.com.cn</option>
+    </select>
+    <div style="margin-top:14px;padding:12px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.02);">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+        <div>
+          <div style="font-size:11px;color:var(--text3);">Grsai 官方 API Key 余额</div>
+          <div id="officialBalance" style="font-size:20px;font-weight:650;margin-top:3px;">点击查询</div>
+        </div>
+        <button type="button" id="refreshBalanceBtn" onclick="refreshOfficialBalance()" style="padding:7px 10px;border:1px solid var(--border2);border-radius:7px;background:var(--surface);color:var(--text2);cursor:pointer;">查询余额</button>
+      </div>
+      <div style="margin-top:10px;">
+        <button type="button" id="openGrsaiBtn" onclick="openOfficialPage()" style="width:100%;padding:10px 12px;border:1px solid rgba(162,89,255,.45);border-radius:8px;background:rgba(162,89,255,.12);color:var(--text);cursor:pointer;font-weight:600;">在 Chrome 中打开 Grsai 账户中心</button>
+        <div style="font-size:11px;color:var(--text3);margin-top:7px;line-height:1.5;">Chrome 会让你选择个人资料或访客模式，选好后自动进入官网。</div>
+      </div>
+    </div>
+    <p style="font-size:12px;color:var(--text3);margin-top:10px;">Key 仅存于本地浏览器 localStorage。</p>
+    <div class="btn-row">
+      <button id="closeSettings">取消</button>
+      <button class="primary" id="saveSettings">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Local Data Modal -->
+<div class="modal" id="dataManager">
+  <div class="box" style="width:460px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <h2 style="margin:0;">本地数据管理</h2>
+      <span id="dataVersion" style="font-size:11px;color:var(--text3);">v1.1.5</span>
+    </div>
+    <div class="data-path" id="dataRootPath">正在读取…</div>
+    <div class="data-grid">
+      <div class="data-card"><div class="name">作品记录</div><div class="value" id="dataHistory">-</div></div>
+      <div class="data-card"><div class="name">生成图片</div><div class="value" id="dataImages">-</div></div>
+      <div class="data-card"><div class="name">参考图片</div><div class="value" id="dataRefs">-</div></div>
+      <div class="data-card"><div class="name">运行日志</div><div class="value" id="dataLogs">-</div></div>
+    </div>
+    <div class="data-actions">
+      <button onclick="openLocalFolder('root')">打开数据总目录</button>
+      <button onclick="openLocalFolder('images')">打开生成图片</button>
+      <button onclick="openLocalFolder('refs')">打开参考图片</button>
+      <button onclick="openLocalFolder('logs')">打开日志目录</button>
+    </div>
+    <div class="btn-row">
+      <button onclick="loadDataInfo()">刷新</button>
+      <button class="primary" id="closeDataManager">完成</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<div class="detail-overlay" id="detailOverlay" onclick="closeDetail()">
+  <span class="detail-close" onclick="closeDetail()">&times;</span>
+  <div class="detail-card" id="detailCard" onclick="event.stopPropagation()"></div>
+</div>
+
+<script>
+document.title = "AI 出图 ✓";
+let _startupReady = false;
+let _activeHost = "";
+let _hostRefreshRunning = false;
+// ===== lightbox =====
+let _lightboxUrls = [];
+let _lightboxIdx = 0;
+
+function _collectUrls(selector) {
+  const imgs = document.querySelectorAll(selector);
+  return Array.from(imgs).map(img => img.src).filter(u => u);
+}
+
+function openLightbox(url, source) {
+  // source: "result" | "history" — 各自独立导航, 不混在一起
+  if (source === "gen") {
+    _lightboxUrls = _collectUrls("#feed .gen-card .img-wrap img");
+  } else if (source === "history") {
+    _lightboxUrls = _collectUrls(".feed-item img");
+  } else {
+    _lightboxUrls = [url];
+  }
+  if (_lightboxUrls.length === 0) _lightboxUrls = [url];
+
+  // 用 pathname 匹配, 因为 img.src 是绝对 URL, 而传入的 url 可能是相对路径
+  const targetPath = (() => {
+    try { return new URL(url, window.location.href).pathname; }
+    catch { return url; }
+  })();
+  _lightboxIdx = _lightboxUrls.findIndex(u => {
+    try { return new URL(u).pathname === targetPath; }
+    catch { return u === url; }
+  });
+  if (_lightboxIdx < 0) _lightboxIdx = 0;
+  _showLightbox();
+}
+
+// lightbox zoom state
+let _lbZoom = 1, _lbPanX = 0, _lbPanY = 0, _lbDragging = false, _lbDragStartX = 0, _lbDragStartY = 0;
+
+function _resetLightboxZoom() {
+  _lbZoom = 1; _lbPanX = 0; _lbPanY = 0;
+  const img = document.getElementById("lightboxImg");
+  if (img) { img.style.transform = ""; img.style.cursor = ""; }
+}
+
+function _showLightbox() {
+  if (_lightboxUrls.length === 0) return;
+  _resetLightboxZoom();
+  // 从当前灯箱图片 URL 找到对应卡片的 data-id 并标记已查看
+  var curUrl = _lightboxUrls[_lightboxIdx];
+  document.querySelectorAll('#feed .feed-item img, #feed .gen-card img').forEach(function(img) {
+    if (img.src === curUrl || img.getAttribute('src') === curUrl) {
+      var card = img.closest('.feed-item, .gen-card');
+      if (card) {
+        var dot = card.querySelector('.unviewed-dot');
+        if (dot) _markCardViewed(dot.getAttribute('data-id'));
+      }
+    }
+  });
+  const lb = document.getElementById("lightbox");
+  document.getElementById("lightboxImg").src = _lightboxUrls[_lightboxIdx];
+  const count = document.getElementById("lightboxCount");
+  count.textContent = _lightboxUrls.length > 1 ? `${_lightboxIdx + 1} / ${_lightboxUrls.length}` : "";
+  // 只有多张时才显示导航箭头
+  document.querySelectorAll(".nav-arrow").forEach(el => {
+    el.style.display = _lightboxUrls.length > 1 ? "" : "none";
+  });
+  lb.classList.add("show");
+  lb.focus();
+}
+
+function closeLightbox() {
+  document.getElementById("lightbox").classList.remove("show");
+  _resetLightboxZoom();
+}
+
+function lightboxPrev() {
+  if (_lightboxUrls.length <= 1) return;
+  _lightboxIdx = (_lightboxIdx - 1 + _lightboxUrls.length) % _lightboxUrls.length;
+  _showLightbox();
+}
+
+function lightboxNext() {
+  if (_lightboxUrls.length <= 1) return;
+  _lightboxIdx = (_lightboxIdx + 1) % _lightboxUrls.length;
+  _showLightbox();
+}
+
+document.addEventListener("keydown", e => {
+  const lb = document.getElementById("lightbox");
+  if (!lb.classList.contains("show")) return;
+  const key = e.key;
+  if (key === "Escape") { e.preventDefault(); closeLightbox(); return; }
+  if (key === "ArrowLeft"  || key === "a" || key === "A") { e.preventDefault(); lightboxPrev(); return; }
+  if (key === "ArrowRight" || key === "d" || key === "D") { e.preventDefault(); lightboxNext(); return; }
+  if (key === "0") { e.preventDefault(); _resetLightboxZoom(); return; }  // 按 0 复位缩放
+});
+
+// lightbox: wheel zoom (deferred until element exists)
+(function _initLbEvents() {
+  var img = document.getElementById("lightboxImg");
+  if (!img) return setTimeout(_initLbEvents, 50);
+  img.addEventListener("wheel", e => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.15 : 0.15;
+    const newZoom = Math.min(6, Math.max(0.3, _lbZoom + delta));
+    // 以鼠标位置为缩放中心
+    const rect = e.target.getBoundingClientRect();
+    const cx = (e.clientX - rect.left) / rect.width;
+    const cy = (e.clientY - rect.top) / rect.height;
+    _lbPanX += (cx * rect.width) * (_lbZoom - newZoom) / _lbZoom;
+    _lbPanY += (cy * rect.height) * (_lbZoom - newZoom) / _lbZoom;
+    _lbZoom = newZoom;
+    e.target.style.transform = `translate(${_lbPanX}px,${_lbPanY}px) scale(${_lbZoom})`;
+    e.target.style.cursor = (_lbZoom !== 1 || _lbPanX !== 0 || _lbPanY !== 0) ? "grab" : "";
+  });
+
+  // lightbox: drag to pan (when zoomed)
+  img.addEventListener("mousedown", e => {
+    if (_lbZoom === 1 && _lbPanX === 0 && _lbPanY === 0) return;
+    e.preventDefault();
+    _lbDragging = true;
+    _lbDragStartX = e.clientX - _lbPanX;
+    _lbDragStartY = e.clientY - _lbPanY;
+    e.target.style.cursor = "grabbing";
+    e.target.classList.add("dragging");
+  });
+})();
+
+window.addEventListener("mousemove", e => {
+  if (!_lbDragging) return;
+  _lbPanX = e.clientX - _lbDragStartX;
+  _lbPanY = e.clientY - _lbDragStartY;
+  const img = document.getElementById("lightboxImg");
+  if (img) img.style.transform = `translate(${_lbPanX}px,${_lbPanY}px) scale(${_lbZoom})`;
+});
+
+window.addEventListener("mouseup", () => {
+  if (_lbDragging) {
+    _lbDragging = false;
+    const img = document.getElementById("lightboxImg");
+    if (img) { img.style.cursor = (_lbZoom !== 1 || _lbPanX !== 0 || _lbPanY !== 0) ? "grab" : ""; img.classList.remove("dragging"); }
+  }
+});
+
+async function downloadImage(url) {
+  try {
+    // 尝试 fetch+blob 下载 (支持 CORS 的 CDN)
+    const resp = await fetch(url);
+    const blob = await resp.blob();
+    const objUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objUrl;
+    a.download = "ai-image-" + Date.now() + ".png";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(objUrl);
+  } catch (e) {
+    // 兜底: 新标签页打开
+    window.open(url, "_blank");
+  }
+}
+
+// ===== 参考图管理 (含前端压缩) =====
+function _isImage(f) {
+  if (f.type && f.type.startsWith("image/")) return true;
+  const ext = (f.name || "").split(".").pop().toLowerCase();
+  return ["jpg","jpeg","png","gif","webp","bmp","svg","avif","heic","heif"].includes(ext);
+}
+
+// ===== 前端图片压缩 (Canvas) =====
+function _compressImage(file) {
+  return new Promise((resolve, reject) => {
+    // 保留原始 dataUrl 用于灯箱显示
+    const origReader = new FileReader();
+    origReader.onload = () => {
+      const origDataUrl = origReader.result;
+
+      const img = new Image();
+      img.onload = () => {
+        const MAX_DIM = 4096;
+        let w = img.width, h = img.height;
+        if (Math.max(w, h) > MAX_DIM) {
+          const ratio = MAX_DIM / Math.max(w, h);
+          w = Math.round(w * ratio);
+          h = Math.round(h * ratio);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        // 保持透明度: 用白色背景 (参考图不需要透明)
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        canvas.toBlob(blob => {
+          if (!blob) { reject(new Error("canvas toBlob failed")); return; }
+          resolve({ dataUrl: origDataUrl, blob });
+          URL.revokeObjectURL(img.src);
+        }, "image/jpeg", 0.92);
+      };
+      img.onerror = () => { URL.revokeObjectURL(img.src); reject(new Error("图片加载失败")); };
+      img.src = URL.createObjectURL(file);
+    };
+    origReader.onerror = reject;
+    origReader.readAsDataURL(file);
+  });
+}
+
+// ===== 参考图管理 =====
+const MAX_REFS = 6;
+const MAX_FILE_SIZE = 50 * 1024 * 1024;  // 50MB 原始文件上限 (压缩后通常 < 300KB)
+let _refs = [];  // {id, dataUrl, file, label}
+
+function renderRefs(newIds) {
+  newIds = newIds || [];
+  const grid = document.getElementById("refsGrid");
+  grid.querySelectorAll(".ref-card").forEach(n => n.remove());
+
+  _refs.forEach(r => {
+    const card = document.createElement("div");
+    card.className = "ref-card";
+    card.setAttribute("data-id", r.id);
+    if (newIds.includes(r.id)) {
+      card.classList.add("ref-new");
+      card.addEventListener("animationend", () => card.classList.remove("ref-new"), { once: true });
+    }
+    card.innerHTML = `
+      <div class="thumb-wrap" onclick="openLightbox('${r.dataUrl}')">
+        <img src="${r.dataUrl}" alt="${r.label || ''}">
+        <button class="ref-x" onclick="event.stopPropagation(); removeRef('${r.id}')">×</button>
+      </div>
+      <input class="ref-label" value="${escapeAttr(r.label || '')}" placeholder="起个名…"
+             onchange="updateLabel('${r.id}', this.value)">
+    `;
+    grid.insertBefore(card, document.getElementById("refAdd"));
+  });
+
+  const add = document.getElementById("refAdd");
+  if (add) add.style.display = _refs.length >= MAX_REFS ? "none" : "";
+}
+
+function escapeAttr(s) { return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+function removeRef(id) {
+  const card = document.querySelector(`.ref-card[data-id="${id}"]`);
+  if (card) {
+    card.classList.add("ref-removing");
+    card.addEventListener("animationend", () => {
+      _refs = _refs.filter(r => r.id !== id);
+      renderRefs();
+    }, { once: true });
+  } else {
+    _refs = _refs.filter(r => r.id !== id);
+    renderRefs();
+  }
+}
+
+function updateLabel(id, val) {
+  const r = _refs.find(r => r.id === id);
+  if (r) r.label = val;
+}
+
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.classList.remove("show"), 2500);
+}
+
+let _addingBusy = false;
+
+async function addFiles(files) {
+  if (_addingBusy) { console.log("[addFiles] 正在处理中,跳过重复调用"); return; }
+  _addingBusy = true;
+
+  const newIds = [];
+  console.log("[addFiles] 收到", files.length, "个文件:", files.map(f => ({name: f.name, type: f.type, size: f.size})));
+  for (const f of files) {
+    if (!_isImage(f)) {
+      console.log("[addFiles] 跳过非图片:", f.name, "type:", f.type);
+      continue;
+    }
+    if (f.size > MAX_FILE_SIZE) {
+      console.log("[addFiles] 跳过超大:", f.name, f.size);
+      toast(f.name + " 超过 50MB"); continue;
+    }
+    if (_refs.length >= MAX_REFS) {
+      console.log("[addFiles] 已达上限:", _refs.length);
+      toast("最多 " + MAX_REFS + " 张参考图"); break;
+    }
+
+    try {
+      const { dataUrl, blob } = await _compressImage(f);
+      const compressed = new File([blob], f.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg" });
+      console.log("[addFiles] 已压缩:", f.name, (f.size/1024/1024).toFixed(1)+"MB →", (blob.size/1024).toFixed(1)+"KB", "→ refs 总数:", _refs.length + 1);
+      const id = Math.random().toString(36).slice(2);
+      _refs.push({ id, dataUrl, file: compressed, label: "" });
+      newIds.push(id);
+    } catch (e) {
+      console.log("[addFiles] 压缩失败:", f.name, e);
+      toast(f.name + " 加载失败");
+    }
+  }
+  _addingBusy = false;
+  renderRefs(newIds);
+}
+
+// 文件选择按钮
+document.getElementById("refFileInput").addEventListener("change", e => {
+  if (e.target.files.length) { addFiles([...e.target.files]); e.target.value = ""; }
+});
+
+// Ctrl+V 粘贴: clipboardData.files → keydown预取服务端 → 服务端兜底
+let _clipboardPending = null;
+
+document.addEventListener("keydown", e => {
+  if (!e.ctrlKey || e.key !== "v") return;
+  const tag = document.activeElement?.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA") return;
+  // 抢在 Chrome 处理 paste 前让服务端读剪贴板 (PS 小图时有 CF_DIB)
+  _clipboardPending = fetch("/clipboard", { method: "POST" })
+    .then(r => r.ok ? r.json() : null)
+    .catch(() => null);
+});
+
+document.addEventListener("paste", async e => {
+  const tag = document.activeElement?.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA") return;
+
+  e.preventDefault();
+  let imageFiles = [...(e.clipboardData?.files || [])].filter(f => f.type?.startsWith("image/"));
+
+  if (!imageFiles.length && _clipboardPending) {
+    const data = await _clipboardPending;
+    _clipboardPending = null;
+    if (data?.data_url) {
+      const blob = await (await fetch(data.data_url)).blob();
+      const ext = (blob.type || "image/png").replace("image/", "").replace("jpeg", "jpg");
+      imageFiles = [new File([blob], "clipboard." + ext, { type: blob.type })];
+    }
+  }
+
+  if (imageFiles.length) {
+    _clipboardPending = null;
+    addFiles(imageFiles);
+    toast("已粘贴 " + imageFiles.length + " 张图片");
+    return;
+  }
+
+  readSystemClipboard();
+});
+
+// 拖拽到参考图区域
+const refsGrid = document.getElementById("refsGrid");
+["dragenter", "dragover"].forEach(ev => refsGrid.addEventListener(ev, e => {
+  e.preventDefault(); refsGrid.classList.add("drag-over");
+}));
+["dragleave", "drop"].forEach(ev => refsGrid.addEventListener(ev, e => {
+  e.preventDefault(); refsGrid.classList.remove("drag-over");
+}));
+refsGrid.addEventListener("drop", e => {
+  e.stopPropagation();  // 阻止冒泡, 避免父级 dropPanel 重复处理
+  if (e.dataTransfer.files.length) addFiles([...e.dataTransfer.files]);
+});
+
+// 也允许拖拽到整个左侧面板
+const dropPanel = document.getElementById("dropPanel");
+dropPanel.addEventListener("dragover", e => e.preventDefault());
+dropPanel.addEventListener("drop", e => {
+  // 只处理图片文件
+  const files = [...e.dataTransfer.files].filter(f => _isImage(f));
+  if (files.length) { e.preventDefault(); addFiles(files); }
+});
+
+// ===== 读取系统剪贴板 (后端) =====
+async function readSystemClipboard() {
+  try {
+    const resp = await fetch("/clipboard", { method: "POST" });
+    if (!resp.ok) {
+      const data = await resp.json();
+      toast(data.error || "剪贴板无图片");
+      return;
+    }
+    const data = await resp.json();
+    const blob = await (await fetch(data.data_url)).blob();
+    const ext = (blob.type || "image/png").replace("image/", "");
+    const file = new File([blob], "clipboard." + ext, { type: blob.type });
+    await addFiles([file]);
+    toast("已读取系统剪贴板");
+  } catch (e) {
+    toast("读取剪贴板失败: " + e);
+  }
+}
+
+async function pasteFromClipboard() {
+  const status = document.getElementById("status");
+  status.textContent = "正在读取系统剪贴板……";
+  status.className = "status-bar";
+  await readSystemClipboard();
+}
+
+// ===== 未查看卡片红点 + 颤抖 =====
+var _VIEWED_KEY = "imgstudio-viewed2";  // 换 key 清掉旧数据
+
+function _getViewed() {
+  try { return new Set(JSON.parse(localStorage.getItem(_VIEWED_KEY) || "[]")); }
+  catch { return new Set(); }
+}
+function _saveViewed(s) {
+  localStorage.setItem(_VIEWED_KEY, JSON.stringify([...s]));
+}
+function _markCardViewed(id) {
+  if (!id) return;
+  var s = _getViewed();
+  if (s.has(id)) return;
+  s.add(id);
+  _saveViewed(s);
+  // 隐藏对应 dot
+  document.querySelectorAll('.unviewed-dot').forEach(function(d) {
+    if (d.getAttribute("data-id") === id) d.style.display = "none";
+  });
+  _applyShake();
+}
+function _applyUnviewedState() {
+  var viewed = _getViewed();
+  document.querySelectorAll('.unviewed-dot').forEach(function(d) {
+    var id = d.getAttribute("data-id");
+    if (!id || viewed.has(id)) { d.style.display = "none"; }
+    else { d.style.display = ""; }
+  });
+  _applyShake();
+}
+function _applyShake() {
+  // 已停用抖动
+}
+
+// ===== 批量管理模式 =====
+let _batchMode = false;
+let _selectedIds = new Set();
+
+function toggleBatchMode() {
+  _batchMode = !_batchMode;
+  if (!_batchMode) _selectedIds.clear();
+  document.getElementById("batchBar").classList.toggle("active", _batchMode);
+  document.getElementById("batchModeBtn").style.display = _batchMode ? "none" : "";
+  _updateBatchUI();
+  loadHistory();  // 重新渲染使复选框可见
+}
+
+function toggleSelectAll() {
+  const btn = document.getElementById("batchSelectBtn");
+  const checkboxes = document.querySelectorAll(".batch-checkbox.visible");
+  if (_selectedIds.size === checkboxes.length) {
+    // 全选 → 全不选
+    _selectedIds.clear();
+    btn.textContent = "全选";
+  } else {
+    // 不全选 → 全选
+    checkboxes.forEach(cb => _selectedIds.add(cb.dataset.id));
+    btn.textContent = "取消选择";
+  }
+  _updateCheckboxStates();
+  _updateBatchUI();
+}
+
+function toggleSelect(id) {
+  if (_selectedIds.has(id)) {
+    _selectedIds.delete(id);
+  } else {
+    _selectedIds.add(id);
+  }
+  _updateCheckboxStates();
+  _updateBatchUI();
+}
+
+function _updateCheckboxStates() {
+  document.querySelectorAll(".batch-checkbox.visible").forEach(cb => {
+    const isChecked = _selectedIds.has(cb.dataset.id);
+    cb.classList.toggle("checked", isChecked);
+  });
+  // 更新 feed-item selected 状态
+  document.querySelectorAll(".feed-item").forEach(el => {
+    const cb = el.querySelector(".batch-checkbox");
+    if (cb) {
+      el.classList.toggle("selected", _selectedIds.has(cb.dataset.id));
+    }
+  });
+}
+
+function _updateBatchUI() {
+  const btn = document.getElementById("batchSelectBtn");
+  const delBtn = document.getElementById("batchDelBtn");
+  const count = _selectedIds.size;
+  if (count > 0) {
+    delBtn.textContent = `删除已选 (${count})`;
+    delBtn.style.opacity = "1";
+  } else {
+    delBtn.textContent = "删除已选";
+    delBtn.style.opacity = "0.5";
+  }
+  // 更新全选按钮
+  const checkboxes = document.querySelectorAll(".batch-checkbox.visible");
+  btn.textContent = checkboxes.length > 0 && count === checkboxes.length ? "取消选择" : "全选";
+}
+
+async function batchDelete() {
+  if (_selectedIds.size === 0) return;
+  if (!confirm(`确定删除选中的 ${_selectedIds.size} 条记录吗？此操作不可撤销。`)) return;
+  const ids = [..._selectedIds];
+  try {
+    const resp = await fetch("/history/batch-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      _selectedIds.clear();
+      loadHistory();
+      toast(`已删除 ${data.deleted} 条记录`);
+    } else {
+      toast("批量删除失败");
+    }
+  } catch (e) {
+    toast("批量删除请求失败: " + e.message);
+  }
+}
+
+// 初始化
+renderRefs();
+
+// ===== history =====
+async function loadHistory() {
+  try {
+    const resp = await fetch("/history");
+    const records = await resp.json();
+    renderHistory(records);
+    _applyUnviewedState();
+  } catch (e) { /* ignore */ }
+}
+
+function renderHistory(records) {
+  const container = document.getElementById("feed");
+  const count = document.getElementById("historyCount");
+  count.textContent = records.length + " 条记录";
+
+  if (!records.length) {
+    container.innerHTML = '<div class="empty-state"><div class="icon">&</div><p>尚未生成图片</p></div>';
+    return;
+  }
+
+  const isBatch = _batchMode;
+  container.innerHTML = records.map((r, i) => `
+    <div class="feed-item ${isBatch ? 'batch-mode' : ''} ${_selectedIds.has(r.id) ? 'selected' : ''}" style="animation:fadeUp .5s ease;animation-delay:${i*50}ms;" onclick="${isBatch ? `toggleSelect('${r.id}')` : `if(!event.target.closest('.item-actions button')&&!event.target.closest('img'))toggleFeedItem(this,'${r.id}')`}">
+      <span class="unviewed-dot" data-id="${r.id}" data-ts="${r.created_at}"></span>
+      <div class="batch-checkbox ${isBatch ? 'visible' : ''} ${_selectedIds.has(r.id) ? 'checked' : ''}" data-id="${r.id}" onclick="event.stopPropagation();toggleSelect('${r.id}')"></div>
+      <div class="item-actions" style="${isBatch ? 'display:none' : ''}">
+        ${r.has_ref ? `<button class="act-refs" onclick="event.stopPropagation();loadHistoryRefs('${r.id}')" title="恢复原参考图"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.5 15.5A9 9 0 1 0 2 12"/></svg></button>` : ''}
+        <button class="act-ref" onclick="event.stopPropagation(); useAsRef('${r.image_url}')" title="作为参考图"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg></button>
+        <button class="act-redo" onclick="event.stopPropagation(); regenerate('${r.id}')" title="重新生成"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.5 7.5A9 9 0 1 0 12 23"/></svg></button>
+        <button class="act-dl" onclick="event.stopPropagation(); downloadImage('${r.image_url}')" title="下载"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
+        <button class="act-del" onclick="deleteHistory(event, '${r.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      </div>
+      <div class="thumb">
+        <img src="${r.image_url}" loading="lazy" alt="" onerror="this.onerror=null;this.outerHTML='<div style=width:100%;height:100%;background:#181820;display:grid;place-items:center;color:#555;font-size:12px;cursor:default>图片已过期</div>'" onclick="event.stopPropagation(); openLightbox('${r.image_url}', 'history')" style="cursor:${isBatch ? 'default' : 'zoom-in'};">
+      </div>
+      <div class="info">
+        <div class="p" title="${r.prompt}">${r.prompt}</div>
+        <div class="meta-row">
+          <span>${r.model}</span>
+          <span>${r.created_at}${r.duration_seconds != null ? ` · ${r.duration_seconds}s` : ''}</span>
+        </div>
+      </div>
+    </div>
+  `).join("");
+}
+
+function toggleFeedItem(el, id) { showDetail(id); }
+function showGenDetail(card) {
+  const img = card.querySelector("img");
+  const prompt = card.querySelector(".meta .p")?.textContent || "";
+  const info = card.querySelector(".info")?.textContent || "";
+  if (!img) return;
+  var dot = card.querySelector('.unviewed-dot');
+  if (dot) _markCardViewed(dot.getAttribute('data-id'));
+  document.getElementById("detailCard").innerHTML = `
+    <div class="detail-img">
+      <img src="${img.src}" onclick="event.stopPropagation();openLightbox('${img.src}','gen')" onerror="this.onerror=null;this.outerHTML='<div style=color:#555;font-size:14px>图片已过期</div>'">
+    </div>
+    <div class="detail-info">
+      <div class="detail-prompt">${prompt}</div>
+      <div class="detail-meta">${info}</div>
+      <div class="detail-actions">
+        <button onclick="downloadImage('${img.src}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> 下载</button>
+        <button onclick="useAsRef('${img.src}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg> 作为参考</button>
+      </div>
+    </div>
+  `;
+  document.getElementById("detailOverlay").classList.add("open");
+}
+
+async function showDetail(id) {
+  const resp = await fetch("/history");
+  const records = await resp.json();
+  const item = records.find(r => r.id === id);
+  if (!item) return;
+  _markCardViewed(item.id);
+  document.getElementById("detailCard").innerHTML = `
+    <div class="detail-img">
+      <img src="${item.image_url}" onclick="event.stopPropagation();openLightbox('${item.image_url}','history')" onerror="this.onerror=null;this.outerHTML='<div style=color:#555;font-size:14px>图片已过期</div>'">
+    </div>
+    <div class="detail-info">
+      <div class="detail-prompt">${item.prompt}</div>
+      <div class="detail-meta">${item.model} &middot; ${item.created_at}${item.duration_seconds != null ? ` &middot; 耗时 ${item.duration_seconds}s` : ''}${item.host ? ` &middot; ${item.host}` : ''}</div>
+      <div class="detail-actions">
+        <button onclick="regenerate('${item.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.5 7.5A9 9 0 1 0 12 23"/></svg> 重新生成</button>
+        <button onclick="useAsRef('${item.image_url}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg> 作为参考</button>
+        <button onclick="downloadImage('${item.image_url}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> 下载</button>
+      </div>
+    </div>
+  `;
+  document.getElementById("detailOverlay").classList.add("open");
+}
+function closeDetail() {
+  document.getElementById("detailOverlay").classList.remove("open");
+}
+
+async function showHistory(id) {
+  const resp = await fetch("/history");
+  const records = await resp.json();
+  const item = records.find(r => r.id === id);
+  if (!item) return;
+
+  if (item.image_url && item.image_url.startsWith("http")) {
+    toast("图片已过期");
+    return;
+  }
+  openLightbox(item.image_url, "history");
+}
+
+async function regenerate(id) {
+  // 获取历史记录
+  const resp = await fetch("/history");
+  const records = await resp.json();
+  const item = records.find(r => r.id === id);
+  if (!item) return;
+
+  // 填回提示词
+  document.getElementById("prompt").value = item.prompt;
+
+  // 尝试恢复参考图
+  try {
+    const refResp = await fetch(`/history/${id}/refs`);
+    if (refResp.ok) {
+      const refs = await refResp.json();
+      console.log("[regenerate] 找到参考图:", refs.length, "张");
+      _refs = [];
+      for (let i = 0; i < refs.length; i++) {
+        const blob = await (await fetch(refs[i])).blob();
+        const file = new File([blob], "ref" + i + "." + (blob.type.replace("image/","") || "png"), { type: blob.type });
+        const dataUrl = await new Promise((res, rej) => {
+          const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob);
+        });
+        _refs.push({ id: Math.random().toString(36).slice(2), dataUrl, file, label: "" });
+      }
+      renderRefs();
+      console.log("[regenerate] 已恢复", _refs.length, "张参考图");
+    }
+  } catch (e) {
+    console.log("[regenerate] 获取参考图失败:", e);
+  }
+
+  // 滚动到顶部并生成
+  const curCount = document.getElementById("count").value;
+  console.log("[regenerate] 当前张数设置:", curCount);
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  setTimeout(() => generate(), 400);
+}
+
+async function loadHistoryRefs(id) {
+  console.log("[loadHistoryRefs] 开始, id=", id);
+  toast("加载参考图…");
+  try {
+    const resp = await fetch(`/history/${id}/refs`);
+    console.log("[loadHistoryRefs] fetch /refs →", resp.status);
+    if (!resp.ok) { toast("无参考图数据 (HTTP " + resp.status + ")"); return; }
+    const refs = await resp.json();
+    console.log("[loadHistoryRefs] 收到 refs:", refs.length, "条");
+    if (!refs.length) { toast("无参考图"); return; }
+    const files = [];
+    for (let i = 0; i < refs.length; i++) {
+      console.log("[loadHistoryRefs] 处理第", i, "个 ref, 开头:", refs[i].substring(0, 40));
+      const blobResp = await fetch(refs[i]);
+      const blob = await blobResp.blob();
+      console.log("[loadHistoryRefs] blob size:", blob.size, "type:", blob.type);
+      files.push(new File([blob], `ref-${i}.png`, { type: blob.type || "image/png" }));
+    }
+    console.log("[loadHistoryRefs] 准备 addFiles, files:", files.length);
+    await addFiles(files);
+    console.log("[loadHistoryRefs] addFiles 完成, _refs 总数:", _refs.length);
+    toast(`已恢复 ${files.length} 张参考图`);
+  } catch (e) {
+    console.error("[loadHistoryRefs] 异常:", e);
+    toast("恢复参考图失败: " + e.message);
+  }
+}
+
+async function useAsRef(url) {
+  try {
+    const r = await fetch(url);
+    const blob = await r.blob();
+    const file = new File([blob], "ref-" + Date.now() + ".png", { type: blob.type || "image/png" });
+    await addFiles([file]);
+    toast("已加入参考图");
+  } catch (e) {
+    toast("无法加载图片");
+  }
+}
+
+async function deleteHistory(event, id) {
+  event.stopPropagation();
+  if (!confirm("删除这条记录？")) return;
+  await fetch("/history/" + id, { method: "DELETE" });
+  loadHistory();
+}
+
+// ===== generate =====
+var _runningBatches = {};  // { batchId: { controller, timer, totalCount } }
+
+function _updateGenStatus() {
+  var active = Object.keys(_runningBatches).length;
+  if (active > 0) {
+    document.getElementById("status").textContent = active + " 批正在生成…";
+    document.getElementById("status").className = "status-bar";
+  } else {
+    document.getElementById("status").textContent = "";
+  }
+}
+
+// 生成中刷新/关闭页面时提醒
+window.addEventListener("beforeunload", function(e) {
+  if (Object.keys(_runningBatches).length > 0) {
+    e.preventDefault();
+    e.returnValue = "图片正在生成中，确定要离开吗？";
+    return e.returnValue;
+  }
+});
+
+// 取消单个批次
+function cancelGeneration(batchId) {
+  var batch = _runningBatches[batchId];
+  if (!batch) return;
+  if (batch.controller) batch.controller.abort();
+  if (batch.timer) clearInterval(batch.timer);
+  // 清除该批次的卡片
+  for (var i = 0; i < batch.totalCount; i++) {
+    var card = document.getElementById("genCard" + batchId + "_" + i);
+    if (card) card.remove();
+  }
+  delete _runningBatches[batchId];
+  _updateGenStatus();
+  toast("⏹ 已取消");
+}
+
+// 取消全部
+function cancelAllGenerations() {
+  var ids = Object.keys(_runningBatches);
+  ids.forEach(function(id) {
+    var batch = _runningBatches[id];
+    if (batch.controller) batch.controller.abort();
+    if (batch.timer) clearInterval(batch.timer);
+    for (var i = 0; i < batch.totalCount; i++) {
+      var card = document.getElementById("genCard" + id + "_" + i);
+      if (card) card.remove();
+    }
+    delete _runningBatches[id];
+  });
+  _updateGenStatus();
+  toast("⏹ 已取消全部 (" + ids.length + " 批)");
+}
+
+// ===== 自适应进度条估算 =====
+var _GEN_TIME_KEY = "gen_times";
+
+function _loadGenTimes() {
+  try { return JSON.parse(localStorage.getItem(_GEN_TIME_KEY) || "{}"); }
+  catch { return {}; }
+}
+function _saveGenTimes(times) {
+  try { localStorage.setItem(_GEN_TIME_KEY, JSON.stringify(times)); }
+  catch {}
+}
+function _getEstimate(modelKey) {
+  var times = _loadGenTimes();
+  var arr = times[modelKey] || [];
+  if (!arr.length) {
+    // 无历史记录: 用保守默认值
+    if (modelKey.startsWith("flux")) return 50;
+    if (modelKey.startsWith("gpt-image")) return 20;
+    return 25;
+  }
+  // 加权平均: 最近一次权重最高, 最多保留 10 次
+  var sum = 0, weight = 0;
+  for (var i = 0; i < arr.length; i++) {
+    var w = i + 1;  // 越往后(越新)权重越高
+    sum += arr[i] * w;
+    weight += w;
+  }
+  return Math.round(sum / weight);
+}
+function _recordGenTime(modelKey, seconds) {
+  if (seconds < 2) return;  // 太快的不记录, 可能异常
+  var times = _loadGenTimes();
+  var arr = times[modelKey] || [];
+  arr.push(Math.round(seconds));
+  if (arr.length > 10) arr = arr.slice(-10);  // 最多保留最近10次
+  times[modelKey] = arr;
+  _saveGenTimes(times);
+}
+
+async function generate() {
+  const prompt = document.getElementById("prompt").value.trim();
+  const btn = document.getElementById("btn");
+  const status = document.getElementById("status");
+  const feedEl = document.getElementById("feed");
+
+  if (!_startupReady) {
+    const ready = await validateStartup(false);
+    if (!ready) return;
+  }
+
+  // 当前 Host 由后端快速预检；三个节点在后台刷新，不阻塞本次生成。
+  refreshHostsInBackground();
+  refreshModelsAndPrices(false);
+
+  if (!prompt) {
+    status.textContent = "请先填写提示词";
+    status.className = "status-bar error";
+    return;
+  }
+
+  const form = new FormData();
+  form.append("model", document.getElementById("model").value);
+  // 发送所有参考图
+  const activeRefs = _refs.filter(r => r.file);
+  activeRefs.forEach(r => form.append("images", r.file));
+  form.append("labels", JSON.stringify(activeRefs.map(r => r.label || "")));
+  form.append("aspect_ratio", document.getElementById("aspectRatio").value);
+  form.append("image_size", document.getElementById("imageSize").value);
+  form.append("count", document.getElementById("count").value);
+  // 注入用户自定义 API Key
+  const saved = localStorage.getItem("imgstudio-settings");
+  if (saved) {
+    try {
+      const s = JSON.parse(saved);
+      if (s.apiKey) form.append("api_key", s.apiKey);
+      if (_activeHost) form.append("host", _activeHost);
+    } catch {}
+  }
+
+  toast("开始生成…");
+
+  const totalCount = parseInt(document.getElementById("count").value) || 1;
+  const batchId = Date.now() + "_" + Math.random().toString(36).substring(2, 8);
+  const batchStart = Date.now();
+
+  // 注册批次
+  var controller = new AbortController();
+  _runningBatches[batchId] = { controller: controller, timer: null, totalCount: totalCount, startTime: batchStart };
+  const signal = controller.signal;
+  _updateGenStatus();
+
+  const modelName = document.getElementById("model").value;
+
+  // 新卡片插入 feed 最顶部
+  feedEl.insertAdjacentHTML("afterbegin", Array.from({length: totalCount}, (_, i) => `
+    <div class="gen-card" id="genCard${batchId}_${i}" onclick="if(!event.target.closest('a,img,button'))showGenDetail(this)">
+	      <span class="unviewed-dot" data-id="" data-ts="${Date.now()}" style="display:none"></span>
+      <div class="img-wrap" style="display:grid;place-items:center;">
+        <svg class="progress-ring" width="80" height="80" viewBox="0 0 80 80">
+          <defs><filter id="g"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#a259ff" flood-opacity="0.6"/></filter></defs>
+          <circle cx="40" cy="40" r="32" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="4"/>
+          <circle class="progress-ring-fill" cx="40" cy="40" r="32" fill="none" stroke="#a259ff" stroke-width="4" stroke-dasharray="201" stroke-dashoffset="201" stroke-linecap="round" transform="rotate(-90 40 40)" filter="url(#g)"/>
+        </svg>
+        <span class="progress-ring-text" style="position:absolute;font-size:12px;color:var(--text3);">0%</span>
+        <button class="card-cancel-btn" onclick="event.stopPropagation();cancelGeneration('${batchId}')" title="取消此批次"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      </div>
+      <div class="meta"><div class="p">${prompt}</div></div>
+      <div class="info"><span>${modelName}</span><span>生成中…</span></div>
+    </div>
+  `).join(""));
+
+  // 卡片进度条 — 根据历史耗时自适应估算
+  const modelKey = document.getElementById("model").value;
+  const estSeconds = _getEstimate(modelKey);
+  const jitter = 0.85 + Math.random() * 0.3;
+  const estimated = estSeconds * jitter;
+  _runningBatches[batchId].modelKey = modelKey;  // 记录模型名, 完成时保存耗时
+
+  const circ = 2 * Math.PI * 32; // ~201
+  var progressTimer = setInterval(() => {
+    if (!_runningBatches[batchId]) { clearInterval(progressTimer); return; }
+    const elapsed = (Date.now() - _runningBatches[batchId].startTime) / 1000;
+    const ratio = Math.min(1, elapsed / estimated);
+    const pct = Math.min(92, Math.round(ratio * ratio * 92));
+    const elapsedSeconds = Math.round(elapsed);
+    const offset = circ - (circ * pct / 100);
+    for (let i = 0; i < totalCount; i++) {
+      const ring = document.querySelector(`#genCard${batchId}_${i} .progress-ring-fill`);
+      const txt  = document.querySelector(`#genCard${batchId}_${i} .progress-ring-text`);
+      if (ring) ring.style.strokeDashoffset = offset;
+      if (txt) txt.textContent = elapsedSeconds + "s";
+      const info = document.querySelector(`#genCard${batchId}_${i} .info span:last-child`);
+      if (info) info.textContent = elapsed >= estimated ? "等待服务器…" : "生成中…";
+    }
+  }, 400);
+  _runningBatches[batchId].timer = progressTimer;
+
+  // 不做隐藏的 AI 提示词增强，确保每张图只提交一次收费生成请求。
+  form.append("prompt", prompt);
+  console.log("[generate] count 元素值:", document.getElementById("count").value, "→ totalCount:", totalCount);
+  status.textContent = totalCount > 1 ? `生成中 (共${totalCount}张)，请稍候……` : "";
+  status.className = "status-bar";
+
+  try {
+    if (totalCount > 1) {
+      // --- 多张: SSE 流式, 出一张显示一张 ---
+      const resp = await fetch("/generate-stream", { method: "POST", body: form, signal });
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let completed = 0;
+      let streamDone = false;
+      const modelVal = document.getElementById("model").value;
+
+      while (!streamDone) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const raw = line.slice(6);
+          if (raw === "[DONE]") {
+            if (_runningBatches[batchId] && _runningBatches[batchId].timer) clearInterval(_runningBatches[batchId].timer);
+            const genSec = Math.round((Date.now() - _runningBatches[batchId].startTime) / 1000);
+            _recordGenTime(_runningBatches[batchId].modelKey, genSec);
+            delete _runningBatches[batchId];
+            _updateGenStatus();
+            toast(`✅ 生成完成 (${completed} 张 / ${genSec}s)`);
+            loadHistory();
+            streamDone = true;
+            break;
+          }
+          try {
+            const evt = JSON.parse(raw);
+            if (evt.url) {
+              completed++;
+              status.textContent = `已完成 ${completed}/${totalCount} 张`;
+              const card = document.getElementById(`genCard${batchId}_${evt.idx}`);
+              if (card) {
+                card.querySelector(".img-wrap").innerHTML = `<img src="${evt.url}" onclick="event.stopPropagation();openLightbox('${evt.url}','gen')" onerror="this.onclick=null;this.style.opacity='.3'">`;
+                card.querySelector(".info").innerHTML = `<span>${modelVal} · #${completed}</span><a onclick="downloadImage('${evt.url}')">下载</a>`;
+                var dot = card.querySelector('.unviewed-dot');
+                if (dot) { dot.setAttribute('data-id', evt.id || ''); dot.style.display = ''; }
+                _applyUnviewedState();
+              }
+            } else if (evt.error) {
+              completed++;
+              status.textContent = `第${evt.idx+1}张失败: ${evt.error}`;
+              const card = document.getElementById(`genCard${batchId}_${evt.idx}`);
+              if (card) {
+                card.querySelector(".img-wrap").innerHTML = `<div style="color:var(--red);font-size:13px;display:grid;place-items:center;height:100%;">生成失败</div>`;
+                card.querySelector(".info span:last-child").textContent = "失败";
+              }
+            }
+          } catch (e) { /* skip malformed */ }
+        }
+      }
+      loadHistory();
+    } else {
+      // --- 单张: 普通 JSON ---
+      const resp = await fetch("/generate", { method: "POST", body: form, signal });
+      const data = await resp.json();
+      const urls = data.image_urls || (data.image_url ? [data.image_url] : []);
+      if (urls.length > 0) {
+        if (_runningBatches[batchId] && _runningBatches[batchId].timer) clearInterval(_runningBatches[batchId].timer);
+        const genSec = Math.round((Date.now() - _runningBatches[batchId].startTime) / 1000);
+        _recordGenTime(_runningBatches[batchId].modelKey, genSec);
+        delete _runningBatches[batchId];
+        _updateGenStatus();
+        toast(`✅ 生成完成 (${genSec}s)`);
+        urls.forEach((url, i) => {
+          const card = document.getElementById(`genCard${batchId}_${i}`);
+          if (card) {
+            card.querySelector(".img-wrap").innerHTML = `<img src="${url}" onclick="event.stopPropagation();openLightbox('${url}','gen')" onerror="this.onclick=null;this.style.opacity='.3'">`;
+            card.querySelector(".info").innerHTML = `<span>${modelName} · 完成</span><a onclick="downloadImage('${url}')">下载</a>`;
+            var dot = card.querySelector('.unviewed-dot');
+            if (dot) { dot.setAttribute('data-id', data.ids ? data.ids[i] || '' : ''); dot.style.display = ''; }
+          }
+        });
+        _applyUnviewedState();
+        loadHistory();
+      } else {
+        if (_runningBatches[batchId] && _runningBatches[batchId].timer) clearInterval(_runningBatches[batchId].timer);
+        delete _runningBatches[batchId];
+        _updateGenStatus();
+        toast("❌ " + (data.error || "生成失败，请重试"));
+        console.log("后端返回：", data);
+        // 卡片显示错误
+        const card = document.getElementById(`genCard${batchId}_0`);
+        if (card) {
+          card.querySelector(".img-wrap").innerHTML = `<div style="color:var(--red);font-size:13px;display:grid;place-items:center;height:100%;">生成失败</div>`;
+          card.querySelector(".info span:last-child").textContent = "失败";
+        }
+      }
+    }
+  } catch (e) {
+    if (e.name === "AbortError") {
+      // 取消已在 cancelGeneration 中处理
+      return;
+    }
+    if (_runningBatches[batchId] && _runningBatches[batchId].timer) clearInterval(_runningBatches[batchId].timer);
+    delete _runningBatches[batchId];
+    _updateGenStatus();
+    toast("❌ 网络请求失败，请检查网络后重试");
+    // 第一个加载卡片显示错误
+    const card = document.getElementById(`genCard${batchId}_0`);
+    if (card) {
+      card.querySelector(".img-wrap").innerHTML = `<div style="color:var(--red);font-size:13px;display:grid;place-items:center;height:100%;">生成失败</div>`;
+      card.querySelector(".info span:last-child").textContent = "失败";
+    }
+  } finally {
+    // 确保批次清理 (防御性: 上面各分支已清理, 这里兜底)
+    var batch = _runningBatches[batchId];
+    if (batch) {
+      if (batch.timer) clearInterval(batch.timer);
+      delete _runningBatches[batchId];
+      _updateGenStatus();
+    }
+  }
+}
+
+// ===== 自定义下拉选择 =====
+function toggleCustomSelect(id) {
+  const el = document.getElementById(id);
+  const wasOpen = el.classList.contains("open");
+  closeAllCustomSelects();
+  if (!wasOpen) el.classList.add("open");
+}
+function closeAllCustomSelects() {
+  document.querySelectorAll(".custom-select.open").forEach(s => s.classList.remove("open"));
+}
+document.addEventListener("click", e => {
+  if (!e.target.closest(".custom-select")) closeAllCustomSelects();
+});
+
+// 初始化自定义下拉选项点击
+document.getElementById("modelDrop").addEventListener("click", e => {
+  const opt = e.target.closest(".cs-opt");
+  if (!opt) return;
+  const drop = document.getElementById("modelDrop");
+  drop.querySelectorAll(".cs-opt").forEach(o => o.classList.remove("selected"));
+  opt.classList.add("selected");
+  // 更新显示文本（去掉 desc）
+  const text = opt.getAttribute("data-label") || opt.getAttribute("data-value");
+  document.querySelector("#modelSelect .cs-text").textContent = text;
+  document.getElementById("model").value = opt.getAttribute("data-value");
+  closeAllCustomSelects();
+});
+
+// ===== 加载模型列表 (从 models.json) =====
+let _allModels = [];  // 缓存所有模型
+let _modelRefreshRunning = false;
+
+function modelPriceText(m) {
+  const credits = Number(m.credits);
+  const creditText = Number.isFinite(credits) ? `${credits.toLocaleString("zh-CN")}积分` : "积分未知";
+  const moneyText = m.price && m.price !== "?" ? `¥${m.price}/次` : "人民币价格未知";
+  return `${creditText} · ${moneyText}`;
+}
+
+function modelDisplayName(m) {
+  return `${m.id} · ${modelPriceText(m)}`;
+}
+
+function getHiddenModels() {
+  try { return new Set(JSON.parse(localStorage.getItem("hiddenModels") || "[]")); }
+  catch { return new Set(); }
+}
+function saveHiddenModels(set) {
+  localStorage.setItem("hiddenModels", JSON.stringify([...set]));
+}
+
+function renderModelSelect() {
+  const sel = document.getElementById("model");
+  const hidden = getHiddenModels();
+  const current = (document.querySelector("#modelDrop .cs-opt.selected") || {}).getAttribute?.("data-value") || sel.value;
+  const groups = {};
+  _allModels.forEach(m => {
+    if (hidden.has(m.id)) return;
+    (groups[m.group || "其他"] ??= []).push(m);
+  });
+  // 更新隐藏的 select
+  sel.innerHTML = Object.entries(groups).map(([g, items]) =>
+    '<optgroup label="' + g + '">' +
+    items.map(m => '<option value="' + m.id + '">' + modelDisplayName(m) + (m.desc ? ' — ' + m.desc : '') + '</option>').join("") +
+    '</optgroup>'
+  ).join("");
+  if ([...sel.options].some(o => o.value === current)) sel.value = current;
+
+  // 更新自定义下拉
+  const drop = document.getElementById("modelDrop");
+  drop.innerHTML = Object.entries(groups).map(([g, items]) =>
+    '<div class="cs-group-label">' + g + '</div>' +
+    items.map(m => {
+      const selClass = m.id === current ? " selected" : "";
+      return '<div class="cs-opt' + selClass + '" data-value="' + m.id + '" data-label="' + modelDisplayName(m) + '">' + m.id + ' <span class="cs-desc">' + modelPriceText(m) + (m.desc ? ' · ' + m.desc : '') + '</span></div>';
+    }).join("")
+  ).join("");
+
+  // 更新触发按钮文字
+  const selectedOpt = drop.querySelector(".cs-opt.selected");
+  const text = selectedOpt ? (selectedOpt.getAttribute("data-label") || current) : (_allModels[0] ? modelDisplayName(_allModels[0]) : "");
+  document.querySelector("#modelSelect .cs-text").textContent = text;
+  if (selectedOpt) sel.value = current;
+}
+
+async function loadModels() {
+  try {
+    const resp = await fetch("/models");
+    _allModels = await resp.json();
+    if (!_allModels.length) return;
+    renderModelSelect();
+  } catch (e) { /* keep existing options */ }
+}
+
+async function refreshModelsAndPrices(showMessage = false) {
+  if (_modelRefreshRunning) return;
+  _modelRefreshRunning = true;
+  const icon = document.getElementById("modelRefreshBtn");
+  if (icon) icon.textContent = "…";
+  try {
+    const resp = await fetch("/refresh-models");
+    const data = await resp.json();
+    if (!resp.ok || !data.ok) throw new Error(data.error || "刷新失败");
+    _allModels = data.models;
+    renderModelSelect();
+    renderModelChecklist();
+    if (showMessage) toast(`模型与价格已更新 · ${data.checked_at}`);
+  } catch (e) {
+    if (showMessage) toast("刷新失败，已保留上次价格");
+  } finally {
+    if (icon) icon.textContent = "↻";
+    _modelRefreshRunning = false;
+  }
+}
+
+// ===== 模型管理弹窗 =====
+function renderModelChecklist() {
+  const container = document.getElementById("modelChecklist");
+  const hidden = getHiddenModels();
+  const groups = {};
+  _allModels.forEach(m => {
+    (groups[m.group || "其他"] ??= []).push(m);
+  });
+  container.innerHTML = Object.entries(groups).map(([g, items]) => `
+    <div class="mm-group">
+      <div class="mm-group-title">${g}</div>
+      ${items.map(m => {
+        const on = !hidden.has(m.id);
+        return `
+        <div class="mm-row${on ? "" : " off"}" onclick="toggleModel('${m.id}')">
+          <div class="dot"></div>
+          <div class="info">
+            <div class="name">${m.id} · ${modelPriceText(m)}</div>
+            ${m.desc ? `<div class="desc">${m.desc}</div>` : ""}
+          </div>
+        </div>`;
+      }).join("")}
+    </div>
+  `).join("");
+}
+
+function toggleModel(id) {
+  const hidden = getHiddenModels();
+  if (hidden.has(id)) hidden.delete(id); else hidden.add(id);
+  saveHiddenModels(hidden);
+  renderModelChecklist();
+  renderModelSelect();
+}
+
+function modelManagerSelectAll() {
+  localStorage.removeItem("hiddenModels");
+  renderModelChecklist();
+  renderModelSelect();
+}
+function modelManagerDeselectAll() {
+  const all = new Set(_allModels.map(m => m.id));
+  saveHiddenModels(all);
+  renderModelChecklist();
+  renderModelSelect();
+}
+
+function openModelManager() {
+  try {
+    if (!_allModels || !_allModels.length) { toast("模型列表尚未加载"); return; }
+    renderModelChecklist();
+    document.getElementById("modelManager").classList.add("open");
+  } catch(e) { console.error(e); toast("打开失败: " + e.message); }
+}
+
+document.getElementById("modelSettingsBtn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  openModelManager();
+});
+document.getElementById("closeModelManager").addEventListener("click", () => {
+  document.getElementById("modelManager").classList.remove("open");
+});
+
+// 回到顶部按钮
+const feed = document.getElementById("feed");
+const scrollBtn = document.getElementById("scrollTopBtn");
+feed.addEventListener("scroll", () => {
+  var show = feed.scrollTop > 200;
+  scrollBtn.style.opacity = show ? "1" : "0";
+  scrollBtn.style.pointerEvents = show ? "" : "none";
+  scrollBtn.style.transform = show ? "translateX(-50%) scale(1)" : "translateX(-50%) scale(0.85)";
+});
+
+loadHistory();
+
+// ===== log console =====
+let logTimer = null;
+
+function toggleLogs() {
+  const body = document.getElementById("logBody");
+  const toggle = document.getElementById("logToggle");
+  const isOpen = body.classList.toggle("open");
+  toggle.classList.toggle("open", isOpen);
+  if (isOpen) { fetchLogs(); }
+  else { if (logTimer) { clearInterval(logTimer); logTimer = null; } }
+}
+
+function toggleAutoRefresh() {
+  if (document.getElementById("autoRefresh").checked) {
+    logTimer = setInterval(fetchLogs, 3000);
+  } else {
+    if (logTimer) { clearInterval(logTimer); logTimer = null; }
+  }
+}
+
+async function fetchLogs() {
+  try {
+    const resp = await fetch("/logs?lines=100");
+    const entries = await resp.json();
+    const el = document.getElementById("logLines");
+    if (!entries.length) {
+      el.innerHTML = '<div class="log-row"><span class="msg">暂无日志</span></div>';
+      return;
+    }
+    el.innerHTML = entries.reverse().map(e => {
+      const cls = e.text.includes("ERROR") ? " err" : e.text.includes("WARNING") ? " warn" : "";
+      const text = e.text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+      return `<div class="log-row${cls}"><span class="tag ${e.tag}">${e.tag}</span><span class="msg">${text}</span></div>`;
+    }).join("");
+    el.scrollTop = 0;
+  } catch (e) { /* ignore */ }
+}
+
+// ===== 本地数据管理 =====
+function formatBytes(bytes) {
+  const value = Number(bytes) || 0;
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+async function loadDataInfo() {
+  try {
+    const resp = await fetch("/app-info");
+    if (!resp.ok) throw new Error("读取失败");
+    const data = await resp.json();
+    document.getElementById("dataVersion").textContent = `v${data.version}`;
+    document.getElementById("dataRootPath").textContent = data.data_root;
+    document.getElementById("dataHistory").textContent = `${data.history.files} 条 · ${formatBytes(data.history.bytes)}`;
+    document.getElementById("dataImages").textContent = `${data.images.files} 个 · ${formatBytes(data.images.bytes)}`;
+    document.getElementById("dataRefs").textContent = `${data.refs.files} 个 · ${formatBytes(data.refs.bytes)}`;
+    document.getElementById("dataLogs").textContent = `${data.logs.files} 个 · ${formatBytes(data.logs.bytes)}`;
+  } catch (e) {
+    document.getElementById("dataRootPath").textContent = "读取本地数据失败";
+    toast("读取本地数据失败");
+  }
+}
+
+async function openLocalFolder(kind) {
+  const form = new FormData();
+  form.append("kind", kind);
+  try {
+    const resp = await fetch("/open-data-folder", { method: "POST", body: form });
+    if (!resp.ok) throw new Error("打开失败");
+    toast("已打开本地文件夹");
+  } catch (e) {
+    toast("无法打开本地文件夹");
+  }
+}
+
+document.getElementById("openDataManager").onclick = () => {
+  document.getElementById("dataManager").classList.add("open");
+  loadDataInfo();
+};
+document.getElementById("closeDataManager").onclick = () => document.getElementById("dataManager").classList.remove("open");
+
+// ===== Host 状态：当前节点预检不阻塞，三个节点在后台刷新 =====
+function renderHostStatus(data) {
+  const bar = document.getElementById("pingBar");
+  const hostParts = (data.hosts || []).map(h => {
+    const selected = h.host === data.selected_host;
+    const color = h.key_valid ? "var(--green)" : h.reachable ? "var(--amber)" : "var(--red)";
+    const label = h.host.replace("https://", "");
+    const latency = h.latency_ms >= 0 ? `${h.latency_ms}ms` : "不可达";
+    return `<span style="display:inline-flex;align-items:center;gap:4px;font-weight:${selected ? 600 : 400};"><span style="width:6px;height:6px;border-radius:50%;background:${color};display:inline-block;"></span>${selected ? "✓ " : ""}${label} ${latency}</span>`;
+  });
+  const checkedAt = data.checked_at || new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"});
+  hostParts.push(`<span style="opacity:.65;">更新 ${checkedAt}</span>`);
+  bar.innerHTML = hostParts.join("");
+}
+
+async function refreshHostsInBackground() {
+  if (_hostRefreshRunning) return;
+  _hostRefreshRunning = true;
+  let settings = {};
+  try { settings = JSON.parse(localStorage.getItem("imgstudio-settings") || "{}"); } catch {}
+  const form = new FormData();
+  form.append("api_key", settings.apiKey || "");
+  form.append("preferred_host", settings.host || "");
+  try {
+    const resp = await fetch("/host-check", { method: "POST", body: form });
+    const data = await resp.json();
+    if (data.selected_host) _activeHost = data.selected_host;
+    renderHostStatus(data);
+  } catch (e) { /* 当前生成不受后台测速失败影响 */ }
+  finally { _hostRefreshRunning = false; }
+}
+
+// ===== 每次使用前：官网模型清单 + Host + API Key 联合验证 =====
+async function validateStartup(openSettingsOnFailure = true) {
+  const btn = document.getElementById("btn");
+  const status = document.getElementById("status");
+  const bar = document.getElementById("pingBar");
+  btn.disabled = true;
+  _startupReady = false;
+  _activeHost = "";
+  status.textContent = "正在获取官网最新模型并验证 API…";
+  status.className = "status-bar";
+  bar.textContent = "模型、节点和 Key 正在并行检查";
+
+  let settings = {};
+  try { settings = JSON.parse(localStorage.getItem("imgstudio-settings") || "{}"); } catch {}
+  const form = new FormData();
+  form.append("api_key", settings.apiKey || "");
+  form.append("preferred_host", settings.host || "");
+
+  try {
+    const resp = await fetch("/startup-check", { method: "POST", body: form });
+    const data = await resp.json();
+
+    if (data.models_ok && Array.isArray(data.models)) {
+      _allModels = data.models;
+      renderModelSelect();
+    }
+
+    _activeHost = data.selected_host || "";
+    _startupReady = !!data.ready;
+    btn.disabled = !_startupReady;
+
+    renderHostStatus(data);
+
+    if (_startupReady) {
+      const switched = data.fallback ? "；首选节点不可用，已自动切换" : "";
+      status.textContent = `验证通过：API Key 有效，官网 ${data.model_count} 个可用图片模型，已选择 ${data.selected_host.replace("https://", "")}（${data.selected_latency_ms}ms）${switched}`;
+      status.className = "status-bar ok";
+      return true;
+    }
+
+    const problems = [];
+    if (!data.key_present) problems.push("未填写 API Key");
+    else if (!data.key_valid) problems.push("API Key 无效或所有节点验证失败");
+    if (!data.models_ok) problems.push("无法从 Grsai 官网获取最新模型清单");
+    status.textContent = "使用前验证失败：" + problems.join("；");
+    status.className = "status-bar error";
+    if (openSettingsOnFailure && (!data.key_present || !data.key_valid)) {
+      setTimeout(() => document.getElementById("settings").classList.add("open"), 300);
+    }
+    return false;
+  } catch (e) {
+    status.textContent = "使用前验证失败：本地服务或网络异常";
+    status.className = "status-bar error";
+    bar.textContent = "验证请求失败";
+    return false;
+  }
+}
+
+// ===== 设置面板 =====
+// logo 图片 base64 缓存
+let _logoImageData = null;
+
+async function openOfficialPage() {
+  const btn = document.getElementById("openGrsaiBtn");
+  btn.disabled = true;
+  btn.textContent = "正在打开 Chrome…";
+  try {
+    const resp = await fetch("/open-official", { method: "POST" });
+    const data = await resp.json();
+    if (!resp.ok || !data.ok) throw new Error(data.error || "打开失败");
+    toast("请在 Chrome 中选择个人资料或访客模式");
+  } catch (e) {
+    toast(e.message || "无法打开 Chrome");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "在 Chrome 中打开 Grsai 账户中心";
+  }
+}
+
+async function refreshOfficialBalance() {
+  const el = document.getElementById("officialBalance");
+  const btn = document.getElementById("refreshBalanceBtn");
+  const key = document.getElementById("apiKey").value.trim();
+  if (!key) { el.textContent = "请先填写 API Key"; return; }
+  el.textContent = "查询中…";
+  btn.disabled = true;
+  const form = new FormData();
+  form.append("api_key", key);
+  form.append("host", _activeHost || document.getElementById("host").value || "");
+  try {
+    const resp = await fetch("/balance", { method: "POST", body: form });
+    const data = await resp.json();
+    if (!resp.ok || !data.ok) throw new Error(data.error || "查询失败");
+    const balance = Number(data.balance);
+    el.textContent = `${Number.isFinite(balance) ? balance.toLocaleString("zh-CN") : data.balance} 积分`;
+    el.title = `Grsai 官方返回 · ${data.checked_at}`;
+  } catch (e) {
+    el.textContent = e.message || "查询失败";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function applyLogoSettings(s) {
+  const logo = document.getElementById("logoIcon");
+  const imgBg = s?.logoBg || "#a259ff";
+  if (s?.logoImage) {
+    logo.textContent = "";
+    logo.style.backgroundImage = `url(${s.logoImage})`;
+    logo.style.backgroundSize = "cover";
+    logo.style.backgroundPosition = "center";
+    logo.style.background = `url(${s.logoImage}) center/cover`;
+  } else {
+    logo.style.backgroundImage = "";
+    logo.style.background = `linear-gradient(135deg, ${imgBg}, ${adjustColor(imgBg, -30)})`;
+    logo.textContent = s?.logoText || "AI";
+  }
+  logo.style.width = (s?.logoSize || 36) + "px";
+  logo.style.height = (s?.logoSize || 36) + "px";
+  logo.style.fontSize = (Math.round((s?.logoSize || 36) * 0.45)) + "px";
+  _logoImageData = s?.logoImage || null;
+}
+
+function adjustColor(hex, amount) {
+  const num = parseInt(hex.replace("#", ""), 16);
+  const r = Math.min(255, Math.max(0, (num >> 16) + amount));
+  const g = Math.min(255, Math.max(0, ((num >> 8) & 0x00FF) + amount));
+  const b = Math.min(255, Math.max(0, (num & 0x0000FF) + amount));
+  return "#" + (0x1000000 + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+document.getElementById("openSettings").onclick = () => {
+  const saved = localStorage.getItem("imgstudio-settings");
+  if (saved) {
+    try {
+      const s = JSON.parse(saved);
+      document.getElementById("apiKey").value = s.apiKey || "";
+      document.getElementById("host").value = s.host || "";
+      document.getElementById("logoText").value = s.logoText || "";
+      document.getElementById("logoSize").value = s.logoSize || 36;
+      const bgVal = s.logoBg || "#a259ff";
+      document.getElementById("logoBg").value = bgVal;
+      document.getElementById("logoBgSwatch").style.background = bgVal;
+      _logoImageData = s.logoImage || null;
+    } catch {}
+  }
+  document.getElementById("settings").classList.add("open");
+  setTimeout(refreshOfficialBalance, 80);
+};
+document.getElementById("closeSettings").onclick = () => document.getElementById("settings").classList.remove("open");
+document.getElementById("toggleKeyView").onclick = () => {
+  const inp = document.getElementById("apiKey");
+  const btn = document.getElementById("toggleKeyView");
+  if (inp.type === "password") {
+    inp.type = "text"; btn.textContent = "🙈";
+  } else {
+    inp.type = "password"; btn.textContent = "👁";
+  }
+};
+
+// logo 图片上传
+document.getElementById("logoImageBtn").onclick = () => document.getElementById("logoImage").click();
+document.getElementById("logoImage").onchange = e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = () => { _logoImageData = r.result; };
+  r.readAsDataURL(f);
+};
+// 颜色同步
+document.getElementById("logoBg").oninput = function() {
+  document.getElementById("logoBgSwatch").style.background = this.value;
+};
+// 初始色块
+document.getElementById("logoBgSwatch").style.background = "#a259ff";
+
+document.getElementById("logoImageClear").onclick = () => {
+  _logoImageData = null;
+  document.getElementById("logoImage").value = "";
+};
+
+document.getElementById("saveSettings").onclick = async () => {
+  const apiKey = document.getElementById("apiKey").value.trim();
+  const host = document.getElementById("host").value;
+  const logoText = document.getElementById("logoText").value.trim();
+  const logoSize = parseInt(document.getElementById("logoSize").value) || 36;
+  const logoBg = document.getElementById("logoBg").value;
+  const logoImage = _logoImageData || "";
+  const s = { apiKey, host, logoText, logoSize, logoBg, logoImage };
+  localStorage.setItem("imgstudio-settings", JSON.stringify(s));
+  applyLogoSettings(s);
+  document.getElementById("settings").classList.remove("open");
+  toast("已保存，正在验证…");
+  await validateStartup(false);
+};
+
+// 页面初始化：应用 logo 设置，无 key 则弹窗
+(function initLogo() {
+  const saved = localStorage.getItem("imgstudio-settings");
+  let settings = {};
+  if (saved) {
+    try { settings = JSON.parse(saved); } catch {}
+  }
+  applyLogoSettings(settings);
+  validateStartup(true);
+  setInterval(() => refreshModelsAndPrices(false), 10 * 60 * 1000);
+})();
+
+// ===== 提示词字数统计 =====
+document.getElementById("prompt").addEventListener("input", () => {
+  document.getElementById("charCount").textContent = document.getElementById("prompt").value.length + " 字";
+});
+
+// ===== 生成参数预设 =====
+function saveParamsPreset() {
+  const preset = {
+    aspectRatio: document.getElementById("aspectRatio").value,
+    count: document.getElementById("count").value,
+    imageSize: document.getElementById("imageSize").value,
+  };
+  localStorage.setItem("genParamsPreset", JSON.stringify(preset));
+}
+
+function restoreParamsPreset() {
+  try {
+    const preset = JSON.parse(localStorage.getItem("genParamsPreset") || "{}");
+    if (preset.aspectRatio) document.getElementById("aspectRatio").value = preset.aspectRatio;
+    if (preset.count) document.getElementById("count").value = preset.count;
+    if (preset.imageSize) document.getElementById("imageSize").value = preset.imageSize;
+  } catch {}
+}
+
+["aspectRatio", "count", "imageSize"].forEach(id => {
+  document.getElementById(id).addEventListener("change", saveParamsPreset);
+});
+restoreParamsPreset();
+</script>
+
+<!-- lightbox -->
+<div class="lightbox" id="lightbox" onclick="closeLightbox()" tabindex="-1">
+  <span class="close">&times;</span>
+  <span id="lightboxCount" style="position:absolute;top:20px;left:50%;transform:translateX(-50%);color:rgba(255,255,255,.7);font-size:14px;letter-spacing:.08em;"></span>
+  <span class="nav-arrow nav-prev" onclick="event.stopPropagation();lightboxPrev()" title="上一张 (A / ←)">&#10094;</span>
+  <span class="nav-arrow nav-next" onclick="event.stopPropagation();lightboxNext()" title="下一张 (D / →)">&#10095;</span>
+  <img id="lightboxImg" src="" alt="" onclick="event.stopPropagation()">
+  <div id="lightboxActions" style="position:absolute; bottom:24px; right:28px; z-index:1; display:flex; gap:6px;">
+    <button class="lb-action-btn" onclick="event.stopPropagation(); downloadImage(document.getElementById('lightboxImg').src)" title="下载图片">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> 下载
+    </button>
+    <button class="lb-action-btn" onclick="event.stopPropagation(); useAsRef(document.getElementById('lightboxImg').src)" title="作为参考图">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg> 作为参考
+    </button>
+  </div>
+</div>
+
+</body>
+</html>

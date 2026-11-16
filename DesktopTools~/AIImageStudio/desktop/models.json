@@ -1,0 +1,16 @@
+[
+  {"id": "nano-banana",       "group": "Nano Banana",  "desc": "基础版",        "price": "0.022", "disabled": false},
+  {"id": "nano-banana-fast",  "group": "Nano Banana",  "desc": "快速版",        "price": "?",     "disabled": false},
+  {"id": "nano-banana-pro",   "group": "Nano Banana",  "desc": "推荐 · 1–4K",  "price": "0.09",  "disabled": false},
+  {"id": "nano-banana-pro-vt","group": "Nano Banana",  "desc": "4K",            "price": "?",     "disabled": false},
+  {"id": "nano-banana-pro-cl","group": "Nano Banana",  "desc": "4K",            "price": "?",     "disabled": false},
+  {"id": "nano-banana-pro-vip","group": "Nano Banana", "desc": "付费",          "price": "?",     "disabled": false},
+  {"id": "nano-banana-2",     "group": "Nano Banana",  "desc": "第二代",        "price": "0.06",  "disabled": false},
+  {"id": "nano-banana-2-cl",  "group": "Nano Banana",  "desc": "1–2K",          "price": "?",     "disabled": false},
+  {"id": "nano-banana-2-4k-cl","group": "Nano Banana", "desc": "4K",            "price": "?",     "disabled": false},
+  {"id": "gpt-image-1.5",     "group": "GPT Image",    "desc": "GPT Image 1.5", "price": "0.02",  "disabled": false},
+  {"id": "gpt-image-2",       "group": "GPT Image",    "desc": "ChatGPT 2.0",   "price": "0.03",  "disabled": false},
+  {"id": "gpt-image-2-vip",   "group": "GPT Image",    "desc": "付费",          "price": "?",     "disabled": false},
+  {"id": "flux-pro",          "group": "Flux",         "desc": "Flux Pro",      "price": "0.03",  "disabled": false},
+  {"id": "flux-pro-1.1",      "group": "Flux",         "desc": "Flux Pro 1.1",  "price": "0.04",  "disabled": false}
+]
